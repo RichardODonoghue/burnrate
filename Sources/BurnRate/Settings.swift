@@ -83,6 +83,10 @@ final class SettingsStore: ObservableObject {
     @Published var widgetProviders: [String] {
         didSet { persist() }
     }
+    /// Notify on window reset (remaining jumps back up).
+    @Published var notifyOnReset: Bool {
+        didSet { persist() }
+    }
     /// Token capacity per provider window, keyed "provider|windowLabel"
     /// (e.g. "Claude|5hr"). Calibrate until % matches the provider's own
     /// usage display. 0/missing = unknown, % shows "--".
@@ -123,6 +127,7 @@ final class SettingsStore: ObservableObject {
     private static let burnAlertsKey = "burnAlerts"
     private static let costAlertsKey = "costAlerts"
     private static let modelBurnAlertsKey = "modelBurnAlerts"
+    private static let notifyOnResetKey = "notifyOnReset"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -135,6 +140,7 @@ final class SettingsStore: ObservableObject {
             .flatMap { try? decoder.decode([String: Int].self, from: $0) } ?? Self.defaultCapacities
         burnAlerts = (defaults.data(forKey: Self.burnAlertsKey))
             .flatMap { try? decoder.decode([BurnAlert].self, from: $0) } ?? Self.defaultBurnAlerts
+        notifyOnReset = defaults.object(forKey: Self.notifyOnResetKey) as? Bool ?? true
         costAlerts = (defaults.data(forKey: Self.costAlertsKey))
             .flatMap { try? decoder.decode([CostAlert].self, from: $0) } ?? []
         modelBurnAlerts = (defaults.data(forKey: Self.modelBurnAlertsKey))
@@ -179,5 +185,6 @@ final class SettingsStore: ObservableObject {
         if let data = try? encoder.encode(modelBurnAlerts) {
             defaults.set(data, forKey: Self.modelBurnAlertsKey)
         }
+        defaults.set(notifyOnReset, forKey: Self.notifyOnResetKey)
     }
 }

@@ -7,8 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsStore = SettingsStore()
     private var statusManager: StatusItemManager?
     private var notifier: MilestoneNotifier?
-    private var settingsWindow: NSWindow?
-    private var modelsWindow: NSWindow?
+    private var appWindow: NSWindow?
     private var pollTimer: Timer?
     private var providers: [any UsageProvider] = []
     /// Local log sources, used for model/cost views and local alerts.
@@ -32,8 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let manager = StatusItemManager(usageStore: usageStore, settingsStore: settingsStore)
         manager.start(
-            onOpenSettings: { [weak self] in self?.openSettings() },
-            onOpenModels: { [weak self] in self?.openModelsWindow() }
+            onOpenDashboard: { [weak self] in self?.openAppWindow(pane: .usage) },
+            onOpenSettings: { [weak self] in self?.openAppWindow(pane: .notifications) }
         )
         statusManager = manager
 
@@ -88,47 +87,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func openSettings() {
-        if settingsWindow == nil {
+    private func openAppWindow(pane: AppPane) {
+        if appWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
-                styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "BurnRate Settings"
-            // Keep the window alive after closing; we reuse it.
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
-        }
-        // Rebuild content each open so the provider list reflects live state.
-        settingsWindow?.contentView = NSHostingView(
-            rootView: SettingsView(
-                store: settingsStore,
-                providerNames: usageStore.current.map(\.providerName)
-            )
-        )
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    private func openModelsWindow() {
-        if modelsWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
+                contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
                 styleMask: [.titled, .closable, .resizable, .miniaturizable],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "BurnRate — Usage by Model"
+            window.title = "BurnRate"
             window.isReleasedWhenClosed = false
             window.center()
-            modelsWindow = window
+            appWindow = window
         }
-        modelsWindow?.contentView = NSHostingView(rootView: ModelsView(viewModel: modelUsageViewModel))
+        appWindow?.contentView = NSHostingView(
+            rootView: SettingsView(
+                store: settingsStore,
+                providerNames: usageStore.current.map(\.providerName),
+                modelNames: Array(Set(modelUsageViewModel.totals.map(\.model))).sorted(),
+                viewModel: modelUsageViewModel,
+                initialPane: pane
+            )
+        )
         modelUsageViewModel.reload()
         NSApp.activate(ignoringOtherApps: true)
-        modelsWindow?.makeKeyAndOrderFront(nil)
+        appWindow?.makeKeyAndOrderFront(nil)
     }
 }

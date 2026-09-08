@@ -45,6 +45,13 @@ final class MilestoneNotifier {
                 // even if several thresholds match).
                 let previous = lastRemaining[window.id]
                 lastRemaining[window.id] = current
+
+                // Window reset: remaining jumped up sharply (e.g. rolling over).
+                if settingsStore.notifyOnReset, let previous, current - previous >= 40 {
+                    send(title: "\(provider.providerName) \(window.label) reset",
+                         body: String(format: "Window reset — %.0f%% remaining.", current))
+                }
+
                 let milestoneMatched = settingsStore.milestones.contains { milestone in
                     milestone.provider == provider.providerName
                         && milestone.windowLabel == window.label

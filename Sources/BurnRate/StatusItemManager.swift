@@ -6,8 +6,8 @@ import AppKit
 final class StatusItemManager: NSObject {
     private let usageStore: UsageStore
     private let settingsStore: SettingsStore
+    private var onOpenDashboard: (() -> Void)?
     private var onOpenSettings: (() -> Void)?
-    private var onOpenModels: (() -> Void)?
 
     private var mainItem: NSStatusItem?
     /// Extra widgets, keyed by provider name.
@@ -19,9 +19,9 @@ final class StatusItemManager: NSObject {
         super.init()
     }
 
-    func start(onOpenSettings: @escaping () -> Void, onOpenModels: @escaping () -> Void) {
+    func start(onOpenDashboard: @escaping () -> Void, onOpenSettings: @escaping () -> Void) {
+        self.onOpenDashboard = onOpenDashboard
         self.onOpenSettings = onOpenSettings
-        self.onOpenModels = onOpenModels
         // Main menu-bar icon must always exist.
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "◉"
@@ -154,7 +154,7 @@ final class StatusItemManager: NSObject {
     }
 
     @objc private func openModels() {
-        onOpenModels?()
+        onOpenDashboard?()
     }
 
     /// Pure formatting helper, callable from tests and nonisolated contexts.
