@@ -3,16 +3,27 @@ import Charts
 
 // MARK: - View model
 
+/// One point of vendor-reported remaining-% history for a plan window.
+struct RemainingSample: Codable, Equatable {
+    let provider: String
+    let label: String
+    let date: Date
+    let remaining: Double
+}
+
 @MainActor
 final class ModelUsageViewModel: ObservableObject {
     @Published var daily: [DailyModelUsage] = []
     @Published var totals: [ModelUsageEntry] = []
+    @Published var remainingHistory: [RemainingSample] = []
     @Published var loading = true
     @Published var lastUpdated: Date?
 
     private let sources: [(name: String, source: any UsageSource)]
     private let defaults: UserDefaults
     private static let historyKey = "modelUsageHistory"
+    private static let remainingKey = "remainingHistory"
+    private static let remainingRetention: TimeInterval = 7 * 86400
 
     init(sources: [(name: String, source: any UsageSource)], defaults: UserDefaults = .standard) {
         self.sources = sources
@@ -23,6 +34,31 @@ final class ModelUsageViewModel: ObservableObject {
             daily = cached
             totals = ModelUsageAggregator.totals(fromCache: cached)
             loading = false
+        }
+        if let data = defaults.data(forKey: Self.remainingKey),
+           let cached = try? JSONDecoder().decode([RemainingSample].self, from: data) {
+            remainingHistory = cached
+        }
+    }
+
+    /// Called after each poll with the vendor quota snapshot; appends to the
+    /// remaining-% history that feeds the trend chart.
+    func appendRemaining(snapshots: [ProviderUsage], date: Date = Date()) {
+        let cutoff = date.addingTimeInterval(-Self.remainingRetention)
+        for usage in snapshots {
+            for window in usage.windows {
+                guard let remaining = window.percentRemaining else { continue }
+                remainingHistory.append(
+                    RemainingSample(provider: usage.providerName,
+                                    label: window.label,
+                                    date: date,
+                                    remaining: remaining)
+                )
+            }
+        }
+        remainingHistory = remainingHistory.filter { $0.date >= cutoff }
+        if let data = try? JSONEncoder().encode(remainingHistory) {
+            defaults.set(data, forKey: Self.remainingKey)
         }
     }
 
@@ -86,10 +122,15 @@ struct ModelsView: View {
         case tokens = "Tokens", cost = "Cost"
         var id: String { rawValue }
     }
+    enum TrendWindow: String, CaseIterable, Identifiable {
+        case rolling = "Rolling", weekly = "Weekly", monthly = "Monthly"
+        var id: String { rawValue }
+    }
 
     @State private var range: Range = .week
     @State private var metric: Metric = .tokens
     @State private var providerFilter: String?
+    @State private var trendWindow: TrendWindow = .rolling
 
     var body: some View {
         VStack(spacing: 0) {
@@ -112,6 +153,7 @@ struct ModelsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        trendChart
                         dailyChart
                         rankingChart
                         breakdownTable
@@ -189,6 +231,84 @@ struct ModelsView: View {
     }
 
     // MARK: Charts
+
+    /// Vendor-reported remaining-% over time, one line per provider.
+    private var trendChart: some View {
+        GroupBox {
+            HStack {
+                Text("Remaining over time — \(trendWindow.rawValue)")
+                    .font(.headline)
+                Spacer()
+                Picker("Window", selection: $trendWindow) {
+                    ForEach(TrendWindow.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 260)
+            }
+            let series = trendSeries
+            if series.isEmpty {
+                emptyHint("Collecting history… this chart fills in as BurnRate polls (a point every 5 minutes).")
+                    .frame(height: 140)
+            } else {
+                Chart {
+                    ForEach(series, id: \.provider) { providerSamples in
+                        ForEach(providerSamples.samples, id: \.date) { point in
+                            LineMark(
+                                x: .value("Time", point.date),
+                                y: .value("Remaining", point.remaining)
+                            )
+                        }
+                        .foregroundStyle(byProvider(providerSamples.provider))
+                        .interpolationMethod(.catmullRom)
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                    }
+                }
+                .chartYScale(domain: 0...100)
+                .chartYAxis {
+                    AxisMarks(position: .trailing, values: [0, 25, 50, 75, 100]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let remaining = value.as(Double.self) {
+                                Text("\(Int(remaining))%")
+                            }
+                        }
+                    }
+                }
+                .chartLegend(position: .bottom) {
+                    HStack(spacing: 12) {
+                        ForEach(providerNames, id: \.self) { name in
+                            HStack(spacing: 4) {
+                                Circle().fill(byProvider(name)).frame(width: 7, height: 7)
+                                Text(name).font(.caption2)
+                            }
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .frame(height: 180)
+            }
+        }
+    }
+
+    /// Per-provider series for the selected window label.
+    private var trendSeries: [(provider: String, samples: [(date: Date, remaining: Double)])] {
+        let dict = Dictionary(grouping: viewModel.remainingHistory.filter {
+            $0.label == trendWindow.rawValue && (providerFilter == nil || $0.provider == providerFilter)
+        }, by: \.provider)
+        return dict.keys.sorted().map { provider in
+            (provider, dict[provider]!.map { (date: $0.date, remaining: $0.remaining) }.sorted { $0.date < $1.date })
+        }
+    }
+
+    private func byProvider(_ provider: String) -> Color {
+        SettingsView.color(for: provider)
+    }
+
+    private func emptyHint(_ text: String) -> some View {
+        Label(text, systemImage: "waveform.path")
+            .foregroundStyle(.secondary)
+            .font(.callout)
+    }
 
     private var dailyChart: some View {
         GroupBox("Daily usage by model (\(metric.rawValue))") {

@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             notifier?.evaluate(usage: snapshots)
             notifier?.evaluateCosts(costs)
             notifier?.evaluateModelBurn(buckets)
+            modelUsageViewModel.appendRemaining(snapshots: snapshots)
 
             // Refresh the Models view data + persist its snapshot.
             let daily = ModelUsageAggregator.daily(buckets: buckets, days: 30)

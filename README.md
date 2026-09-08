@@ -6,11 +6,17 @@ Live % remaining and reset times for every usage window (5-hour, weekly, monthly
 
 ## Features
 
-- **Menu bar dropdown** — per-provider usage: % remaining, token counts, reset times
+- **Menu bar dropdown** — per-provider usage: % remaining, reset times, plan tier (e.g. "Team 5x")
 - **Vendor-authoritative data** — the same numbers the vendors' own dashboards show
+- **Usage by model** — dashboard with daily stacked bars, model ranking, input/output/cache breakdowns and remaining-% trend lines (Swift Charts)
 - **Milestone notifications** — desktop alerts when a window drops below a threshold you choose
+- **Burn-rate alerts** — detect usage spikes (fast % drops, per-model token surges)
+- **Cost alerts** — daily spend caps (OpenCode reports vendor cost; others use LiteLLM list-price estimates)
+- **Reset notifications** — know when a window refills to 100%
 - **Extra menu-bar widgets** — spawn an additional status item per provider
 - **Background operation** — lives in the menu bar, no Dock icon, polls every 5 minutes
+
+Cost figures are list-price estimates (LiteLLM pricing table) where vendors don't report spend — the standard ccusage/tokscale convention.
 
 ## Build
 

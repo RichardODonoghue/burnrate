@@ -157,13 +157,24 @@ final class StatusItemManager: NSObject {
         onOpenDashboard?()
     }
 
-    /// Pure formatting helper, callable from tests and nonisolated contexts.
+    /// Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t.
     nonisolated static func formatTokens(_ count: Int) -> String {
-        switch count {
-        case ..<1_000: "\(count)"
-        case ..<1_000_000: String(format: "%.1fk", Double(count) / 1_000)
-        default: String(format: "%.2fM", Double(count) / 1_000_000)
+        let v = Double(count)
+        switch v {
+        case ..<1_000: return "\(count)"
+        case ..<1_000_000: return compact(v / 1_000) + "k"
+        case ..<1_000_000_000: return compact(v / 1_000_000) + "m"
+        case ..<1_000_000_000_000: return compact(v / 1_000_000_000) + "b"
+        default: return compact(v / 1_000_000_000_000) + "t"
         }
+    }
+
+    /// Trims trailing zeros: 10.0 → "10", 1.5 → "1.5", 1.25 → "1.25".
+    nonisolated private static func compact(_ value: Double) -> String {
+        let s = String(format: "%.2f", value)
+        return s
+            .replacingOccurrences(of: #"(\.\d*?)0+$"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
     }
 
     /// Menus are MainActor-only; the formatters are cached and reused.
