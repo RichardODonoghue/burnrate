@@ -18,15 +18,47 @@ final class MilestoneNotifier {
     private var modelBurnCooldown: [String: Date] = [:]
     /// Recently sent notifications (title|body → time), to suppress duplicates.
     private var recentSends: [String: Date] = [:]
+    private let defaults: UserDefaults
 
     nonisolated static let pollInterval: TimeInterval = 300
     /// History older than this can't affect any alert (largest window + slack).
     nonisolated static let historyRetention: TimeInterval = 6 * 3600
     nonisolated static let burnCooldownInterval: TimeInterval = 1800
+    private static let stateKey = "notifierState"
 
-    init(settingsStore: SettingsStore) {
+    /// Alert bookkeeping persisted across launches — otherwise every restart
+    /// re-fires all breached milestones (previousRemaining empty → "crossing")
+    /// and resets cost/burn cooldowns.
+    private struct NotifierState: Codable {
+        var lastRemaining: [String: Double] = [:]
+        var costFired: [String] = []
+        var burnCooldown: [String: Date] = [:]
+        var modelBurnCooldown: [String: Date] = [:]
+    }
+
+    init(settingsStore: SettingsStore, defaults: UserDefaults = .standard) {
         self.settingsStore = settingsStore
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.stateKey),
+           let state = try? JSONDecoder().decode(NotifierState.self, from: data) {
+            lastRemaining = state.lastRemaining
+            costFired = Set(state.costFired)
+            burnCooldown = state.burnCooldown
+            modelBurnCooldown = state.modelBurnCooldown
+        }
         Task { await requestAuthorization() }
+    }
+
+    private func saveState() {
+        let state = NotifierState(
+            lastRemaining: lastRemaining,
+            costFired: Array(costFired),
+            burnCooldown: burnCooldown,
+            modelBurnCooldown: modelBurnCooldown
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            defaults.set(data, forKey: Self.stateKey)
+        }
     }
 
     private func requestAuthorization() async {
@@ -74,6 +106,7 @@ final class MilestoneNotifier {
                 evaluateBurnAlerts(provider: provider.providerName, window: window, now: now)
             }
         }
+        saveState()
     }
 
     /// Daily local-log spend per provider vs configured cost alerts.
@@ -90,6 +123,7 @@ final class MilestoneNotifier {
             send(title: "\(alert.provider) daily spend",
                  body: String(format: "$%.2f spent today (limit $%.2f).", spend, alert.dailyLimitUSD))
         }
+        saveState()
     }
 
     /// Per-model token burn detection from local logs.
@@ -108,6 +142,7 @@ final class MilestoneNotifier {
                  body: String(format: "%@ tokens in %d min.",
                               StatusItemManager.formatTokens(hit.tokens), alert.minutes))
         }
+        saveState()
     }
 
     private func recordHistory(windowID: String, date: Date, remaining: Double) {
