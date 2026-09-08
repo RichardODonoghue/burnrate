@@ -58,7 +58,7 @@ struct ProviderUsage: Equatable {
 /// against user-configured capacities.
 enum UsageComputation {
     static let windowSpecs: [(label: String, seconds: TimeInterval)] = [
-        ("5hr", 5 * 3600),
+        ("Rolling", 5 * 3600),
         ("Weekly", 7 * 86400),
         ("Monthly", 30 * 86400),
     ]

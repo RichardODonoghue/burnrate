@@ -147,15 +147,15 @@ final class SettingsStore: ObservableObject {
 
     static var defaultMilestones: [Milestone] {
         [
-            Milestone(provider: "Claude", windowLabel: "5hr", percentRemaining: 20),
+            Milestone(provider: "Claude", windowLabel: "Rolling", percentRemaining: 20),
             Milestone(provider: "Claude", windowLabel: "Weekly", percentRemaining: 10),
-            Milestone(provider: "Codex", windowLabel: "5hr", percentRemaining: 20),
+            Milestone(provider: "Codex", windowLabel: "Rolling", percentRemaining: 20),
         ]
     }
 
     static var defaultBurnAlerts: [BurnAlert] {
         [
-            BurnAlert(provider: "Claude", windowLabel: "5hr", percentDrop: 15, minutes: 30),
+            BurnAlert(provider: "Claude", windowLabel: "Rolling", percentDrop: 15, minutes: 30),
         ]
     }
 

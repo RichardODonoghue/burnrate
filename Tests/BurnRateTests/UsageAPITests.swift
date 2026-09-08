@@ -18,7 +18,7 @@ struct UsageAPITests {
         """#
         let windows = try ClaudeUsageAPIProvider.parseWindows(Data(body.utf8))
         #expect(windows.count == 3)
-        #expect(windows[0].label == "5hr")
+        #expect(windows[0].label == "Rolling")
         #expect(windows[0].percentRemaining == 1)
         #expect(windows[1].label == "Weekly")
         #expect(windows[1].percentRemaining == 58)
@@ -34,7 +34,7 @@ struct UsageAPITests {
         """#
         let windows = try ClaudeUsageAPIProvider.parseWindows(Data(body.utf8))
         #expect(windows.count == 2)
-        #expect(windows[0].label == "5hr")
+        #expect(windows[0].label == "Rolling")
         #expect(windows[0].percentRemaining == 1)
         #expect(windows[1].label == "Weekly")
         #expect(windows[1].percentRemaining == 58)
@@ -55,7 +55,7 @@ struct UsageAPITests {
         """#
         let windows = try OpenCodeGoUsageAPIProvider.parseWindows(Data(body.utf8))
         #expect(windows.count == 3)
-        #expect(windows.map(\.label) == ["5hr", "Weekly", "Monthly"])
+        #expect(windows.map(\.label) == ["Rolling", "Weekly", "Monthly"])
         #expect(windows[0].percentRemaining == 98)
         #expect(windows[1].percentRemaining == 74)
         #expect(windows[2].percentRemaining == 82)
@@ -80,9 +80,9 @@ struct UsageAPITests {
             }
         }
         let provider = LocalUsageProvider(source: StubSource())
-        let usage = await provider.fetchUsage(capacities: ["Stub|5hr": 1000])
+        let usage = await provider.fetchUsage(capacities: ["Stub|Rolling": 1000])
         #expect(usage != nil)
-        #expect(usage?.windows.first { $0.label == "5hr" }?.percentRemaining == 90)
+        #expect(usage?.windows.first { $0.label == "Rolling" }?.percentRemaining == 90)
     }
 
     @Test func parsesOpenCodeGoAPIKeyFromAuthJSON() throws {

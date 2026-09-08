@@ -178,7 +178,7 @@ actor ClaudeUsageAPIProvider: UsageProvider {
                 let kind = limit["kind"] as? String ?? ""
                 let label: String
                 switch kind {
-                case "session": label = "5hr"
+                case "session": label = "Rolling"
                 case "weekly_all": label = "Weekly"
                 case "weekly_scoped":
                     label = ((limit["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
@@ -200,7 +200,7 @@ actor ClaudeUsageAPIProvider: UsageProvider {
 
         // Fallback: flat keys (older response shape).
         var windows: [UsageWindow] = []
-        for (label, key) in [("5hr", "five_hour"), ("Weekly", "seven_day")] {
+        for (label, key) in [("Rolling", "five_hour"), ("Weekly", "seven_day")] {
             guard let entry = obj[key] as? [String: Any],
                   let utilization = entry["utilization"] as? Double
             else { continue }

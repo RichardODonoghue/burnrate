@@ -10,7 +10,7 @@ struct BurnRateEvaluatorTests {
         (now.addingTimeInterval(-minutesAgo * 60), remaining)
     }
 
-    private let alert = BurnAlert(provider: "Claude", windowLabel: "5hr", percentDrop: 15, minutes: 30)
+    private let alert = BurnAlert(provider: "Claude", windowLabel: "Rolling", percentDrop: 15, minutes: 30)
 
     @Test func firesOnFastDrop() {
         let history = [sample(35, 80), sample(30, 78), sample(5, 60)]

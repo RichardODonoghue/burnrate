@@ -15,7 +15,7 @@ struct UsageComputationTests {
             UsageSample(timestamp: date(6 * 3600, from: now), tokens: .init(input: 999, output: 0, cacheRead: 0, cacheWrite: 0)),
         ]
         let windows = UsageComputation.windows(samples: samples, provider: "Claude", capacities: [:], now: now)
-        let fiveHour = windows.first { $0.label == "5hr" }
+        let fiveHour = windows.first { $0.label == "Rolling" }
         #expect(fiveHour?.tokensUsed == 300)
     }
 
@@ -26,10 +26,10 @@ struct UsageComputationTests {
         let windows = UsageComputation.windows(
             samples: samples,
             provider: "Claude",
-            capacities: ["Claude|5hr": 4_200_000],
+            capacities: ["Claude|Rolling": 4_200_000],
             now: now
         )
-        let fiveHour = windows.first { $0.label == "5hr" }
+        let fiveHour = windows.first { $0.label == "Rolling" }
         #expect(fiveHour?.percentRemaining == 50)
         #expect(fiveHour?.tokensUsed == 12_000_000)
     }
@@ -40,10 +40,10 @@ struct UsageComputationTests {
         let windows = UsageComputation.windows(
             samples: samples,
             provider: "Claude",
-            capacities: ["Claude|5hr": 1000],
+            capacities: ["Claude|Rolling": 1000],
             now: now
         )
-        #expect(windows.first { $0.label == "5hr" }?.percentRemaining == 75)
+        #expect(windows.first { $0.label == "Rolling" }?.percentRemaining == 75)
     }
 
     @Test func percentNilWithoutCapacity() {
@@ -57,10 +57,10 @@ struct UsageComputationTests {
         let windows = UsageComputation.windows(
             samples: samples,
             provider: "Claude",
-            capacities: ["Claude|5hr": 1000],
+            capacities: ["Claude|Rolling": 1000],
             now: now
         )
-        #expect(windows.first { $0.label == "5hr" }?.percentRemaining == 0)
+        #expect(windows.first { $0.label == "Rolling" }?.percentRemaining == 0)
     }
 
     @Test func tokensFormatting() {

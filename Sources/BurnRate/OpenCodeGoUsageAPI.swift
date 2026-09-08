@@ -75,9 +75,8 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
         else { throw URLError(.cannotParseResponse) }
 
         var windows: [UsageWindow] = []
-        // "Rolling" is OpenCode's ~5-hour window; normalized to "5hr" so
-        // milestones/settings share one term across providers.
-        for (label, key) in [("5hr", "rolling"), ("Weekly", "weekly"), ("Monthly", "monthly")] {
+        // Both providers' short rolling windows share the "Rolling" label.
+        for (label, key) in [("Rolling", "rolling"), ("Weekly", "weekly"), ("Monthly", "monthly")] {
             guard let entry = usage[key] as? [String: Any] else { continue }
             let used = (entry["percent"] as? Double)
                 .map { min(100, max(0, $0)) } ?? 0

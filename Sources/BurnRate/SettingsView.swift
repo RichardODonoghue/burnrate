@@ -54,14 +54,14 @@ struct SettingsView: View {
 private struct MilestonesView: View {
     @ObservedObject var store: SettingsStore
     let providerNames: [String]
-    private let windowLabels = ["5hr", "Weekly", "Fable", "Monthly"]
+    private let windowLabels = ["Rolling", "Weekly", "Fable", "Monthly"]
 
     @State private var newProvider = "Claude"
-    @State private var newWindow = "5hr"
+    @State private var newWindow = "Rolling"
     @State private var newThreshold = 20.0
 
     @State private var burnProvider = "Claude"
-    @State private var burnWindow = "5hr"
+    @State private var burnWindow = "Rolling"
     @State private var burnDrop = 15.0
     @State private var burnMinutes = 30.0
 
@@ -326,8 +326,8 @@ private struct MilestonesView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: newProvider) { _, _ in newWindow = "5hr" }
-        .onChange(of: burnProvider) { _, _ in burnWindow = "5hr" }
+        .onChange(of: newProvider) { _, _ in newWindow = "Rolling" }
+        .onChange(of: burnProvider) { _, _ in burnWindow = "Rolling" }
     }
 }
 
