@@ -24,7 +24,13 @@ final class StatusItemManager: NSObject {
         self.onOpenSettings = onOpenSettings
         // Main menu-bar icon must always exist.
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "◉"
+        if let flame = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "BurnRate"),
+           let configured = flame.withSymbolConfiguration(.init(pointSize: 13, weight: .medium)) {
+            configured.isTemplate = true
+            item.button?.image = configured
+        } else {
+            item.button?.title = "◉"
+        }
         item.menu = makeMenu()
         mainItem = item
         rebuildWidgets()
@@ -115,9 +121,9 @@ final class StatusItemManager: NSObject {
             for window in usage.windows {
                 let percent = window.percentRemaining
                     .map { String(format: "%.0f", $0) } ?? "--"
-                var detail = "\(percent)% remaining"
+                var detail = "\(percent)%"
                 if window.tokensUsed > 0 {
-                    detail += " · \(Self.formatTokens(window.tokensUsed)) tok"
+                    detail += " · \(Self.formatTokens(window.tokensUsed))"
                 }
                 if let resetsAt = window.resetsAt {
                     detail += " · resets \(Self.formatTime(resetsAt))"
@@ -137,10 +143,12 @@ final class StatusItemManager: NSObject {
             action: #selector(openModels),
             keyEquivalent: "m"
         )
+        models.image = NSImage(systemSymbolName: "chart.bar.doc.horizontal", accessibilityDescription: nil)
         models.target = self
         menu.addItem(models)
 
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         settings.target = self
         menu.addItem(settings)
 
