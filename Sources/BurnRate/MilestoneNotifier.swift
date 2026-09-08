@@ -16,6 +16,8 @@ final class MilestoneNotifier {
     private var costFired: Set<String> = []
     /// Cooldown per model-burn alert key.
     private var modelBurnCooldown: [String: Date] = [:]
+    /// Recently sent notifications (title|body → time), to suppress duplicates.
+    private var recentSends: [String: Date] = [:]
 
     nonisolated static let pollInterval: TimeInterval = 300
     /// History older than this can't affect any alert (largest window + slack).
@@ -139,6 +141,13 @@ final class MilestoneNotifier {
     }
 
     private func send(title: String, body: String) {
+        // Suppress duplicates (double polls, stray second instances, etc.).
+        let key = title + "|" + body
+        let now = Date()
+        recentSends = recentSends.filter { now.timeIntervalSince($0.value) < 60 }
+        guard recentSends[key] == nil else { return }
+        recentSends[key] = now
+
         guard Bundle.main.bundleIdentifier != nil else {
             // Body contains "%" — never pass it as an NSLog format string.
             NSLog("%@", "[milestone] \(title): \(body)")

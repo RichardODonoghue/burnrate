@@ -350,14 +350,11 @@ private struct MilestonesView: View {
                 Text("Any model").tag("*")
                 ForEach(modelNames, id: \.self) { Text($0).tag($0) }
             }
-            HStack {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Tokens")
-                Spacer()
                 TextField("2,000,000", text: $modelBurnTokens)
                     .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 140)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: 180)
                     .monospacedDigit()
             }
             Picker("Window", selection: $modelBurnMinutes) {

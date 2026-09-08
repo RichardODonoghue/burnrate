@@ -23,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ])
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Single instance: a second copy would double every notification.
+        if let bundleID = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).count > 1 {
+            NSApp.terminate(nil)
+            return
+        }
         PricingService.shared.bootstrap()
         // Dock icon for dev runs without a bundle; bundled runs use the icns.
         NSApp.applicationIconImage = AppIconRenderer.appIconImage(size: 256)
