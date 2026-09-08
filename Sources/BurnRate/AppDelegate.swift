@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             appWindow = window
         }
-        appWindow?.contentView = NSHostingView(
+        let hostingView = NSHostingView(
             rootView: SettingsView(
                 store: settingsStore,
                 providerNames: usageStore.current.map(\.providerName),
@@ -109,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 initialPane: pane
             )
         )
+        // Don't let SwiftUI's intrinsic content size drive the window/frame;
+        // otherwise wide panes push the sidebar out of view.
+        hostingView.sizingOptions = []
+        appWindow?.contentView = hostingView
         modelUsageViewModel.reload()
         NSApp.activate(ignoringOtherApps: true)
         appWindow?.makeKeyAndOrderFront(nil)
