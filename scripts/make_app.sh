@@ -50,5 +50,9 @@ cp "$BINARY" "$APP/Contents/MacOS/${APP_NAME}"
 echo "==> ad-hoc codesign"
 codesign --force --sign - "$APP"
 
+# Re-register with LaunchServices so Notification Center picks up the new
+# icns (icon cache keys off the bundle registration).
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null
+
 echo "==> done: $APP"
 echo "    launch with: open ${APP}"
