@@ -21,6 +21,7 @@ echo "==> assembling ${DIST}/${APP_NAME}.app"
 APP="${DIST}/${APP_NAME}.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -33,6 +34,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleDisplayName</key>         <string>${APP_NAME}</string>
     <key>CFBundleShortVersionString</key>  <string>${VERSION}</string>
     <key>CFBundleVersion</key>             <string>${VERSION}</string>
+    <key>CFBundleIconFile</key>            <string>AppIcon</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
     <key>LSMinimumSystemVersion</key>      <string>15.0</string>

@@ -24,13 +24,7 @@ final class StatusItemManager: NSObject {
         self.onOpenSettings = onOpenSettings
         // Main menu-bar icon must always exist.
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let flame = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "BurnRate"),
-           let configured = flame.withSymbolConfiguration(.init(pointSize: 13, weight: .medium)) {
-            configured.isTemplate = true
-            item.button?.image = configured
-        } else {
-            item.button?.title = "◉"
-        }
+        item.button?.image = AppIconRenderer.menuBarImage()
         item.menu = makeMenu()
         mainItem = item
         rebuildWidgets()

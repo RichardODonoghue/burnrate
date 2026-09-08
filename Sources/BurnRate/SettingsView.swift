@@ -101,16 +101,10 @@ private struct MilestonesView: View {
     var body: some View {
         Form {
             milestoneSection
+            resetSection
             burnRateSection
-            costSection
             modelBurnSection
-            Section {
-                Toggle("Notify when a window resets", isOn: $store.notifyOnReset)
-            } header: {
-                Text("Window resets")
-            } footer: {
-                Text("Fires when a plan window rolls over and refills to 100% remaining.")
-            }
+            costSection
         }
         .formStyle(.grouped)
         .onChange(of: newProvider) { _, _ in newWindow = "Rolling" }
@@ -198,6 +192,18 @@ private struct MilestonesView: View {
             Text("Plan milestones")
         } footer: {
             Text("Percentages come from vendor quota APIs.")
+        }
+    }
+
+    // MARK: Window resets
+
+    private var resetSection: some View {
+        Section {
+            Toggle("Notify when a window resets", isOn: $store.notifyOnReset)
+        } header: {
+            Text("Window resets")
+        } footer: {
+            Text("Fires when a plan window rolls over and refills to 100% remaining.")
         }
     }
 
@@ -434,9 +440,9 @@ private struct AboutView: View {
         Form {
             Section {
                 VStack(spacing: 10) {
-                    Image(systemName: "gauge.with.needle")
-                        .font(.system(size: 40))
-                        .foregroundStyle(Color.accentColor)
+                    Image(nsImage: AppIconRenderer.appIconImage(size: 256))
+                        .resizable()
+                        .frame(width: 72, height: 72)
                     Text("BurnRate")
                         .font(.title2).fontWeight(.semibold)
                     Text("Version \(AppInfo.version)")

@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         PricingService.shared.bootstrap()
+        // Dock icon for dev runs without a bundle; bundled runs use the icns.
+        NSApp.applicationIconImage = AppIconRenderer.appIconImage(size: 256)
         providers = [
             ClaudeUsageAPIProvider(),
             OpenCodeGoUsageAPIProvider(),
