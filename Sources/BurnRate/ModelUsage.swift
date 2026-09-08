@@ -42,7 +42,7 @@ enum ModelUsageAggregator {
                 entry.tokens.output += sample.tokens.output
                 entry.tokens.cacheRead += sample.tokens.cacheRead
                 entry.tokens.cacheWrite += sample.tokens.cacheWrite
-                entry.cost += sample.cost ?? 0
+                entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
                 entry.requests += 1
                 byDay[day, default: [:]][key] = entry
             }
@@ -65,7 +65,7 @@ enum ModelUsageAggregator {
                 entry.tokens.output += sample.tokens.output
                 entry.tokens.cacheRead += sample.tokens.cacheRead
                 entry.tokens.cacheWrite += sample.tokens.cacheWrite
-                entry.cost += sample.cost ?? 0
+                entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
                 entry.requests += 1
                 byKey[key] = entry
             }

@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ])
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        PricingService.shared.bootstrap()
         providers = [
             ClaudeUsageAPIProvider(),
             OpenCodeGoUsageAPIProvider(),
@@ -70,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 buckets.append((name, samples))
                 let todayCost = samples
                     .filter { $0.timestamp >= todayStart }
-                    .reduce(0.0) { $0 + ($1.cost ?? 0) }
+                    .reduce(0.0) { $0 + PricingService.shared.cost(of: $1) }
                 costs.append((name, todayCost))
             }
 
