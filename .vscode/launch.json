@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:ai-usage-tracker-mac-osx}",
+            "name": "Debug BurnRate",
+            "target": "BurnRate",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug BurnRate"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:ai-usage-tracker-mac-osx}",
+            "name": "Release BurnRate",
+            "target": "BurnRate",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release BurnRate"
+        }
+    ]
+}
