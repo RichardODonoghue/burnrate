@@ -251,16 +251,16 @@ struct ModelsView: View {
                     .frame(height: 140)
             } else {
                 Chart {
-                    ForEach(series, id: \.provider) { providerSamples in
-                        ForEach(providerSamples.samples, id: \.date) { point in
+                    ForEach(trendSeries, id: \.provider) { series in
+                        ForEach(series.samples, id: \.date) { point in
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Remaining", point.remaining)
                             )
+                            .foregroundStyle(by: .value("Provider", series.provider))
+                            .interpolationMethod(.catmullRom)
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                         }
-                        .foregroundStyle(byProvider(providerSamples.provider))
-                        .interpolationMethod(.catmullRom)
-                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                     }
                 }
                 .chartYScale(domain: 0...100)
@@ -274,17 +274,13 @@ struct ModelsView: View {
                         }
                     }
                 }
-                .chartLegend(position: .bottom) {
-                    HStack(spacing: 12) {
-                        ForEach(providerNames, id: \.self) { name in
-                            HStack(spacing: 4) {
-                                Circle().fill(byProvider(name)).frame(width: 7, height: 7)
-                                Text(name).font(.caption2)
-                            }
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                }
+                // By-value coloring + automatic legend: one entry per provider
+                // with data, colors matched to the scale.
+                .chartLegend(position: .bottom)
+                .chartForegroundStyleScale(
+                    domain: trendSeries.map(\.provider),
+                    range: trendSeries.map { SettingsView.color(for: $0.provider) }
+                )
                 .frame(height: 180)
             }
         }
@@ -298,10 +294,6 @@ struct ModelsView: View {
         return dict.keys.sorted().map { provider in
             (provider, dict[provider]!.map { (date: $0.date, remaining: $0.remaining) }.sorted { $0.date < $1.date })
         }
-    }
-
-    private func byProvider(_ provider: String) -> Color {
-        SettingsView.color(for: provider)
     }
 
     private func emptyHint(_ text: String) -> some View {
