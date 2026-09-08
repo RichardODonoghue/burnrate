@@ -54,7 +54,7 @@ struct SettingsView: View {
 private struct MilestonesView: View {
     @ObservedObject var store: SettingsStore
     let providerNames: [String]
-    private let windowLabels = ["5hr", "Rolling", "Weekly", "Fable", "Monthly"]
+    private let windowLabels = ["5hr", "Weekly", "Fable", "Monthly"]
 
     @State private var newProvider = "Claude"
     @State private var newWindow = "5hr"

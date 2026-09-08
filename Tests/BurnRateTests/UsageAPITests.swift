@@ -55,7 +55,7 @@ struct UsageAPITests {
         """#
         let windows = try OpenCodeGoUsageAPIProvider.parseWindows(Data(body.utf8))
         #expect(windows.count == 3)
-        #expect(windows.map(\.label) == ["Rolling", "Weekly", "Monthly"])
+        #expect(windows.map(\.label) == ["5hr", "Weekly", "Monthly"])
         #expect(windows[0].percentRemaining == 98)
         #expect(windows[1].percentRemaining == 74)
         #expect(windows[2].percentRemaining == 82)
