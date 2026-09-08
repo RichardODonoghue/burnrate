@@ -128,7 +128,11 @@ final class StatusItemManager: NSObject {
                 if let resetsAt = window.resetsAt {
                     detail += " · resets \(Self.formatTime(resetsAt))"
                 }
-                menu.addItem(NSMenuItem(title: "  \(window.label): \(detail)", action: nil, keyEquivalent: ""))
+                let item = NSMenuItem(title: "  \(window.label): \(detail)", action: nil, keyEquivalent: "")
+                if let resetsAt = window.resetsAt {
+                    item.toolTip = "Resets \(Self.exactTime(resetsAt))"
+                }
+                menu.addItem(item)
             }
             menu.addItem(.separator())
         }
@@ -193,7 +197,7 @@ final class StatusItemManager: NSObject {
         return formatter
     }()
 
-    /// Multi-day windows (weekly/monthly) need a date, not just a clock time.
+    /// Exact timestamp for tooltips (relative text keeps the menu narrow).
     @MainActor
     private static let dateTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -202,12 +206,24 @@ final class StatusItemManager: NSObject {
         return formatter
     }()
 
+    /// Compact relative reset text: "in 45m", "in 5h", "in 3d" — a fixed
+    /// medium date ("Sep 12, 2026 at 6:00 PM") was the widest menu line and
+    /// stretched the whole dropdown.
     @MainActor
     static func formatTime(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
-            timeFormatter.string(from: date)
-        } else {
-            dateTimeFormatter.string(from: date)
+        let seconds = date.timeIntervalSinceNow
+        if seconds <= 0 { return "now" }
+        if seconds < 3600 { return "in \(Int((seconds / 60).rounded(.up)))m" }
+        if seconds < 86_400 {
+            let hours = Int(seconds / 3600)
+            let minutes = Int(seconds.truncatingRemainder(dividingBy: 3600) / 60)
+            return minutes > 0 ? "in \(hours)h \(minutes)m" : "in \(hours)h"
         }
+        return "in \(Int((seconds / 86_400).rounded(.up)))d"
+    }
+
+    @MainActor
+    static func exactTime(_ date: Date) -> String {
+        dateTimeFormatter.string(from: date)
     }
 }
