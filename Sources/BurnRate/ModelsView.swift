@@ -153,6 +153,7 @@ struct ModelsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        snapshotCards
                         trendChart
                         dailyChart
                         rankingChart
@@ -230,6 +231,110 @@ struct ModelsView: View {
         .padding(.vertical, 10)
     }
 
+    // MARK: Snapshot cards
+
+    private var snapshotCards: some View {
+        HStack(spacing: 12) {
+            rollingCard
+            tokensTodayCard
+            costTodayCard
+        }
+    }
+
+    /// Latest vendor-reported Rolling remaining % per provider.
+    private var latestRolling: [(provider: String, remaining: Double)] {
+        var latest: [String: (date: Date, remaining: Double)] = [:]
+        for sample in viewModel.remainingHistory where sample.label == "Rolling" {
+            if let current = latest[sample.provider] {
+                if sample.date > current.date { latest[sample.provider] = (sample.date, sample.remaining) }
+            } else {
+                latest[sample.provider] = (sample.date, sample.remaining)
+            }
+        }
+        return latest.map { (provider: $0.key, remaining: $0.value.remaining) }
+            .sorted { $0.remaining < $1.remaining }
+    }
+
+    private var todayEntries: [ModelUsageEntry] {
+        let start = Calendar.current.startOfDay(for: Date())
+        return viewModel.daily.first { $0.day >= start }?.entries ?? []
+    }
+
+    private var rollingCard: some View {
+        card(title: "Rolling usage", icon: "gauge.with.needle") {
+            let latest = latestRolling
+            if latest.isEmpty {
+                Text("Collecting…")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(latest, id: \.provider) { item in
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(SettingsView.color(for: item.provider))
+                                .frame(width: 7, height: 7)
+                            Text(item.provider)
+                            Spacer()
+                            Text("\(Int(item.remaining))%")
+                                .monospacedDigit()
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var tokensTodayCard: some View {
+        card(title: "Tokens today", icon: "number") {
+            let entries = todayEntries
+            let total = entries.reduce(0) { $0 + $1.totalTokens }
+            let requests = entries.reduce(0) { $0 + $1.requests }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(total == 0 ? "—" : StatusItemManager.formatTokens(total))
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                Text("\(requests) requests")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var costTodayCard: some View {
+        card(title: "Cost today", icon: "dollarsign.circle") {
+            let cost = todayEntries.reduce(0.0) { $0 + $1.cost }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(cost > 0 ? String(format: "$%.2f", cost) : "—")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                Text("list-price estimate")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func card<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .foregroundStyle(.orange)
+                    Text(title)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                }
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     // MARK: Charts
 
     /// Vendor-reported remaining-% over time, one line per provider.
@@ -264,6 +369,12 @@ struct ModelsView: View {
                     }
                 }
                 .chartYScale(domain: 0...100)
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .day)) { value in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                    }
+                }
                 .chartYAxis {
                     AxisMarks(position: .trailing, values: [0, 25, 50, 75, 100]) { value in
                         AxisGridLine()
