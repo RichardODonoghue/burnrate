@@ -1,23 +1,25 @@
 import AppKit
 
-/// Renders the BurnRate mark: a flame rising out of a gauge dial at its
-/// base — the flame is the needle. One drawing, three presentations:
-/// menu-bar template, Dock/app icon, About pane.
+/// Renders the BurnRate mark: a flame with a gauge needle laid over it.
+/// One drawing, three presentations: menu-bar template, Dock/app icon,
+/// About pane.
 enum AppIconRenderer {
     /// Monochrome template image for the menu bar (alpha only, adapts to
-    /// light/dark menu bars).
+    /// light/dark menu bars). The needle is knocked out of the flame
+    /// silhouette so it reads at 18pt.
     static func menuBarImage() -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
-            NSColor.black.set()
-            // Flame rising from the dial, centered slightly high.
             drawFlame(symbolName: "flame.fill",
-                      in: NSRect(x: rect.midX - 5, y: rect.height * 0.18,
-                                 width: 10, height: rect.height * 0.76),
+                      in: rect.insetBy(dx: 1, dy: 1),
                       gradient: false)
-            // Gauge dial at the flame's base.
-            drawDial(center: NSPoint(x: rect.midX, y: rect.height * 0.18),
-                     radius: 3.4, color: .black)
+            drawNeedle(base: NSPoint(x: rect.midX + 0.4, y: rect.height * 0.22),
+                       length: rect.height * 0.68,
+                       angleDegrees: 18,
+                       pivotRadius: 1.15,
+                       needleWidth: 1.5,
+                       knockOutWidth: 3.4,
+                       color: .black)
             return true
         }
         image.isTemplate = true
@@ -25,7 +27,7 @@ enum AppIconRenderer {
     }
 
     /// Full-color app icon (Dock, notifications, About). Dark rounded square,
-    /// gradient flame rising from a light gauge dial.
+    /// gradient flame, white needle laid on top.
     static func appIconImage(size: CGFloat = 512) -> NSImage {
         NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let background = NSBezierPath(roundedRect: rect.insetBy(dx: rect.width * 0.02, dy: rect.height * 0.02),
@@ -34,14 +36,15 @@ enum AppIconRenderer {
             background.fill()
 
             drawFlame(symbolName: "flame.fill",
-                      in: NSRect(x: rect.midX - rect.width * 0.24,
-                                 y: rect.height * 0.22,
-                                 width: rect.width * 0.48,
-                                 height: rect.height * 0.68),
+                      in: rect.insetBy(dx: rect.width * 0.16, dy: rect.height * 0.10),
                       gradient: true)
-            drawDial(center: NSPoint(x: rect.midX, y: rect.height * 0.24),
-                     radius: rect.width * 0.15,
-                     color: NSColor(calibratedWhite: 0.92, alpha: 1))
+            drawNeedle(base: NSPoint(x: rect.midX + rect.width * 0.01, y: rect.height * 0.20),
+                       length: rect.height * 0.62,
+                       angleDegrees: 18,
+                       pivotRadius: rect.width * 0.045,
+                       needleWidth: rect.width * 0.05,
+                       knockOutWidth: 0,
+                       color: NSColor(calibratedWhite: 0.96, alpha: 1))
             return true
         }
     }
@@ -68,20 +71,43 @@ enum AppIconRenderer {
         target.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
     }
 
-    /// Gauge dial at the flame's base: circle + needle pointing straight up,
-    /// into the flame — the flame reads as the needle.
-    private static func drawDial(center: NSPoint, radius: CGFloat, color: NSColor) {
-        color.setStroke()
-        let circle = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
-                                                 width: radius * 2, height: radius * 2))
-        circle.lineWidth = radius * 0.24
-        circle.stroke()
+    /// Gauge needle from `base`, tilted `angleDegrees` from vertical.
+    /// `knockOutWidth > 0` first clears a wider channel (so a dark needle
+    /// stays visible over a dark flame in template images).
+    private static func drawNeedle(
+        base: NSPoint,
+        length: CGFloat,
+        angleDegrees: CGFloat,
+        pivotRadius: CGFloat,
+        needleWidth: CGFloat,
+        knockOutWidth: CGFloat,
+        color: NSColor
+    ) {
+        let angle = (90 - angleDegrees) * .pi / 180
+        let tip = NSPoint(x: base.x + length * CGFloat(cos(angle)),
+                          y: base.y + length * CGFloat(sin(angle)))
+        let path = NSBezierPath()
+        path.move(to: base)
+        path.line(to: tip)
+        path.lineCapStyle = .round
 
-        let needle = NSBezierPath()
-        needle.move(to: center)
-        needle.line(to: NSPoint(x: center.x, y: center.y + radius * 0.95))
-        needle.lineWidth = radius * 0.24
-        needle.lineCapStyle = .round
-        needle.stroke()
+        if knockOutWidth > 0 {
+            let knockOut = path.copy() as! NSBezierPath
+            knockOut.lineWidth = knockOutWidth
+            NSColor.black.setStroke()
+            let context = NSGraphicsContext.current!.cgContext
+            context.setBlendMode(.destinationOut)
+            knockOut.stroke()
+            context.setBlendMode(.normal)
+        }
+
+        color.setStroke()
+        path.lineWidth = needleWidth
+        path.stroke()
+
+        // Pivot dot.
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(x: base.x - pivotRadius, y: base.y - pivotRadius,
+                                    width: pivotRadius * 2, height: pivotRadius * 2)).fill()
     }
 }

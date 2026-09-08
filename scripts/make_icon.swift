@@ -14,7 +14,7 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         NSColor(calibratedWhite: 0.10, alpha: 1).setFill()
         background.fill()
 
-        // Gradient flame rising from the dial.
+        // Gradient flame rising, with a white gauge needle laid over it.
         let flameRect = NSRect(x: rect.midX - rect.width * 0.24,
                                y: rect.height * 0.22,
                                width: rect.width * 0.48,
@@ -33,20 +33,22 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         }
         target.draw(in: flameRect, from: .zero, operation: .sourceOver, fraction: 1)
 
-        // Gauge dial at the flame's base; needle points up into the flame.
-        let dialCenter = NSPoint(x: rect.midX, y: rect.height * 0.24)
-        let dialRadius = rect.width * 0.15
-        NSColor(calibratedWhite: 0.92, alpha: 1).setStroke()
-        let circle = NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
-                                                 width: dialRadius * 2, height: dialRadius * 2))
-        circle.lineWidth = dialRadius * 0.24
-        circle.stroke()
+        // Needle over the flame, tilted 18° from vertical.
+        let angle = (90.0 - 18.0) * Double.pi / 180
+        let base = NSPoint(x: rect.midX + rect.width * 0.01, y: rect.height * 0.20)
+        let length = rect.height * 0.62
+        let tip = NSPoint(x: base.x + length * CGFloat(cos(angle)), y: base.y + length * CGFloat(sin(angle)))
+        NSColor(calibratedWhite: 0.96, alpha: 1).setStroke()
         let needle = NSBezierPath()
-        needle.move(to: dialCenter)
-        needle.line(to: NSPoint(x: dialCenter.x, y: dialCenter.y + dialRadius * 0.95))
-        needle.lineWidth = dialRadius * 0.24
+        needle.move(to: base)
+        needle.line(to: tip)
+        needle.lineWidth = rect.width * 0.05
         needle.lineCapStyle = .round
         needle.stroke()
+        NSColor(calibratedWhite: 0.96, alpha: 1).setFill()
+        let pivotRadius = rect.width * 0.045
+        NSBezierPath(ovalIn: NSRect(x: base.x - pivotRadius, y: base.y - pivotRadius,
+                                    width: pivotRadius * 2, height: pivotRadius * 2)).fill()
         return true
     }
 }
