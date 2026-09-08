@@ -60,6 +60,11 @@ private struct MilestonesView: View {
     @State private var newWindow = "5hr"
     @State private var newThreshold = 20.0
 
+    @State private var burnProvider = "Claude"
+    @State private var burnWindow = "5hr"
+    @State private var burnDrop = 15.0
+    @State private var burnMinutes = 30.0
+
     var body: some View {
         Form {
             Section("Alert when a plan window drops to threshold") {
@@ -135,9 +140,89 @@ private struct MilestonesView: View {
                     .disabled(providerNames.isEmpty)
                 }
             }
+
+            Section("Burn-rate alerts — alert when usage spikes") {
+                if store.burnAlerts.isEmpty {
+                    Label(
+                        "No burn-rate alerts. Add one to get notified when usage accelerates.",
+                        systemImage: "flame"
+                    )
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+                }
+                ForEach(store.burnAlerts) { alert in
+                    HStack(spacing: 10) {
+                        Image(systemName: "flame.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(alert.provider).fontWeight(.medium)
+                            Text(alert.windowLabel).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(String(format: "↓%.0f%% / %d min", alert.percentDrop, alert.minutes))
+                            .font(.callout)
+                            .monospacedDigit()
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.orange.opacity(0.15)))
+                        Button {
+                            store.burnAlerts.removeAll { $0.id == alert.id }
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            Section("Add burn-rate alert") {
+                Picker("Provider", selection: $burnProvider) {
+                    ForEach(providerNames, id: \.self) { name in
+                        Label(name, systemImage: "circle.fill")
+                            .foregroundColor(SettingsView.color(for: name))
+                    }
+                }
+                Picker("Window", selection: $burnWindow) {
+                    ForEach(windowLabels, id: \.self) { Text($0) }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Drop")
+                        Spacer()
+                        Text("\(Int(burnDrop))% within \(Int(burnMinutes)) min")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $burnDrop, in: 5...60, step: 1)
+                    HStack {
+                        Text("Window")
+                        Slider(value: $burnMinutes, in: 15...120, step: 15)
+                            .frame(width: 160)
+                    }
+                }
+                .padding(.vertical, 2)
+                HStack {
+                    Spacer()
+                    Button("Add Burn-Rate Alert") {
+                        store.burnAlerts.append(
+                            BurnAlert(
+                                provider: burnProvider,
+                                windowLabel: burnWindow,
+                                percentDrop: burnDrop,
+                                minutes: Int(burnMinutes)
+                            )
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(providerNames.isEmpty)
+                }
+            }
         }
         .formStyle(.grouped)
         .onChange(of: newProvider) { _, _ in newWindow = "5hr" }
+        .onChange(of: burnProvider) { _, _ in burnWindow = "5hr" }
     }
 }
 

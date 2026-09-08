@@ -11,6 +11,18 @@ struct Milestone: Codable, Identifiable, Hashable {
     var key: String { "\(provider)|\(windowLabel)|\(percentRemaining)" }
 }
 
+/// One burn-rate alert: notify when a provider window's remaining % drops by
+/// at least `percentDrop` within a trailing `minutes` window.
+struct BurnAlert: Codable, Identifiable, Hashable {
+    var provider: String
+    var windowLabel: String
+    var percentDrop: Double
+    var minutes: Int
+
+    var id: String { key }
+    var key: String { "\(provider)|\(windowLabel)|\(percentDrop)|\(minutes)" }
+}
+
 /// Pure threshold logic, kept testable and UI-free.
 enum MilestoneEvaluator {
     /// True when usage crossed from above the threshold to at/below it.
@@ -19,6 +31,37 @@ enum MilestoneEvaluator {
             return currentRemaining <= threshold
         }
         return previous > threshold && currentRemaining <= threshold
+    }
+}
+
+/// Pure burn-rate detection over a timestamped remaining-% history.
+enum BurnRateEvaluator {
+    /// Returns (drop, baseline, current) when remaining fell by at least the
+    /// alert's percentDrop over its trailing minutes window, else nil.
+    ///
+    /// `history` must be the window's remaining-% readings (oldest last).
+    /// A baseline is only used if it is at least `minutes` old, so a freshly
+    /// started app can't fire on a partial window.
+    static func detect(
+        history: [(date: Date, remaining: Double)],
+        alert: BurnAlert,
+        now: Date,
+        pollInterval: TimeInterval
+    ) -> (drop: Double, baseline: Double, current: Double)? {
+        // Baseline: oldest reading within the trailing window (+ one poll of
+        // slack, since polls land on 5-minute boundaries).
+        let windowStart = now.addingTimeInterval(-Double(alert.minutes) * 60 - pollInterval)
+        guard let baseline = history.first(where: { $0.date >= windowStart }) else { return nil }
+        // Require the window to actually span `minutes` — a freshly started
+        // app has too little history to judge burn rate.
+        guard now.timeIntervalSince(baseline.date) >= Double(alert.minutes) * 60 - pollInterval / 2 else {
+            return nil
+        }
+        // History is appended chronologically; last entry is the current reading.
+        guard let latest = history.last, latest.date >= baseline.date else { return nil }
+        let drop = baseline.remaining - latest.remaining
+        guard drop >= alert.percentDrop else { return nil }
+        return (drop, baseline.remaining, latest.remaining)
     }
 }
 
@@ -36,6 +79,10 @@ final class SettingsStore: ObservableObject {
     /// (e.g. "Claude|5hr"). Calibrate until % matches the provider's own
     /// usage display. 0/missing = unknown, % shows "--".
     @Published var planCapacities: [String: Int] {
+        didSet { persist() }
+    }
+    /// Burn-rate alerts: notify on a fast % drop within a trailing window.
+    @Published var burnAlerts: [BurnAlert] {
         didSet { persist() }
     }
 
@@ -56,6 +103,7 @@ final class SettingsStore: ObservableObject {
     private static let milestonesKey = "milestones"
     private static let widgetsKey = "widgetProviders"
     private static let capacitiesKey = "planCapacities"
+    private static let burnAlertsKey = "burnAlerts"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -66,6 +114,8 @@ final class SettingsStore: ObservableObject {
             .flatMap { try? decoder.decode([String].self, from: $0) } ?? []
         planCapacities = (defaults.data(forKey: Self.capacitiesKey))
             .flatMap { try? decoder.decode([String: Int].self, from: $0) } ?? Self.defaultCapacities
+        burnAlerts = (defaults.data(forKey: Self.burnAlertsKey))
+            .flatMap { try? decoder.decode([BurnAlert].self, from: $0) } ?? Self.defaultBurnAlerts
         // Treat a persisted empty set as "no user config" so shipped defaults apply.
         if planCapacities.isEmpty {
             planCapacities = Self.defaultCapacities
@@ -80,6 +130,12 @@ final class SettingsStore: ObservableObject {
         ]
     }
 
+    static var defaultBurnAlerts: [BurnAlert] {
+        [
+            BurnAlert(provider: "Claude", windowLabel: "5hr", percentDrop: 15, minutes: 30),
+        ]
+    }
+
     private func persist() {
         let encoder = JSONEncoder()
         if let data = try? encoder.encode(milestones) {
@@ -90,6 +146,9 @@ final class SettingsStore: ObservableObject {
         }
         if let data = try? encoder.encode(planCapacities) {
             defaults.set(data, forKey: Self.capacitiesKey)
+        }
+        if let data = try? encoder.encode(burnAlerts) {
+            defaults.set(data, forKey: Self.burnAlertsKey)
         }
     }
 }

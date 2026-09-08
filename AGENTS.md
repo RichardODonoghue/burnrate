@@ -60,4 +60,8 @@
   tokens only. Claude data counts cache reads, so raw token capacity guessing
   never matches the vendor % — prefer the quota API.
 - Usage polling continues while the app is backgrounded; milestone thresholds
-  are evaluated on each poll.
+  and burn-rate alerts are evaluated on each poll.
+- Burn-rate alerts (`BurnAlert`): notify when a window's remaining % drops
+  ≥ N within a trailing M-minute window. History kept per window id (6h
+  retention), baseline = oldest in-window reading, 30-min cooldown per window
+  after firing. Detection is pure (`BurnRateEvaluator`, tested).
