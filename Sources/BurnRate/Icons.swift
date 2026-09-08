@@ -1,20 +1,23 @@
 import AppKit
 
-/// Renders the BurnRate mark: a flame with a small burn-level dial.
-/// One drawing, three presentations: menu-bar template, Dock/app icon,
-/// About pane.
+/// Renders the BurnRate mark: a flame rising out of a gauge dial at its
+/// base — the flame is the needle. One drawing, three presentations:
+/// menu-bar template, Dock/app icon, About pane.
 enum AppIconRenderer {
     /// Monochrome template image for the menu bar (alpha only, adapts to
-    /// light/dark menu bars). Flame body, small dial pinned top-right.
+    /// light/dark menu bars).
     static func menuBarImage() -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             NSColor.black.set()
+            // Flame rising from the dial, centered slightly high.
             drawFlame(symbolName: "flame.fill",
-                      in: rect.insetBy(dx: 0.5, dy: 1.5),
+                      in: NSRect(x: rect.midX - 5, y: rect.height * 0.18,
+                                 width: 10, height: rect.height * 0.76),
                       gradient: false)
-            drawDial(center: NSPoint(x: rect.maxX - 3.1, y: rect.maxY - 3.1),
-                     radius: 2.9, color: .black)
+            // Gauge dial at the flame's base.
+            drawDial(center: NSPoint(x: rect.midX, y: rect.height * 0.18),
+                     radius: 3.4, color: .black)
             return true
         }
         image.isTemplate = true
@@ -22,7 +25,7 @@ enum AppIconRenderer {
     }
 
     /// Full-color app icon (Dock, notifications, About). Dark rounded square,
-    /// gradient flame, dial pinned top-right.
+    /// gradient flame rising from a light gauge dial.
     static func appIconImage(size: CGFloat = 512) -> NSImage {
         NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let background = NSBezierPath(roundedRect: rect.insetBy(dx: rect.width * 0.02, dy: rect.height * 0.02),
@@ -31,10 +34,14 @@ enum AppIconRenderer {
             background.fill()
 
             drawFlame(symbolName: "flame.fill",
-                      in: rect.insetBy(dx: rect.width * 0.16, dy: rect.height * 0.12),
+                      in: NSRect(x: rect.midX - rect.width * 0.24,
+                                 y: rect.height * 0.22,
+                                 width: rect.width * 0.48,
+                                 height: rect.height * 0.68),
                       gradient: true)
-            drawDial(center: NSPoint(x: rect.maxX - rect.width * 0.19, y: rect.maxY - rect.height * 0.19),
-                     radius: rect.width * 0.13, color: NSColor(calibratedWhite: 0.92, alpha: 1))
+            drawDial(center: NSPoint(x: rect.midX, y: rect.height * 0.24),
+                     radius: rect.width * 0.15,
+                     color: NSColor(calibratedWhite: 0.92, alpha: 1))
             return true
         }
     }
@@ -61,20 +68,19 @@ enum AppIconRenderer {
         target.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
     }
 
-    /// Small dial: circle + needle pointing up-right ("burning high").
+    /// Gauge dial at the flame's base: circle + needle pointing straight up,
+    /// into the flame — the flame reads as the needle.
     private static func drawDial(center: NSPoint, radius: CGFloat, color: NSColor) {
         color.setStroke()
         let circle = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
                                                  width: radius * 2, height: radius * 2))
-        circle.lineWidth = radius * 0.22
+        circle.lineWidth = radius * 0.24
         circle.stroke()
 
         let needle = NSBezierPath()
         needle.move(to: center)
-        let angle = 45.0 * .pi / 180
-        needle.line(to: NSPoint(x: center.x + radius * 0.72 * CGFloat(cos(angle)),
-                                y: center.y + radius * 0.72 * CGFloat(sin(angle))))
-        needle.lineWidth = radius * 0.22
+        needle.line(to: NSPoint(x: center.x, y: center.y + radius * 0.95))
+        needle.lineWidth = radius * 0.24
         needle.lineCapStyle = .round
         needle.stroke()
     }

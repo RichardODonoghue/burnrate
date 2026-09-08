@@ -14,8 +14,11 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         NSColor(calibratedWhite: 0.10, alpha: 1).setFill()
         background.fill()
 
-        // Gradient flame body.
-        let flameRect = rect.insetBy(dx: rect.width * 0.16, dy: rect.height * 0.12)
+        // Gradient flame rising from the dial.
+        let flameRect = NSRect(x: rect.midX - rect.width * 0.24,
+                               y: rect.height * 0.22,
+                               width: rect.width * 0.48,
+                               height: rect.height * 0.68)
         guard let symbol = NSImage(systemSymbolName: "flame.fill",
                                    accessibilityDescription: "flame") else { return true }
         let scaled = symbol.withSymbolConfiguration(.init(pointSize: flameRect.height, weight: .bold)) ?? symbol
@@ -30,20 +33,18 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         }
         target.draw(in: flameRect, from: .zero, operation: .sourceOver, fraction: 1)
 
-        // Dial pinned top-right: circle + needle up-right.
-        let dialCenter = NSPoint(x: rect.maxX - rect.width * 0.19, y: rect.maxY - rect.height * 0.19)
-        let dialRadius = rect.width * 0.13
+        // Gauge dial at the flame's base; needle points up into the flame.
+        let dialCenter = NSPoint(x: rect.midX, y: rect.height * 0.24)
+        let dialRadius = rect.width * 0.15
         NSColor(calibratedWhite: 0.92, alpha: 1).setStroke()
         let circle = NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
                                                  width: dialRadius * 2, height: dialRadius * 2))
-        circle.lineWidth = dialRadius * 0.22
+        circle.lineWidth = dialRadius * 0.24
         circle.stroke()
         let needle = NSBezierPath()
         needle.move(to: dialCenter)
-        let angle = 45.0 * Double.pi / 180
-        needle.line(to: NSPoint(x: dialCenter.x + dialRadius * 0.72 * CGFloat(cos(angle)),
-                                y: dialCenter.y + dialRadius * 0.72 * CGFloat(sin(angle))))
-        needle.lineWidth = dialRadius * 0.22
+        needle.line(to: NSPoint(x: dialCenter.x, y: dialCenter.y + dialRadius * 0.95))
+        needle.lineWidth = dialRadius * 0.24
         needle.lineCapStyle = .round
         needle.stroke()
         return true
