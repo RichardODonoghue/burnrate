@@ -353,9 +353,11 @@ private struct MilestonesView: View {
             HStack {
                 Text("Tokens")
                 Spacer()
-                TextField("2000000", text: $modelBurnTokens)
+                TextField("2,000,000", text: $modelBurnTokens)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 110)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 140)
+                    .fixedSize(horizontal: true, vertical: false)
                     .monospacedDigit()
             }
             Picker("Window", selection: $modelBurnMinutes) {
@@ -364,7 +366,8 @@ private struct MilestonesView: View {
             HStack {
                 Spacer()
                 Button("Add Model Burn Alert") {
-                    if let tokens = Int(modelBurnTokens), tokens > 0 {
+                    let parsed = Int(modelBurnTokens.replacingOccurrences(of: ",", with: ""))
+                    if let tokens = parsed, tokens > 0 {
                         store.modelBurnAlerts.append(
                             ModelBurnAlert(provider: modelBurnProvider, model: modelBurnModel,
                                            tokens: tokens, minutes: modelBurnMinutes)
@@ -373,7 +376,7 @@ private struct MilestonesView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled((Int(modelBurnTokens) ?? 0) <= 0)
+                .disabled((Int(modelBurnTokens.replacingOccurrences(of: ",", with: "")) ?? 0) <= 0)
             }
         } header: {
             Text("Model burn alerts")
