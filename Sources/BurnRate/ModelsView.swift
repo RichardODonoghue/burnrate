@@ -370,9 +370,19 @@ struct ModelsView: View {
                 }
                 .chartYScale(domain: 0...100)
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) { value in
-                        AxisGridLine()
-                        AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                    // Rolling covers ~days: tick every 6 hours. Weekly/Monthly
+                    // windows get one tick per day.
+                    switch trendWindow {
+                    case .rolling:
+                        AxisMarks(values: .stride(by: .hour, count: 6)) { value in
+                            AxisGridLine()
+                            AxisValueLabel(format: .dateTime.hour().minute())
+                        }
+                    case .weekly, .monthly:
+                        AxisMarks(values: .stride(by: .day)) { value in
+                            AxisGridLine()
+                            AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                        }
                     }
                 }
                 .chartYAxis {
