@@ -14,6 +14,7 @@ struct SettingsView: View {
     let providerNames: [String]
     let modelNames: [String]
     let viewModel: ModelUsageViewModel
+    let remaining: Double?
 
     @State private var selection: AppPane
 
@@ -22,12 +23,14 @@ struct SettingsView: View {
         providerNames: [String],
         modelNames: [String],
         viewModel: ModelUsageViewModel,
+        remaining: Double? = nil,
         initialPane: AppPane = .notifications
     ) {
         self.store = store
         self.providerNames = providerNames
         self.modelNames = modelNames
         self.viewModel = viewModel
+        self.remaining = remaining
         _selection = State(initialValue: initialPane)
     }
 
@@ -55,7 +58,7 @@ struct SettingsView: View {
             case .widgets:
                 WidgetsView(store: store, providerNames: providerNames)
             case .about:
-                AboutView()
+                AboutView(remaining: remaining)
             }
         }
         .frame(minWidth: 860, minHeight: 560)
@@ -436,11 +439,13 @@ private struct WidgetsView: View {
 // MARK: - About
 
 private struct AboutView: View {
+    let remaining: Double?
+
     var body: some View {
         Form {
             Section {
                 VStack(spacing: 10) {
-                    Image(nsImage: AppIconRenderer.appIconImage(size: 256))
+                    Image(nsImage: AppIconRenderer.appIconImage(size: 256, remaining: remaining))
                         .resizable()
                         .frame(width: 72, height: 72)
                     Text("BurnRate")

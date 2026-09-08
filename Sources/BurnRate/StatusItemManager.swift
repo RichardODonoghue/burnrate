@@ -33,7 +33,17 @@ final class StatusItemManager: NSObject {
     /// Rebuild menu contents from the latest usage snapshot.
     func refreshMenu() {
         mainItem?.menu = makeMenu()
+        // Menu-bar icon is stateful: needle + tint track the worst window.
+        if let item = mainItem {
+            item.button?.image = AppIconRenderer.menuBarImage(remaining: worstRollingRemaining())
+        }
         rebuildWidgets()
+    }
+
+    private func worstRollingRemaining() -> Double? {
+        usageStore.current
+            .compactMap { $0.window(withLabel: "Rolling")?.percentRemaining }
+            .min()
     }
 
     // MARK: - Widgets

@@ -117,6 +117,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 providerNames: usageStore.current.map(\.providerName),
                 modelNames: Array(Set(modelUsageViewModel.totals.map(\.model))).sorted(),
                 viewModel: modelUsageViewModel,
+                remaining: usageStore.current
+                    .compactMap { $0.window(withLabel: "Rolling")?.percentRemaining }
+                    .min(),
                 initialPane: pane
             )
         )
@@ -124,8 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // otherwise wide panes push the sidebar out of view.
         hostingView.sizingOptions = []
         appWindow?.contentView = hostingView
-        modelUsageViewModel.reload()
-        // Dock presence while the UI is open; back to accessory when closed.
+        modelUsageViewModel.reload()        // Dock presence while the UI is open; back to accessory when closed.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         appWindow?.makeKeyAndOrderFront(nil)

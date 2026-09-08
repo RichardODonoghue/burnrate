@@ -1,11 +1,34 @@
 import AppKit
 
-/// Renders the BurnRate mark "Dial Core": a flame with a dark gauge dial
-/// knocked into it and a needle reading remaining usage. One 72-unit
-/// geometry (y-down SVG space), three presentations:
-/// menu-bar template (mono) · Dock/app icon (plate) · About pane.
+/// Renders the G2 "Dial Core" mark: a flame with a gauge dial knocked into
+/// it, needle reading remaining usage. 72-unit design space (y-down), from
+/// the approved G2 sheet.
+///
+/// The mark is stateful: the needle angle and flame tint track the current
+/// remaining % (green ≥55, amber ~45, red ≤20).
 enum AppIconRenderer {
-    // MARK: - Geometry (72-unit design space, from the approved G2 sheet)
+    // MARK: - Geometry (72-unit design space)
+
+    /// Flame outline (FLO from the G2 sheet). Built lazily; treat as
+    /// read-only (paths are only used for fill/clip, never mutated).
+    private nonisolated(unsafe) static let flamePath: NSBezierPath = {
+        let p = NSBezierPath()
+        p.move(to: NSPoint(x: 36, y: 6))
+        p.curve(to: NSPoint(x: 19.5, y: 27),
+                controlPoint1: NSPoint(x: 33, y: 14), controlPoint2: NSPoint(x: 24, y: 20))
+        p.curve(to: NSPoint(x: 15.5, y: 41),
+                controlPoint1: NSPoint(x: 16.5, y: 32), controlPoint2: NSPoint(x: 15.5, y: 36.5))
+        p.curve(to: NSPoint(x: 36, y: 60),
+                controlPoint1: NSPoint(x: 15.5, y: 52), controlPoint2: NSPoint(x: 24.5, y: 60))
+        p.curve(to: NSPoint(x: 56.5, y: 41),
+                controlPoint1: NSPoint(x: 47.5, y: 60), controlPoint2: NSPoint(x: 56.5, y: 52))
+        p.curve(to: NSPoint(x: 52.5, y: 27),
+                controlPoint1: NSPoint(x: 56.5, y: 36.5), controlPoint2: NSPoint(x: 55.5, y: 32))
+        p.curve(to: NSPoint(x: 36, y: 6),
+                controlPoint1: NSPoint(x: 48, y: 20), controlPoint2: NSPoint(x: 39, y: 14))
+        p.close()
+        return p
+    }()
 
     private static let dialCenter = NSPoint(x: 36, y: 42)
     private static let dialRadius: CGFloat = 10.5
@@ -13,168 +36,133 @@ enum AppIconRenderer {
     private static let pivotRadius: CGFloat = 2.2
     private static let needleLength: CGFloat = 22
     private static let needleWidth: CGFloat = 2.6
-    /// Static rest angle (≈70% remaining), matching the shipped icon.
-    private static let restAngle: Double = 18
 
-    // MARK: - Public renderers
+    // MARK: - State mapping
 
-    /// Monochrome template image for the menu bar (alpha only, adapts to
-    /// light/dark menu bars). The dial is knocked out of the flame; needle
-    /// and pivot draw in ink. Pass `percentRemaining` to sweep the needle
-    /// (−45° empty → +45° refilled); omit it to park at the rest angle.
-    static func menuBarImage(percentRemaining: Double? = nil) -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-            drawG2(in: rect, mode: .mono(ink: .black), percentRemaining: percentRemaining)
+    /// Needle angle from vertical: 100% remaining → 0°, 70% → 18° (G2 rest
+    /// pose), 0% → 60°.
+    static func needleAngle(forRemaining remaining: Double?) -> Double {
+        let value = min(max(remaining ?? 70, 0), 100)
+        return (100 - value) * 0.6
+    }
+
+    /// G2 severity ramp: green ≥55, amber ~45, red ≤20 (percent remaining).
+    static func tint(forRemaining remaining: Double?) -> (top: NSColor, bottom: NSColor) {
+        let value = min(max(remaining ?? 70, 0), 100)
+        func rgb(_ hex: (UInt8, UInt8, UInt8)) -> NSColor {
+            NSColor(calibratedRed: CGFloat(hex.0) / 255, green: CGFloat(hex.1) / 255, blue: CGFloat(hex.2) / 255, alpha: 1)
+        }
+        let stops: [(threshold: Double, a: (UInt8, UInt8, UInt8), b: (UInt8, UInt8, UInt8))] = [
+            (100, (0x8F, 0xE0, 0x7A), (0x33, 0xAE, 0x70)),
+            (55, (0x8F, 0xE0, 0x7A), (0x33, 0xAE, 0x70)),
+            (45, (0xFF, 0xC2, 0x4B), (0xFF, 0x7A, 0x3D)),
+            (20, (0xFF, 0x8A, 0x5C), (0xE6, 0x40, 0x19)),
+            (0, (0xFF, 0x8A, 0x5C), (0xE6, 0x40, 0x19)),
+        ]
+        guard value < stops[0].threshold else { return (rgb(stops[0].a), rgb(stops[0].b)) }
+        for (higher, lower) in zip(stops, stops.dropFirst()) where value >= lower.threshold {
+            let fraction = CGFloat((higher.threshold - value) / (higher.threshold - lower.threshold))
+            let mix = { (c1: (UInt8, UInt8, UInt8), c2: (UInt8, UInt8, UInt8)) -> NSColor in
+                NSColor(calibratedRed: CGFloat(c1.0) + (CGFloat(c2.0) - CGFloat(c1.0)) * fraction,
+                        green: CGFloat(c1.1) + (CGFloat(c2.1) - CGFloat(c1.1)) * fraction,
+                        blue: CGFloat(c1.2) + (CGFloat(c2.2) - CGFloat(c1.2)) * fraction, alpha: 1)
+            }
+            return (mix(higher.a, lower.a), mix(higher.b, lower.b))
+        }
+        return (rgb(stops.last!.a), rgb(stops.last!.b))
+    }
+
+    // MARK: - Renderers
+
+    /// Monochrome template image for the menu bar. Needle angle + dial hole
+    /// reflect the current remaining % (nil → rest pose at 70%).
+    static func menuBarImage(remaining: Double? = nil) -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let scale = size.width / 72
+        let angle = needleAngle(forRemaining: remaining)
+        let image = NSImage(size: size, flipped: true) { _ in
+            let context = NSGraphicsContext.current!.cgContext
+            context.scaleBy(x: scale, y: scale)
+            NSColor.black.setFill()
+            flamePath.fill()
+            // Dial core: punch a hole in the flame.
+            context.setBlendMode(.destinationOut)
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
+                                        width: dialRadius * 2, height: dialRadius * 2)).fill()
+            context.setBlendMode(.normal)
+            // Needle + pivot.
+            NSColor.black.setStroke()
+            needlePath(angle: angle).lineWidth = needleWidth
+            needlePath(angle: angle).stroke()
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
+                                        width: pivotRadius * 2, height: pivotRadius * 2)).fill()
             return true
         }
         image.isTemplate = true
         return image
     }
 
-    /// Full-color app icon (Dock, notifications, About). Dark rounded plate,
-    /// gradient flame, dark dial core, warm needle on top. Pass
-    /// `percentRemaining` to tint the flame along the fresh→ember ramp;
-    /// omit it for the static ember mark.
-    static func appIconImage(size: CGFloat = 512, percentRemaining: Double? = nil) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            drawG2(in: rect, mode: .plate, percentRemaining: percentRemaining)
+    /// Full-color plate for Dock/notifications/About. Needle + tint track
+    /// remaining %; plate is the dark rounded square.
+    static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = true) -> NSImage {
+        let scale = size / 72
+        let angle = needleAngle(forRemaining: remaining)
+        let tint = tint(forRemaining: remaining)
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { _ in
+            let context = NSGraphicsContext.current!.cgContext
+            context.scaleBy(x: scale, y: scale)
+            if plate {
+                NSColor(calibratedRed: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 255, alpha: 1).setFill()
+                NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
+                             xRadius: 16, yRadius: 16).fill()
+            }
+            // Flame filled with the severity gradient, clipped to its shape.
+            context.saveGState()
+            flamePath.addClip()
+            NSGradient(starting: tint.bottom, ending: tint.top)?
+                .draw(in: NSRect(x: 15.5, y: 6, width: 41, height: 54), angle: 90)
+            context.restoreGState()
+            // Dial core.
+            NSColor(calibratedRed: 0x20 / 255, green: 0x0A / 255, blue: 0x02 / 255, alpha: 0.88).setFill()
+            NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
+                                        width: dialRadius * 2, height: dialRadius * 2)).fill()
+            // Needle + pivot.
+            NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setStroke()
+            needlePath(angle: angle).lineWidth = needleWidth
+            needlePath(angle: angle).stroke()
+            NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setFill()
+            NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
+                                        width: pivotRadius * 2, height: pivotRadius * 2)).fill()
             return true
         }
+        return image
     }
 
-    /// Needle angle for a remaining-percent reading.
-    /// Fuel-gauge semantics: E = empty (−45°) … F = refilled (+45°).
-    static func needleAngle(percentRemaining: Double) -> Double {
-        -45 + 0.9 * percentRemaining
-    }
-
-    /// Fresh→ember flame ramp, mirroring the approved G2 sheet: pure green
-    /// ≥ 55%, green→amber blend 55→45, amber→red 45→20, ember red below.
-    static func tint(percentRemaining p: Double) -> (top: NSColor, bottom: NSColor) {
-        struct RGB { let r, g, b: CGFloat }
-        func rgb(_ hex: UInt32) -> RGB {
-            RGB(r: CGFloat((hex >> 16) & 0xFF) / 255,
-                g: CGFloat((hex >> 8) & 0xFF) / 255,
-                b: CGFloat(hex & 0xFF) / 255)
-        }
-        let stops: [(t: Double, top: RGB, bottom: RGB)] = [
-            (100, rgb(0x8FE07A), rgb(0x33AE70)),
-            (55,  rgb(0x8FE07A), rgb(0x33AE70)),
-            (45,  rgb(0xFFC24B), rgb(0xFF7A3D)),
-            (20,  rgb(0xFF8A5C), rgb(0xE64019)),
-            (0,   rgb(0xFF8A5C), rgb(0xE64019)),
-        ]
-        func ns(_ c: RGB, alpha: CGFloat = 1) -> NSColor {
-            NSColor(calibratedRed: c.r, green: c.g, blue: c.b, alpha: alpha)
-        }
-        guard let i = stops.firstIndex(where: { p >= $0.t }) else {
-            return (ns(stops[0].top), ns(stops[0].bottom))
-        }
-        if i == 0 { return (ns(stops[0].top), ns(stops[0].bottom)) }
-        let hi = stops[i], lo = stops[i - 1]
-        let f = (lo.t - p) / (lo.t - hi.t)
-        func mix(_ a: RGB, _ b: RGB) -> RGB {
-            RGB(r: a.r + (b.r - a.r) * CGFloat(f),
-                g: a.g + (b.g - a.g) * CGFloat(f),
-                b: a.b + (b.b - a.b) * CGFloat(f))
-        }
-        return (ns(mix(lo.top, hi.top)), ns(mix(lo.bottom, hi.bottom)))
-    }
-
-    // MARK: - Drawing
-
-    private enum Mode { case mono(ink: NSColor); case plate }
-
-    private static func drawG2(in rect: NSRect, mode: Mode, percentRemaining: Double?) {
-        let deg = percentRemaining.map(needleAngle(percentRemaining:)) ?? restAngle
-        let (top, bottom) = percentRemaining.map(tint(percentRemaining:))
-            ?? (NSColor(calibratedRed: 1.0, green: 0.62, blue: 0.20, alpha: 1),
-                NSColor(calibratedRed: 0.90, green: 0.25, blue: 0.10, alpha: 1))
-
-        let ctx = NSGraphicsContext.current!.cgContext
-        let s = min(rect.width, rect.height) / 72
-        ctx.saveGState()
-        // Map SVG space: origin top-left, y-down, scaled to rect.
-        ctx.translateBy(x: 0, y: rect.height)
-        ctx.scaleBy(x: s, y: -s)
-
-        switch mode {
-        case .mono(let ink):
-            ink.setFill()
-            flamePath().fill()
-            // Knock the dial out of the flame (alpha only).
-            ctx.saveGState()
-            ctx.setBlendMode(.destinationOut)
-            NSColor.black.setFill()
-            dialPath().fill()
-            ctx.restoreGState()
-            drawNeedle(deg: deg, stroke: ink)
-        case .plate:
-            NSColor(calibratedWhite: 26.0 / 255.0, alpha: 1).setFill()
-            platePath().fill()
-            // Flame with vertical gradient, clipped to the silhouette.
-            ctx.saveGState()
-            flamePath().addClip()
-            let space = CGColorSpaceCreateDeviceRGB()
-            let grad = CGGradient(colorsSpace: space,
-                                  colors: [top.cgColor, bottom.cgColor] as CFArray,
-                                  locations: [0, 1])!
-            ctx.drawLinearGradient(grad,
-                                   start: CGPoint(x: 36, y: 6),
-                                   end: CGPoint(x: 36, y: 60), options: [])
-            ctx.restoreGState()
-            // Dial core over the flame.
-            NSColor(calibratedRed: 0x20 / 255.0, green: 0x0A / 255.0, blue: 0x02 / 255.0,
-                    alpha: 0.88).setFill()
-            dialPath().fill()
-            drawNeedle(deg: deg, stroke: NSColor(calibratedRed: 1.0, green: 0xF6 / 255.0,
-                                                 blue: 0xEA / 255.0, alpha: 1))
-        }
-        ctx.restoreGState()
-    }
-
-    private static func drawNeedle(deg: Double, stroke: NSColor) {
-        let r = deg * Double.pi / 180
-        let tip = NSPoint(x: pivot.x + needleLength * CGFloat(sin(r)),
-                          y: pivot.y - needleLength * CGFloat(cos(r)))
+    private static func needlePath(angle: Double) -> NSBezierPath {
+        let radians = angle * .pi / 180
         let path = NSBezierPath()
         path.move(to: pivot)
-        path.line(to: tip)
+        path.line(to: NSPoint(x: pivot.x + needleLength * CGFloat(sin(radians)),
+                              y: pivot.y - needleLength * CGFloat(cos(radians))))
         path.lineCapStyle = .round
-        stroke.setStroke()
-        path.lineWidth = needleWidth
-        path.stroke()
-        stroke.setFill()
-        NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
-                                    width: pivotRadius * 2, height: pivotRadius * 2)).fill()
+        return path
     }
 
-    private static func flamePath() -> NSBezierPath {
-        let p = NSBezierPath()
-        p.move(to: NSPoint(x: 36, y: 6))
-        p.curve(to: NSPoint(x: 19.5, y: 27), controlPoint1: NSPoint(x: 33, y: 14),
-                controlPoint2: NSPoint(x: 24, y: 20))
-        p.curve(to: NSPoint(x: 15.5, y: 41), controlPoint1: NSPoint(x: 16.5, y: 32),
-                controlPoint2: NSPoint(x: 15.5, y: 36.5))
-        p.curve(to: NSPoint(x: 36, y: 60), controlPoint1: NSPoint(x: 15.5, y: 52),
-                controlPoint2: NSPoint(x: 24.5, y: 60))
-        p.curve(to: NSPoint(x: 56.5, y: 41), controlPoint1: NSPoint(x: 47.5, y: 60),
-                controlPoint2: NSPoint(x: 56.5, y: 52))
-        p.curve(to: NSPoint(x: 52.5, y: 27), controlPoint1: NSPoint(x: 56.5, y: 36.5),
-                controlPoint2: NSPoint(x: 55.5, y: 32))
-        p.curve(to: NSPoint(x: 36, y: 6), controlPoint1: NSPoint(x: 48, y: 20),
-                controlPoint2: NSPoint(x: 39, y: 14))
-        p.close()
-        return p
-    }
-
-    private static func dialPath() -> NSBezierPath {
-        NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
-                                    width: dialRadius * 2, height: dialRadius * 2))
-    }
-
-    private static func platePath() -> NSBezierPath {
-        NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
-                     xRadius: 16, yRadius: 16)
+    /// Replaces the flame fill with a vertical gradient, masked by the
+    /// flame's own alpha.
+    private static func recolorFlame(of image: NSImage, top: NSColor, bottom: NSColor) -> NSImage {
+        let size = image.size
+        let recolored = NSImage(size: size, flipped: false) { _ in
+            image.draw(at: .zero, from: .zero, operation: .copy, fraction: 1)
+            let context = NSGraphicsContext.current!.cgContext
+            context.setBlendMode(.sourceAtop)
+            let gradient = NSGradient(starting: bottom, ending: top) // bottom of plate → top
+            gradient?.draw(in: NSRect(origin: .zero, size: size), angle: 90)
+            context.setBlendMode(.normal)
+            return true
+        }
+        return recolored
     }
 }
