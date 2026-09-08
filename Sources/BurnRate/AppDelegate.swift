@@ -91,8 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 620, height: 440),
-                styleMask: [.titled, .closable],
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
+                styleMask: [.titled, .closable, .resizable],
                 backing: .buffered,
                 defer: false
             )

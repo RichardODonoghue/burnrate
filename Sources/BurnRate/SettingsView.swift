@@ -36,7 +36,7 @@ struct SettingsView: View {
                 AboutView()
             }
         }
-        .frame(width: 620, height: 440)
+        .frame(width: 640, height: 520)
     }
 
     static func color(for provider: String) -> Color {
@@ -247,24 +247,26 @@ private struct MilestonesView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                HStack {
+                VStack(alignment: .leading, spacing: 6) {
                     Picker("Provider", selection: $costProvider) {
                         ForEach(providerNames, id: \.self) { Text($0) }
                     }
-                    .frame(width: 160)
-                    Spacer()
-                    Text("Limit $")
-                    TextField("5.00", text: $costLimit)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 70)
-                    Button("Add") {
-                        if let limit = Double(costLimit), limit > 0 {
-                            store.costAlerts.removeAll { $0.provider == costProvider }
-                            store.costAlerts.append(CostAlert(provider: costProvider, dailyLimitUSD: limit))
-                            costLimit = ""
+                    HStack {
+                        Text("Daily limit ($)")
+                        Spacer()
+                        TextField("5.00", text: $costLimit)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 90)
+                            .monospacedDigit()
+                        Button("Add") {
+                            if let limit = Double(costLimit), limit > 0 {
+                                store.costAlerts.removeAll { $0.provider == costProvider }
+                                store.costAlerts.append(CostAlert(provider: costProvider, dailyLimitUSD: limit))
+                                costLimit = ""
+                            }
                         }
+                        .disabled((Double(costLimit) ?? 0) <= 0)
                     }
-                    .disabled(Double(costLimit) == nil || Double(costLimit) ?? 0 <= 0)
                 }
             }
 
@@ -289,34 +291,37 @@ private struct MilestonesView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                HStack {
+                VStack(alignment: .leading, spacing: 6) {
                     Picker("Provider", selection: $modelBurnProvider) {
                         ForEach(providerNames, id: \.self) { Text($0) }
                     }
-                    .frame(width: 140)
-                    TextField("model (e.g. opus)", text: $modelBurnModel)
+                    TextField("Model (e.g. opus, * for any)", text: $modelBurnModel)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 120)
-                    Text(">")
-                    TextField("2000000", text: $modelBurnTokens)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                        .monospacedDigit()
-                    Text("tok /")
-                    Picker("", selection: $modelBurnMinutes) {
+                    HStack {
+                        Text("Tokens")
+                        Spacer()
+                        TextField("2000000", text: $modelBurnTokens)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 100)
+                            .monospacedDigit()
+                    }
+                    Picker("Window", selection: $modelBurnMinutes) {
                         ForEach([15, 30, 60, 120], id: \.self) { Text("\($0) min").tag($0) }
                     }
-                    .frame(width: 100)
-                    Button("Add") {
-                        if let tokens = Int(modelBurnTokens), tokens > 0, !modelBurnModel.isEmpty {
-                            store.modelBurnAlerts.append(
-                                ModelBurnAlert(provider: modelBurnProvider, model: modelBurnModel,
-                                               tokens: tokens, minutes: modelBurnMinutes)
-                            )
-                            modelBurnTokens = ""
+                    HStack {
+                        Spacer()
+                        Button("Add Model Burn Alert") {
+                            if let tokens = Int(modelBurnTokens), tokens > 0, !modelBurnModel.isEmpty {
+                                store.modelBurnAlerts.append(
+                                    ModelBurnAlert(provider: modelBurnProvider, model: modelBurnModel,
+                                                   tokens: tokens, minutes: modelBurnMinutes)
+                                )
+                                modelBurnTokens = ""
+                            }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .disabled((Int(modelBurnTokens) ?? 0) <= 0 || modelBurnModel.isEmpty)
                     }
-                    .disabled(Int(modelBurnTokens) == nil || modelBurnModel.isEmpty)
                 }
             }
         }
