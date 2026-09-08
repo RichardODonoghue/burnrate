@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             window.title = "BurnRate"
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.center()
             appWindow = window
         }
@@ -118,7 +119,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingView.sizingOptions = []
         appWindow?.contentView = hostingView
         modelUsageViewModel.reload()
+        // Dock presence while the UI is open; back to accessory when closed.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         appWindow?.makeKeyAndOrderFront(nil)
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 }
