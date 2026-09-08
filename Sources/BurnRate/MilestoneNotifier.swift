@@ -12,6 +12,10 @@ final class MilestoneNotifier {
     private var history: [String: [(date: Date, remaining: Double)]] = [:]
     /// Cooldown per window id after a burn-rate alert fires.
     private var burnCooldown: [String: Date] = [:]
+    /// Daily-spend alert already fired, keyed "provider|dayStart".
+    private var costFired: Set<String> = []
+    /// Cooldown per model-burn alert key.
+    private var modelBurnCooldown: [String: Date] = [:]
 
     nonisolated static let pollInterval: TimeInterval = 300
     /// History older than this can't affect any alert (largest window + slack).
@@ -60,6 +64,40 @@ final class MilestoneNotifier {
                 recordHistory(windowID: window.id, date: now, remaining: current)
                 evaluateBurnAlerts(provider: provider.providerName, window: window, now: now)
             }
+        }
+    }
+
+    /// Daily local-log spend per provider vs configured cost alerts.
+    /// Fires at most once per provider per day.
+    func evaluateCosts(_ costs: [(provider: String, cost: Double)], date: Date = Date()) {
+        let dayKey = String(Calendar.current.startOfDay(for: date).timeIntervalSince1970)
+        for alert in settingsStore.costAlerts {
+            let firedKey = "\(alert.provider)|\(dayKey)"
+            guard !costFired.contains(firedKey),
+                  let spend = costs.first(where: { $0.provider == alert.provider })?.cost,
+                  spend >= alert.dailyLimitUSD
+            else { continue }
+            costFired.insert(firedKey)
+            send(title: "\(alert.provider) daily spend",
+                 body: String(format: "$%.2f spent today (limit $%.2f).", spend, alert.dailyLimitUSD))
+        }
+    }
+
+    /// Per-model token burn detection from local logs.
+    func evaluateModelBurn(_ buckets: [(provider: String, samples: [UsageSample])], date: Date = Date()) {
+        for alert in settingsStore.modelBurnAlerts {
+            if let until = modelBurnCooldown[alert.key], date < until { continue }
+            guard let bucket = buckets.first(where: { $0.provider == alert.provider }) else { continue }
+            guard let hit = ModelBurnEvaluator.detect(
+                samples: bucket.samples,
+                alert: alert,
+                now: date,
+                pollInterval: Self.pollInterval
+            ) else { continue }
+            modelBurnCooldown[alert.key] = date.addingTimeInterval(Self.burnCooldownInterval)
+            send(title: "\(alert.provider) \(hit.model) burning fast",
+                 body: String(format: "%@ tokens in %d min.",
+                              StatusItemManager.formatTokens(hit.tokens), alert.minutes))
         }
     }
 

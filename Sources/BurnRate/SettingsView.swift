@@ -65,6 +65,13 @@ private struct MilestonesView: View {
     @State private var burnDrop = 15.0
     @State private var burnMinutes = 30.0
 
+    @State private var costProvider = "OpenCode"
+    @State private var costLimit = ""
+    @State private var modelBurnProvider = "Claude"
+    @State private var modelBurnModel = ""
+    @State private var modelBurnTokens = ""
+    @State private var modelBurnMinutes = 30
+
     var body: some View {
         Form {
             Section("Alert when a plan window drops to threshold") {
@@ -217,6 +224,99 @@ private struct MilestonesView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(providerNames.isEmpty)
+                }
+            }
+            Section("Daily cost alerts (local logs; cost data: OpenCode only)") {
+                ForEach(store.costAlerts) { alert in
+                    HStack(spacing: 10) {
+                        Image(systemName: "dollarsign.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(alert.provider)
+                        Spacer()
+                        Text(String(format: "≥ $%.2f/day", alert.dailyLimitUSD))
+                            .font(.callout)
+                            .monospacedDigit()
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.green.opacity(0.15)))
+                        Button {
+                            store.costAlerts.removeAll { $0.id == alert.id }
+                        } label: {
+                            Image(systemName: "trash").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    Picker("Provider", selection: $costProvider) {
+                        ForEach(providerNames, id: \.self) { Text($0) }
+                    }
+                    .frame(width: 160)
+                    Spacer()
+                    Text("Limit $")
+                    TextField("5.00", text: $costLimit)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 70)
+                    Button("Add") {
+                        if let limit = Double(costLimit), limit > 0 {
+                            store.costAlerts.removeAll { $0.provider == costProvider }
+                            store.costAlerts.append(CostAlert(provider: costProvider, dailyLimitUSD: limit))
+                            costLimit = ""
+                        }
+                    }
+                    .disabled(Double(costLimit) == nil || Double(costLimit) ?? 0 <= 0)
+                }
+            }
+
+            Section("Model burn alerts (tokens per model, local logs)") {
+                ForEach(store.modelBurnAlerts) { alert in
+                    HStack(spacing: 10) {
+                        Image(systemName: "flame.fill").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(alert.provider) · \(alert.model)").fontWeight(.medium)
+                            Text("window \(alert.minutes) min").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(StatusItemManager.formatTokens(alert.tokens)) tok")
+                            .font(.callout).monospacedDigit()
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.orange.opacity(0.15)))
+                        Button {
+                            store.modelBurnAlerts.removeAll { $0.id == alert.id }
+                        } label: {
+                            Image(systemName: "trash").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    Picker("Provider", selection: $modelBurnProvider) {
+                        ForEach(providerNames, id: \.self) { Text($0) }
+                    }
+                    .frame(width: 140)
+                    TextField("model (e.g. opus)", text: $modelBurnModel)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 120)
+                    Text(">")
+                    TextField("2000000", text: $modelBurnTokens)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                        .monospacedDigit()
+                    Text("tok /")
+                    Picker("", selection: $modelBurnMinutes) {
+                        ForEach([15, 30, 60, 120], id: \.self) { Text("\($0) min").tag($0) }
+                    }
+                    .frame(width: 100)
+                    Button("Add") {
+                        if let tokens = Int(modelBurnTokens), tokens > 0, !modelBurnModel.isEmpty {
+                            store.modelBurnAlerts.append(
+                                ModelBurnAlert(provider: modelBurnProvider, model: modelBurnModel,
+                                               tokens: tokens, minutes: modelBurnMinutes)
+                            )
+                            modelBurnTokens = ""
+                        }
+                    }
+                    .disabled(Int(modelBurnTokens) == nil || modelBurnModel.isEmpty)
                 }
             }
         }

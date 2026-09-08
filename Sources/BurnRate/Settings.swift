@@ -65,6 +65,14 @@ enum BurnRateEvaluator {
     }
 }
 
+/// Alert when one provider's daily local-log spend (USD) exceeds the limit.
+struct CostAlert: Codable, Identifiable, Hashable {
+    var provider: String
+    var dailyLimitUSD: Double
+
+    var id: String { provider }
+}
+
 /// Holds user settings; persists to UserDefaults as JSON.
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -83,6 +91,15 @@ final class SettingsStore: ObservableObject {
     }
     /// Burn-rate alerts: notify on a fast % drop within a trailing window.
     @Published var burnAlerts: [BurnAlert] {
+        didSet { persist() }
+    }
+    /// Per-provider daily spend cap (USD), from local logs (OpenCode only
+    /// reports cost today).
+    @Published var costAlerts: [CostAlert] {
+        didSet { persist() }
+    }
+    /// Per-model token burn alerts.
+    @Published var modelBurnAlerts: [ModelBurnAlert] {
         didSet { persist() }
     }
 
@@ -104,6 +121,8 @@ final class SettingsStore: ObservableObject {
     private static let widgetsKey = "widgetProviders"
     private static let capacitiesKey = "planCapacities"
     private static let burnAlertsKey = "burnAlerts"
+    private static let costAlertsKey = "costAlerts"
+    private static let modelBurnAlertsKey = "modelBurnAlerts"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -116,6 +135,10 @@ final class SettingsStore: ObservableObject {
             .flatMap { try? decoder.decode([String: Int].self, from: $0) } ?? Self.defaultCapacities
         burnAlerts = (defaults.data(forKey: Self.burnAlertsKey))
             .flatMap { try? decoder.decode([BurnAlert].self, from: $0) } ?? Self.defaultBurnAlerts
+        costAlerts = (defaults.data(forKey: Self.costAlertsKey))
+            .flatMap { try? decoder.decode([CostAlert].self, from: $0) } ?? []
+        modelBurnAlerts = (defaults.data(forKey: Self.modelBurnAlertsKey))
+            .flatMap { try? decoder.decode([ModelBurnAlert].self, from: $0) } ?? []
         // Treat a persisted empty set as "no user config" so shipped defaults apply.
         if planCapacities.isEmpty {
             planCapacities = Self.defaultCapacities
@@ -149,6 +172,12 @@ final class SettingsStore: ObservableObject {
         }
         if let data = try? encoder.encode(burnAlerts) {
             defaults.set(data, forKey: Self.burnAlertsKey)
+        }
+        if let data = try? encoder.encode(costAlerts) {
+            defaults.set(data, forKey: Self.costAlertsKey)
+        }
+        if let data = try? encoder.encode(modelBurnAlerts) {
+            defaults.set(data, forKey: Self.modelBurnAlertsKey)
         }
     }
 }

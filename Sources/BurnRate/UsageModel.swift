@@ -1,7 +1,7 @@
 import Foundation
 
 /// Token counts for one usage event.
-struct TokenUsage: Equatable {
+struct TokenUsage: Codable, Equatable {
     var input: Int
     var output: Int
     var cacheRead: Int
@@ -22,6 +22,10 @@ struct TokenUsage: Equatable {
 struct UsageSample: Equatable {
     let timestamp: Date
     let tokens: TokenUsage
+    /// Model identifier when the source records it (e.g. "claude-opus-5").
+    var model: String?
+    /// Vendor-reported cost in USD when available (OpenCode only).
+    var cost: Double?
 }
 
 /// Aggregated usage for one plan window (5hr / Weekly / Monthly).

@@ -106,7 +106,12 @@ actor ClaudeUsageSource: UsageSource {
                 cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0,
                 cacheWrite: usage["cache_creation_input_tokens"] as? Int ?? 0
             )
-            samples.append(UsageSample(timestamp: timestamp, tokens: tokens))
+            samples.append(UsageSample(
+                timestamp: timestamp,
+                tokens: tokens,
+                model: message["model"] as? String,
+                cost: obj["costUSD"] as? Double
+            ))
         }
         return samples
     }
@@ -160,13 +165,22 @@ actor CodexUsageSource: UsageSource {
     }
 
     /// One sample per file: the last cumulative total_token_usage event.
+    /// Model comes from the session's turn_context/session_meta lines.
     static func parseSessionFile(at url: URL) throws -> UsageSample? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         var last: UsageSample?
+        var model: String?
         for line in text.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  obj["type"] as? String == "event_msg",
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+
+            if model == nil, let payload = obj["payload"] as? [String: Any],
+               let m = payload["model"] as? String {
+                model = m
+            }
+
+            guard obj["type"] as? String == "event_msg",
                   let payload = obj["payload"] as? [String: Any],
                   payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
@@ -180,7 +194,12 @@ actor CodexUsageSource: UsageSource {
                 cacheRead: totals["cached_input_tokens"] as? Int ?? 0,
                 cacheWrite: 0
             )
-            last = UsageSample(timestamp: timestamp, tokens: tokens)
+            last = UsageSample(
+                timestamp: timestamp,
+                tokens: tokens,
+                model: model,
+                cost: nil
+            )
         }
         return last
     }
@@ -193,13 +212,10 @@ actor CodexUsageSource: UsageSource {
 /// readers run against the live DB, so no snapshot copy is needed.
 actor OpenCodeUsageSource: UsageSource {
     nonisolated let name = "OpenCode Go"
-    let providerIDFilter: String
+    let providerIDFilter: String?
     let dbURL: URL
 
-    init(
-        providerIDFilter: String = "opencode-go",
-        dbURL: URL? = nil
-    ) {
+    init(providerIDFilter: String? = nil, dbURL: URL? = nil) {
         self.providerIDFilter = providerIDFilter
         self.dbURL = dbURL
             ?? FileManager.default.homeDirectoryForCurrentUser
@@ -213,7 +229,8 @@ actor OpenCodeUsageSource: UsageSource {
     }
 
     /// Internal (not private) so tests can run it against a fixture DB.
-    static func querySamples(from dbPath: URL, providerIDFilter: String, cutoffMs: Int) throws -> [UsageSample] {
+    /// `providerIDFilter == nil` keeps all providers (model/cost views).
+    static func querySamples(from dbPath: URL, providerIDFilter: String?, cutoffMs: Int) throws -> [UsageSample] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = [
@@ -240,7 +257,7 @@ actor OpenCodeUsageSource: UsageSource {
         for line in output.split(separator: "\n") {
             guard let tabIndex = line.firstIndex(of: "\t") else { continue }
             let providerID = String(line[line.startIndex..<tabIndex])
-            guard providerID == providerIDFilter else { continue }
+            if let providerIDFilter, providerID != providerIDFilter { continue }
             if let sample = parseMessageJSON(String(line[line.index(after: tabIndex)...])) {
                 samples.append(sample)
             }
@@ -248,7 +265,7 @@ actor OpenCodeUsageSource: UsageSource {
         return samples
     }
 
-    /// message.data JSON: {providerID, tokens:{input,output,reasoning,cache:{read,write}}, time:{created: ms}}
+    /// message.data JSON: {providerID, modelID, cost, tokens:{input,output,reasoning,cache:{read,write}}, time:{created: ms}}
     static func parseMessageJSON(_ json: String) -> UsageSample? {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -264,7 +281,9 @@ actor OpenCodeUsageSource: UsageSource {
                 output: tokens["output"] as? Int ?? 0,
                 cacheRead: cache?["read"] as? Int ?? 0,
                 cacheWrite: cache?["write"] as? Int ?? 0
-            )
+            ),
+            model: obj["modelID"] as? String,
+            cost: obj["cost"] as? Double
         )
     }
 }

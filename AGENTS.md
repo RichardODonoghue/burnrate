@@ -65,3 +65,11 @@
   ≥ N within a trailing M-minute window. History kept per window id (6h
   retention), baseline = oldest in-window reading, 30-min cooldown per window
   after firing. Detection is pure (`BurnRateEvaluator`, tested).
+- Per-model usage: `UsageSample` carries `model` + `cost` (cost only from
+  OpenCode; Claude logs have costUSD null). `ModelUsageAggregator` buckets
+  into per-day per-model totals; the Models window (Charts) reads a snapshot
+  persisted to UserDefaults (`modelUsageHistory`) and refreshed each poll.
+  OpenCode local source accepts `providerIDFilter: nil` (all providers).
+- Extra alerts: `CostAlert` (daily USD spend from local logs, OpenCode only)
+  and `ModelBurnAlert` (model tokens over trailing minutes, wildcard `*`
+  model allowed) — both in the notifier with once-per-day / cooldown logic.

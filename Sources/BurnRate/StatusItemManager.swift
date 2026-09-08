@@ -7,6 +7,7 @@ final class StatusItemManager: NSObject {
     private let usageStore: UsageStore
     private let settingsStore: SettingsStore
     private var onOpenSettings: (() -> Void)?
+    private var onOpenModels: (() -> Void)?
 
     private var mainItem: NSStatusItem?
     /// Extra widgets, keyed by provider name.
@@ -18,8 +19,9 @@ final class StatusItemManager: NSObject {
         super.init()
     }
 
-    func start(onOpenSettings: @escaping () -> Void) {
+    func start(onOpenSettings: @escaping () -> Void, onOpenModels: @escaping () -> Void) {
         self.onOpenSettings = onOpenSettings
+        self.onOpenModels = onOpenModels
         // Main menu-bar icon must always exist.
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "◉"
@@ -130,6 +132,14 @@ final class StatusItemManager: NSObject {
             menu.addItem(.separator())
         }
 
+        let models = NSMenuItem(
+            title: "Usage by Model…",
+            action: #selector(openModels),
+            keyEquivalent: "m"
+        )
+        models.target = self
+        menu.addItem(models)
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -141,6 +151,10 @@ final class StatusItemManager: NSObject {
 
     @objc private func openSettings() {
         onOpenSettings?()
+    }
+
+    @objc private func openModels() {
+        onOpenModels?()
     }
 
     /// Pure formatting helper, callable from tests and nonisolated contexts.
