@@ -170,7 +170,7 @@ private struct MilestonesView: View {
                 HStack {
                     Text("Alert threshold")
                     Spacer()
-                    Text("\(Int(newThreshold))% remaining")
+                    Text("\(Int(newThreshold.rounded()))% remaining")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
@@ -240,7 +240,7 @@ private struct MilestonesView: View {
                 HStack {
                     Text("Drop")
                     Spacer()
-                    Text("\(Int(burnDrop))% within \(Int(burnMinutes)) min")
+                    Text("\(Int(burnDrop.rounded()))% within \(Int((burnMinutes / 15).rounded() * 15)) min")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
@@ -250,7 +250,7 @@ private struct MilestonesView: View {
                 HStack {
                     Text("Trailing window")
                     Spacer()
-                    Text("\(Int(burnMinutes / 15) * 15) min")
+                    Text("\(Int((burnMinutes / 15).rounded() * 15)) min")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
