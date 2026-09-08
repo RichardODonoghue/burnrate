@@ -120,7 +120,8 @@ struct ModelsView: View {
                 }
             }
         }
-        .frame(width: 900, height: 640)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 700, minHeight: 480)
     }
 
     // MARK: Data selection

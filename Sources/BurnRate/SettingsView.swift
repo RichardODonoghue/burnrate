@@ -58,7 +58,6 @@ struct SettingsView: View {
                 AboutView()
             }
         }
-        .frame(width: 1000, height: 700)
         .frame(minWidth: 860, minHeight: 560)
     }
 
