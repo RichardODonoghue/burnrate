@@ -22,6 +22,9 @@ struct TokenUsage: Codable, Equatable {
 struct UsageSample: Equatable {
     let timestamp: Date
     let tokens: TokenUsage
+    /// Vendor request identifier, when present (Claude). Used to dedupe
+    /// repeated log lines for the same request.
+    var requestId: String?
     /// Model identifier when the source records it (e.g. "claude-opus-5").
     var model: String?
     /// Vendor-reported cost in USD when available (OpenCode only).

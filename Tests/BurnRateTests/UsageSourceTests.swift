@@ -23,6 +23,21 @@ struct UsageSourceTests {
         #expect(try ClaudeUsageSource.parseFile(at: url).isEmpty)
     }
 
+    @Test func dedupesRepeatedRequestIdsKeepingLast() throws {
+        // Same request logged three times (streaming/resume); last is final.
+        let lines = #"""
+        {"timestamp":"2026-09-08T10:00:00.000Z","type":"assistant","requestId":"req_1","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+        {"timestamp":"2026-09-08T10:00:05.000Z","type":"assistant","requestId":"req_1","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":3000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+        {"timestamp":"2026-09-08T10:01:00.000Z","type":"assistant","requestId":"req_2","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+        """#
+        let url = try writeTemp(lines)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let samples = try ClaudeUsageSource.parseFile(at: url)
+        #expect(samples.count == 2)
+        let req1 = samples.first { $0.requestId == "req_1" }
+        #expect(req1?.tokens.output == 3000)
+    }
+
     @Test func codexTakesLastCumulativeEvent() throws {
         let lines = #"""
         {"timestamp":"2026-09-08T10:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":50,"reasoning_output_tokens":5}}}}

@@ -122,16 +122,10 @@ final class StatusItemManager: NSObject {
                 let percent = window.percentRemaining
                     .map { String(format: "%.0f", $0) } ?? "--"
                 var detail = "\(percent)%"
-                if window.tokensUsed > 0 {
-                    detail += " · \(Self.formatTokens(window.tokensUsed))"
-                }
                 if let resetsAt = window.resetsAt {
                     detail += " · resets \(Self.formatTime(resetsAt))"
                 }
                 let item = NSMenuItem(title: "  \(window.label): \(detail)", action: nil, keyEquivalent: "")
-                if let resetsAt = window.resetsAt {
-                    item.toolTip = "Resets \(Self.exactTime(resetsAt))"
-                }
                 menu.addItem(item)
             }
             menu.addItem(.separator())
@@ -189,23 +183,7 @@ final class StatusItemManager: NSObject {
             .replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
     }
 
-    /// Menus are MainActor-only; the formatters are cached and reused.
-    @MainActor
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
-    /// Exact timestamp for tooltips (relative text keeps the menu narrow).
-    @MainActor
-    private static let dateTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
+    /// Menus are MainActor-only.
     /// Compact relative reset text: "in 45m", "in 5h", "in 3d" — a fixed
     /// medium date ("Sep 12, 2026 at 6:00 PM") was the widest menu line and
     /// stretched the whole dropdown.
@@ -220,10 +198,5 @@ final class StatusItemManager: NSObject {
             return minutes > 0 ? "in \(hours)h \(minutes)m" : "in \(hours)h"
         }
         return "in \(Int((seconds / 86_400).rounded(.up)))d"
-    }
-
-    @MainActor
-    static func exactTime(_ date: Date) -> String {
-        dateTimeFormatter.string(from: date)
     }
 }

@@ -14,6 +14,12 @@ protocol UsageSource: Actor {
 /// so sources skip and prune them.
 let sampleRetention: TimeInterval = 31 * 86400
 
+/// Lossy UTF-8 read — a single bad byte must not zero out a whole file.
+func readTextFile(_ url: URL) -> String {
+    guard let data = try? Data(contentsOf: url) else { return "" }
+    return String(decoding: data, as: UTF8.self)
+}
+
 /// ISO8601 timestamps used by Claude Code and Codex session logs.
 enum LogDate {
     static func parse(_ string: String) -> Date? {
@@ -63,9 +69,10 @@ actor ClaudeUsageSource: UsageSource {
             let cached = cache[file.path]
             var samples: [UsageSample]
             if let cached, newSize >= cached.size, mtime == cached.mtime {
-                // Append-only: parse only the new bytes.
+                // Append-only: parse only the new bytes, then re-dedupe —
+                // a request's final line can land after the cached offset.
                 if newSize > cached.size, let appended = try Self.readTail(file, fromOffset: cached.size) {
-                    samples = cached.samples + Self.parseLines(appended)
+                    samples = Self.dedupe(cached.samples + Self.parseLines(appended))
                 } else {
                     samples = cached.samples
                 }
@@ -78,13 +85,37 @@ actor ClaudeUsageSource: UsageSource {
         }
         // Drop entries for files that were deleted or rotated away.
         cache = cache.filter { seenPaths.contains($0.key) }
-        return all
+        // The same requestId can appear in multiple files (resumed/copied
+        // sessions): dedupe globally, keeping the latest reading.
+        return Self.dedupe(all)
     }
 
     /// Each line: {"timestamp":"...","type":"assistant","message":{"usage":{...}}}
+    /// Lines repeat per requestId (streaming/resume rewrites), so results are
+    /// deduped: one sample per request, keeping the last (final cumulative)
+    /// reading.
     static func parseFile(at url: URL) throws -> [UsageSample] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        return parseLines(text)
+        let text = readTextFile(url)
+        return dedupe(parseLines(text))
+    }
+
+    /// Keeps the last occurrence per requestId; samples without one pass through.
+    static func dedupe(_ samples: [UsageSample]) -> [UsageSample] {
+        var byRequest: [String: (index: Int, sample: UsageSample)] = [:]
+        var result: [UsageSample] = []
+        for sample in samples {
+            guard let requestId = sample.requestId, !requestId.isEmpty else {
+                result.append(sample)
+                continue
+            }
+            if let existing = byRequest[requestId] {
+                result[existing.index] = sample
+            } else {
+                byRequest[requestId] = (result.count, sample)
+                result.append(sample)
+            }
+        }
+        return result
     }
 
     static func parseLines(_ text: String) -> [UsageSample] {
@@ -109,6 +140,7 @@ actor ClaudeUsageSource: UsageSource {
             samples.append(UsageSample(
                 timestamp: timestamp,
                 tokens: tokens,
+                requestId: obj["requestId"] as? String ?? obj["request_id"] as? String,
                 model: message["model"] as? String,
                 cost: obj["costUSD"] as? Double
             ))
@@ -120,7 +152,7 @@ actor ClaudeUsageSource: UsageSource {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(offset))
-        return String(data: handle.readDataToEndOfFile(), encoding: .utf8)
+        return String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
     }
 }
 
@@ -167,7 +199,7 @@ actor CodexUsageSource: UsageSource {
     /// One sample per file: the last cumulative total_token_usage event.
     /// Model comes from the session's turn_context/session_meta lines.
     static func parseSessionFile(at url: URL) throws -> UsageSample? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let text = readTextFile(url)
         var last: UsageSample?
         var model: String?
         for line in text.split(separator: "\n") {

@@ -47,7 +47,10 @@
      - Codex: same pattern, `~/.codex/auth.json` — not implemented yet.
   2. **Local log parsing (tokens/cost, fallback)** — see below.
 - Local parsing (no network): Claude `~/.claude/projects/**/*.jsonl` (append-only,
-  incremental byte-offset cache, skip files older than 31 days); Codex
+  incremental byte-offset cache, skip files untouched for 31 days, lossy UTF-8
+  reads, **requestId dedupe** — Claude Code rewrites the same request across
+  lines/files, so each requestId counts once with its final cumulative usage;
+  without this, totals over-count ~2x); Codex
   `~/.codex/sessions/**/*.jsonl` (last cumulative `token_count` event per file);
   OpenCode legacy `~/.local/share/opencode/opencode.db` (SQLite+WAL, query
   read-only via `/usr/bin/sqlite3` with `time_created` filter — never copy the
