@@ -8,6 +8,7 @@ final class StatusItemManager: NSObject {
     private let settingsStore: SettingsStore
     private var onOpenDashboard: (() -> Void)?
     private var onOpenSettings: (() -> Void)?
+    private var onTestNotification: (() -> Void)?
 
     private var mainItem: NSStatusItem?
     /// Extra widgets, keyed by provider name.
@@ -19,9 +20,14 @@ final class StatusItemManager: NSObject {
         super.init()
     }
 
-    func start(onOpenDashboard: @escaping () -> Void, onOpenSettings: @escaping () -> Void) {
+    func start(
+        onOpenDashboard: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void,
+        onTestNotification: @escaping () -> Void = {}
+    ) {
         self.onOpenDashboard = onOpenDashboard
         self.onOpenSettings = onOpenSettings
+        self.onTestNotification = onTestNotification
         // Main menu-bar icon must always exist.
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = AppIconRenderer.menuBarImage()
@@ -154,6 +160,11 @@ final class StatusItemManager: NSObject {
         settings.target = self
         menu.addItem(settings)
 
+        let test = NSMenuItem(title: "Send Test Notification", action: #selector(testNotification), keyEquivalent: "")
+        test.image = NSImage(systemSymbolName: "bell.badge", accessibilityDescription: nil)
+        test.target = self
+        menu.addItem(test)
+
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
         return menu
@@ -165,6 +176,10 @@ final class StatusItemManager: NSObject {
 
     @objc private func openModels() {
         onOpenDashboard?()
+    }
+
+    @objc private func testNotification() {
+        onTestNotification?()
     }
 
     /// Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t.
