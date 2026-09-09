@@ -106,7 +106,10 @@ enum AppIconRenderer {
 
     /// Full-color plate for Dock/notifications/About. Needle + tint track
     /// remaining %; plate is the dark rounded square.
-    static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = true) -> NSImage {
+    /// Full-color app icon: the bare flame (no plate), severity-tinted, with
+    /// the dark dial core knocked into it and the needle — matches the G2
+    /// notification mock. macOS is happy with free-form (non-square) icons.
+    static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = false) -> NSImage {
         let scale = size / 72
         let angle = needleAngle(forRemaining: remaining)
         let tint = tint(forRemaining: remaining)
@@ -114,8 +117,6 @@ enum AppIconRenderer {
             let context = NSGraphicsContext.current!.cgContext
             context.scaleBy(x: scale, y: scale)
             if plate {
-                // Light plate (G2 light-ink variant) — the mark must stay
-                // legible on dark notification banners.
                 NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
                 NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                              xRadius: 16, yRadius: 16).fill()
@@ -126,15 +127,15 @@ enum AppIconRenderer {
             NSGradient(starting: tint.bottom, ending: tint.top)?
                 .draw(in: NSRect(x: 15.5, y: 6, width: 41, height: 54), angle: 90)
             context.restoreGState()
-            // Dial core.
+            // Dial core — dark, so on dark banners it reads as a knockout.
             NSColor(calibratedRed: 0x20 / 255, green: 0x0A / 255, blue: 0x02 / 255, alpha: 0.88).setFill()
             NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
                                         width: dialRadius * 2, height: dialRadius * 2)).fill()
-            // Needle + pivot — dark ink on the light plate.
-            NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setStroke()
+            // Needle + pivot.
+            NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setStroke()
             needlePath(angle: angle).lineWidth = needleWidth
             needlePath(angle: angle).stroke()
-            NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setFill()
+            NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setFill()
             NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
                                         width: pivotRadius * 2, height: pivotRadius * 2)).fill()
             return true

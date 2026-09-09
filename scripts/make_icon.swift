@@ -1,5 +1,6 @@
-// Generates Resources/AppIcon.icns — the G2 "Dial Core" mark at rest pose
-// (70% remaining). Run: swift scripts/make_icon.swift
+// Generates Resources/AppIcon.icns — the G2 "Dial Core" mark: bare amber
+// flame (no plate), dark dial core knocked in, cream needle. Brand pose.
+// Run: swift scripts/make_icon.swift
 import AppKit
 
 // 72-unit design space (y-down), from the G2 sheet.
@@ -29,27 +30,22 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         let context = NSGraphicsContext.current!.cgContext
         context.scaleBy(x: scale, y: scale)
 
-        // Plate.
-        NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
-                     xRadius: 16, yRadius: 16).fill()
-
-        // Flame with severity gradient (G2 rest pose: 70% → green).
+        // Bare flame with the amber-orange brand gradient (no plate).
         context.saveGState()
         flamePath.addClip()
-        NSGradient(starting: NSColor(calibratedRed: 0x33 / 255, green: 0xAE / 255, blue: 0x70 / 255, alpha: 1),
-                   ending: NSColor(calibratedRed: 0x8F / 255, green: 0xE0 / 255, blue: 0x7A / 255, alpha: 1))?
+        NSGradient(starting: NSColor(calibratedRed: 0xFF / 255, green: 0xC2 / 255, blue: 0x4B / 255, alpha: 1),
+                   ending: NSColor(calibratedRed: 0xFF / 255, green: 0x7A / 255, blue: 0x3D / 255, alpha: 1))?
             .draw(in: NSRect(x: 15.5, y: 6, width: 41, height: 54), angle: 90)
         context.restoreGState()
 
-        // Dial core.
+        // Dark dial core knocked into the flame.
         NSColor(calibratedRed: 0x20 / 255, green: 0x0A / 255, blue: 0x02 / 255, alpha: 0.88).setFill()
         NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
                                     width: dialRadius * 2, height: dialRadius * 2)).fill()
 
-        // Needle + pivot (18° from vertical).
+        // Cream needle + pivot (18° from vertical).
         let radians = restAngle * .pi / 180
-        NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setStroke()
+        NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setStroke()
         let needle = NSBezierPath()
         needle.move(to: pivot)
         needle.line(to: NSPoint(x: pivot.x + needleLength * CGFloat(sin(radians)),
@@ -57,7 +53,7 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         needle.lineWidth = needleWidth
         needle.lineCapStyle = .round
         needle.stroke()
-        NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setFill()
+        NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setFill()
         NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
                                     width: pivotRadius * 2, height: pivotRadius * 2)).fill()
         return true
