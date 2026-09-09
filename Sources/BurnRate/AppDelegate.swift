@@ -30,10 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         PricingService.shared.bootstrap()
-        // Dock icon for dev runs without a bundle; bundled runs keep the
-        // system-loaded icns (the banner renderer draws from this image, and
-        // the runtime-composed one rasterizes blank there).
-        if Bundle.main.bundleIdentifier == nil {
+        // Dock icon for dev runs without a bundle; bundled runs load the
+        // shipped icns explicitly — banners render from the running
+        // process's app icon, and an accessory app doesn't load it by default.
+        if Bundle.main.bundleIdentifier != nil {
+            NSApp.applicationIconImage = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
+        } else {
             NSApp.applicationIconImage = AppIconRenderer.appIconImage(size: 256)
         }
         providers = [
