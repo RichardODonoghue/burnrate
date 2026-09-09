@@ -104,9 +104,9 @@ enum AppIconRenderer {
         return image
     }
 
-    /// Full-color app icon: G2 flame on the light plate. One icon serves
+    /// Full-color app icon: G2 flame on the dark plate. One icon serves
     /// Dock, notifications and About — macOS allows only a single app icon,
-    /// so the plate (light, hairline border) keeps the thin flame legible on
+    /// and the dark plate keeps the amber flame + cream needle crisp on
     /// both dark banners and the light Dock grid.
     static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = true) -> NSImage {
         let scale = size / 72
@@ -115,12 +115,12 @@ enum AppIconRenderer {
         let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { _ in
             let context = NSGraphicsContext.current!.cgContext
             context.scaleBy(x: scale, y: scale)
-            // Light plate + hairline border for definition on any surface.
+            // Dark plate + light hairline border for definition on any surface.
             if plate {
-                NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
+                NSColor(calibratedRed: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1).setFill()
                 NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                              xRadius: 16, yRadius: 16).fill()
-                NSColor(calibratedWhite: 0.45, alpha: 1).setStroke()
+                NSColor(calibratedWhite: 1, alpha: 0.28).setStroke()
                 let border = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                                           xRadius: 16, yRadius: 16)
                 border.lineWidth = 1
@@ -132,10 +132,15 @@ enum AppIconRenderer {
             NSGradient(starting: tint.bottom, ending: tint.top)?
                 .draw(in: NSRect(x: 15.5, y: 6, width: 41, height: 54), angle: 90)
             context.restoreGState()
-            // Dial core — dark, so on dark banners it reads as a knockout.
+            // Dial core — dark, with a faint rim so it reads on the dark plate.
             NSColor(calibratedRed: 0x20 / 255, green: 0x0A / 255, blue: 0x02 / 255, alpha: 0.88).setFill()
             NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
                                         width: dialRadius * 2, height: dialRadius * 2)).fill()
+            NSColor(calibratedWhite: 1, alpha: 0.18).setStroke()
+            let dialRing = NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
+                                                       width: dialRadius * 2, height: dialRadius * 2))
+            dialRing.lineWidth = 0.8
+            dialRing.stroke()
             // Needle + pivot.
             NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setStroke()
             needlePath(angle: angle).lineWidth = needleWidth

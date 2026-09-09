@@ -7,7 +7,10 @@
 set -e
 
 APP_NAME="BurnRate"
-BUNDLE_ID="com.burnrate.app"
+# Fresh bundle ID: iconservices/Notification Center cache the app icon per
+# bundle ID, and the old ID ("com.burnrate.app") had a blank icon baked in
+# from an early iconless build that no cache clearing would dislodge.
+BUNDLE_ID="com.burnrate.desktop"
 VERSION="${1:-0.1.0}"
 DIST="dist"
 

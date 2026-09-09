@@ -30,12 +30,12 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         let context = NSGraphicsContext.current!.cgContext
         context.scaleBy(x: scale, y: scale)
 
-        // Light plate + hairline border (single icon must read on dark
+        // Dark plate + light hairline border (single icon must read on dark
         // banners and the light Dock grid).
-        NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
+        NSColor(calibratedRed: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1).setFill()
         NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                      xRadius: 16, yRadius: 16).fill()
-        NSColor(calibratedWhite: 0.45, alpha: 1).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.28).setStroke()
         let border = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                                   xRadius: 16, yRadius: 16)
         border.lineWidth = 1
@@ -49,10 +49,15 @@ func drawAppIcon(size: CGFloat) -> NSImage {
             .draw(in: NSRect(x: 15.5, y: 6, width: 41, height: 54), angle: 90)
         context.restoreGState()
 
-        // Dark dial core knocked into the flame.
+        // Dark dial core knocked into the flame, faint rim for the dark plate.
         NSColor(calibratedRed: 0x20 / 255, green: 0x0A / 255, blue: 0x02 / 255, alpha: 0.88).setFill()
         NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
                                     width: dialRadius * 2, height: dialRadius * 2)).fill()
+        NSColor(calibratedWhite: 1, alpha: 0.18).setStroke()
+        let dialRing = NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
+                                                   width: dialRadius * 2, height: dialRadius * 2))
+        dialRing.lineWidth = 0.8
+        dialRing.stroke()
 
         // Cream needle + pivot (18° from vertical).
         let radians = restAngle * .pi / 180

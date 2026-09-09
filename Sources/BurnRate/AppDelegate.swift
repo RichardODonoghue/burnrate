@@ -23,11 +23,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         PricingService.shared.bootstrap()
+        // One-time migration: settings/history lived under the old bundle ID
+        // ("com.burnrate.app"); UserDefaults domains are keyed by bundle ID,
+        // so pull the legacy domain into the new standard domain once.
+        migrateLegacyDefaults()
         // Dock icon for dev runs without a bundle; bundled runs load the
         // shipped icns explicitly — banners render from the running
         // process's app icon, and an accessory app doesn't load it by default.
         if Bundle.main.bundleIdentifier != nil {
-            NSApp.applicationIconImage = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
+            let icns = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+                .flatMap { NSImage(contentsOf: $0) }
+            NSApp.applicationIconImage = NSImage(named: "AppIcon") ?? icns ?? NSApp.applicationIconImage
         } else {
             NSApp.applicationIconImage = AppIconRenderer.appIconImage(size: 256)
         }
@@ -67,6 +73,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         pollTimer?.invalidate()
+    }
+
+    /// Copies user settings/history from the legacy bundle-ID defaults
+    /// domain (com.burnrate.app) into the current standard domain. Runs at
+    /// most once; existing values in the new domain win.
+    private func migrateLegacyDefaults() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: "migratedLegacyBundleID") else { return }
+        guard let legacy = UserDefaults(suiteName: "com.burnrate.app"),
+              let source = legacy.persistentDomain(forName: "com.burnrate.app"),
+              !source.isEmpty
+        else {
+            defaults.set(true, forKey: "migratedLegacyBundleID")
+            return
+        }
+        let existing = defaults.dictionaryRepresentation()
+        for (key, value) in source where existing[key] == nil {
+            defaults.set(value, forKey: key)
+        }
+        defaults.set(true, forKey: "migratedLegacyBundleID")
     }
 
     private func poll() {
