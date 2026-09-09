@@ -84,7 +84,6 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
                 id: "OpenCode-\(label)",
                 label: label,
                 tokensUsed: 0,
-                weightedUsed: 0,
                 percentRemaining: 100 - used,
                 resetsAt: (entry["resetsAt"] as? String).flatMap(LogDate.parse)
             ))

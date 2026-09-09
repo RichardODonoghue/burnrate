@@ -153,7 +153,7 @@ final class MilestoneNotifier {
     }
 
     private func evaluateBurnAlerts(provider: String, window: UsageWindow, now: Date) {
-        guard let current = window.percentRemaining else { return }
+        guard window.percentRemaining != nil else { return }
         let windowID = window.id
         if let cooledUntil = burnCooldown[windowID], now < cooledUntil { return }
 

@@ -31,14 +31,13 @@ struct UsageSample: Equatable {
     var cost: Double?
 }
 
-/// Aggregated usage for one plan window (5hr / Weekly / Monthly).
+/// Aggregated usage for one plan window (Rolling / Weekly / Monthly).
 struct UsageWindow: Equatable, Identifiable {
     let id: String
     let label: String
-    /// Raw tokens (all cache traffic included) — informational display.
+    /// Raw tokens (all cache traffic included) — informational display,
+    /// verified by tests.
     let tokensUsed: Int
-    /// Cache-discounted tokens — the unit plan capacities are measured in.
-    let weightedUsed: Double
     /// nil when the user has not configured a plan capacity for this window.
     let percentRemaining: Double?
     /// When the window resets (provider APIs supply this; local parsing can't).
@@ -76,6 +75,8 @@ enum UsageComputation {
             let cutoff = now.addingTimeInterval(-spec.seconds)
             let inWindow = samples.filter { $0.timestamp >= cutoff }
             let rawUsed = inWindow.reduce(0) { $0 + $1.tokens.total }
+            // Capacities are measured in weighted tokens (cache read ×0.1,
+            // write ×1.25) — raw cache traffic would blow past any capacity.
             let weightedUsed = inWindow.reduce(0.0) { $0 + $1.tokens.weighted }
             let capacity = capacities["\(provider)|\(spec.label)"] ?? 0
             let percent: Double? = capacity > 0
@@ -85,7 +86,6 @@ enum UsageComputation {
                 id: "\(provider)-\(spec.label)",
                 label: spec.label,
                 tokensUsed: rawUsed,
-                weightedUsed: weightedUsed,
                 percentRemaining: percent,
                 resetsAt: nil
             )

@@ -17,7 +17,6 @@ final class ModelUsageViewModel: ObservableObject {
     @Published var totals: [ModelUsageEntry] = []
     @Published var remainingHistory: [RemainingSample] = []
     @Published var loading = true
-    @Published var lastUpdated: Date?
 
     private let sources: [(name: String, source: any UsageSource)]
     private let defaults: UserDefaults
@@ -65,7 +64,6 @@ final class ModelUsageViewModel: ObservableObject {
     func ingest(daily: [DailyModelUsage], totals: [ModelUsageEntry]) {
         self.daily = daily
         self.totals = totals
-        lastUpdated = Date()
         loading = false
         if let data = try? JSONEncoder().encode(daily) {
             defaults.set(data, forKey: Self.historyKey)

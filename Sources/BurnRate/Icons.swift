@@ -104,8 +104,6 @@ enum AppIconRenderer {
         return image
     }
 
-    /// Full-color plate for Dock/notifications/About. Needle + tint track
-    /// remaining %; plate is the dark rounded square.
     /// Full-color app icon: G2 flame on the light plate. One icon serves
     /// Dock, notifications and About — macOS allows only a single app icon,
     /// so the plate (light, hairline border) keeps the thin flame legible on

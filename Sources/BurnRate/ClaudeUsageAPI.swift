@@ -190,7 +190,6 @@ actor ClaudeUsageAPIProvider: UsageProvider {
                     id: "Claude-\(label)",
                     label: label,
                     tokensUsed: 0,
-                    weightedUsed: 0,
                     percentRemaining: 100 - used,
                     resetsAt: (limit["resets_at"] as? String).flatMap(LogDate.parse)
                 ))
@@ -209,7 +208,6 @@ actor ClaudeUsageAPIProvider: UsageProvider {
                 id: "Claude-\(label)",
                 label: label,
                 tokensUsed: 0,
-                weightedUsed: 0,
                 percentRemaining: max(0, 100 - utilization),
                 resetsAt: resetsAt
             ))
