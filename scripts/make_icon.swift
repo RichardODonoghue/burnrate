@@ -30,7 +30,18 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         let context = NSGraphicsContext.current!.cgContext
         context.scaleBy(x: scale, y: scale)
 
-        // Bare flame with the amber-orange brand gradient (no plate).
+        // Light plate + hairline border (single icon must read on dark
+        // banners and the light Dock grid).
+        NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
+                     xRadius: 16, yRadius: 16).fill()
+        NSColor(calibratedWhite: 0.45, alpha: 1).setStroke()
+        let border = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
+                                  xRadius: 16, yRadius: 16)
+        border.lineWidth = 1
+        border.stroke()
+
+        // Bare flame with the amber-orange brand gradient.
         context.saveGState()
         flamePath.addClip()
         NSGradient(starting: NSColor(calibratedRed: 0xFF / 255, green: 0xC2 / 255, blue: 0x4B / 255, alpha: 1),

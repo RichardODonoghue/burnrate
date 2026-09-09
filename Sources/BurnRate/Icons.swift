@@ -106,20 +106,27 @@ enum AppIconRenderer {
 
     /// Full-color plate for Dock/notifications/About. Needle + tint track
     /// remaining %; plate is the dark rounded square.
-    /// Full-color app icon: the bare flame (no plate), severity-tinted, with
-    /// the dark dial core knocked into it and the needle — matches the G2
-    /// notification mock. macOS is happy with free-form (non-square) icons.
-    static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = false) -> NSImage {
+    /// Full-color app icon: G2 flame on the light plate. One icon serves
+    /// Dock, notifications and About — macOS allows only a single app icon,
+    /// so the plate (light, hairline border) keeps the thin flame legible on
+    /// both dark banners and the light Dock grid.
+    static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = true) -> NSImage {
         let scale = size / 72
         let angle = needleAngle(forRemaining: remaining)
         let tint = tint(forRemaining: remaining)
         let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { _ in
             let context = NSGraphicsContext.current!.cgContext
             context.scaleBy(x: scale, y: scale)
+            // Light plate + hairline border for definition on any surface.
             if plate {
                 NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
                 NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                              xRadius: 16, yRadius: 16).fill()
+                NSColor(calibratedWhite: 0.45, alpha: 1).setStroke()
+                let border = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
+                                          xRadius: 16, yRadius: 16)
+                border.lineWidth = 1
+                border.stroke()
             }
             // Flame filled with the severity gradient, clipped to its shape.
             context.saveGState()
