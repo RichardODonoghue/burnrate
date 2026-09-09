@@ -30,7 +30,7 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         context.scaleBy(x: scale, y: scale)
 
         // Plate.
-        NSColor(calibratedRed: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 255, alpha: 1).setFill()
+        NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
         NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                      xRadius: 16, yRadius: 16).fill()
 
@@ -49,7 +49,7 @@ func drawAppIcon(size: CGFloat) -> NSImage {
 
         // Needle + pivot (18° from vertical).
         let radians = restAngle * .pi / 180
-        NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setStroke()
+        NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setStroke()
         let needle = NSBezierPath()
         needle.move(to: pivot)
         needle.line(to: NSPoint(x: pivot.x + needleLength * CGFloat(sin(radians)),
@@ -57,7 +57,7 @@ func drawAppIcon(size: CGFloat) -> NSImage {
         needle.lineWidth = needleWidth
         needle.lineCapStyle = .round
         needle.stroke()
-        NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setFill()
+        NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setFill()
         NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
                                     width: pivotRadius * 2, height: pivotRadius * 2)).fill()
         return true

@@ -114,7 +114,9 @@ enum AppIconRenderer {
             let context = NSGraphicsContext.current!.cgContext
             context.scaleBy(x: scale, y: scale)
             if plate {
-                NSColor(calibratedRed: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 255, alpha: 1).setFill()
+                // Light plate (G2 light-ink variant) — the mark must stay
+                // legible on dark notification banners.
+                NSColor(calibratedRed: 0xED / 255, green: 0xED / 255, blue: 0xF0 / 255, alpha: 1).setFill()
                 NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
                              xRadius: 16, yRadius: 16).fill()
             }
@@ -128,11 +130,11 @@ enum AppIconRenderer {
             NSColor(calibratedRed: 0x20 / 255, green: 0x0A / 255, blue: 0x02 / 255, alpha: 0.88).setFill()
             NSBezierPath(ovalIn: NSRect(x: dialCenter.x - dialRadius, y: dialCenter.y - dialRadius,
                                         width: dialRadius * 2, height: dialRadius * 2)).fill()
-            // Needle + pivot.
-            NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setStroke()
+            // Needle + pivot — dark ink on the light plate.
+            NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setStroke()
             needlePath(angle: angle).lineWidth = needleWidth
             needlePath(angle: angle).stroke()
-            NSColor(calibratedRed: 0xFF / 255, green: 0xF6 / 255, blue: 0xEA / 255, alpha: 1).setFill()
+            NSColor(calibratedRed: 0x1D / 255, green: 0x1D / 255, blue: 0x1F / 255, alpha: 1).setFill()
             NSBezierPath(ovalIn: NSRect(x: pivot.x - pivotRadius, y: pivot.y - pivotRadius,
                                         width: pivotRadius * 2, height: pivotRadius * 2)).fill()
             return true
@@ -150,19 +152,4 @@ enum AppIconRenderer {
         return path
     }
 
-    /// Replaces the flame fill with a vertical gradient, masked by the
-    /// flame's own alpha.
-    private static func recolorFlame(of image: NSImage, top: NSColor, bottom: NSColor) -> NSImage {
-        let size = image.size
-        let recolored = NSImage(size: size, flipped: false) { _ in
-            image.draw(at: .zero, from: .zero, operation: .copy, fraction: 1)
-            let context = NSGraphicsContext.current!.cgContext
-            context.setBlendMode(.sourceAtop)
-            let gradient = NSGradient(starting: bottom, ending: top) // bottom of plate → top
-            gradient?.draw(in: NSRect(origin: .zero, size: size), angle: 90)
-            context.setBlendMode(.normal)
-            return true
-        }
-        return recolored
-    }
 }
