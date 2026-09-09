@@ -178,15 +178,18 @@ final class MilestoneNotifier {
     /// Test notification to verify banner/drawer icon rendering.
     func sendTest() {
         send(title: "BurnRate test",
-             body: "Dial Core check — this banner should show the flame-and-dial icon.")
+             body: "Dial Core check — this banner should show the flame-and-dial icon.",
+             dedupe: false)
     }
 
-    private func send(title: String, body: String) {
+    private func send(title: String, body: String, dedupe: Bool = true) {
         // Suppress duplicates (double polls, stray second instances, etc.).
         let key = title + "|" + body
         let now = Date()
         recentSends = recentSends.filter { now.timeIntervalSince($0.value) < 60 }
-        guard recentSends[key] == nil else { return }
+        if dedupe {
+            guard recentSends[key] == nil else { return }
+        }
         recentSends[key] = now
 
         guard Bundle.main.bundleIdentifier != nil else {
