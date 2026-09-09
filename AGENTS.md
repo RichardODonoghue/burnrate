@@ -15,6 +15,17 @@
 - Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.
 - No codegen, migrations, or lint config yet; add commands here as tooling lands.
 
+## Bundle ID
+
+- `com.burnrate.desktop` (was `com.burnrate.app` until Sep 2026).
+- Notification Center / iconservices cache the **banner icon per bundle ID**;
+  the old ID had a blank icon cached that no icns change or cache clearing
+  could dislodge. Fresh ID fixed it. Don't change the ID casually —
+  notification permission and all UserDefaults (settings, history, notifier
+  state) are keyed on it.
+- AppDelegate runs a one-time defaults migration from the legacy
+  `com.burnrate.app` domain (guarded by the `migratedLegacyBundleID` flag).
+
 ## Product invariants (do not break)
 
 - Menu bar icon always present; app runs in the background. No dock window as primary UI.
