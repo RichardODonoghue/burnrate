@@ -10,17 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appWindow: NSWindow?
     private var pollTimer: Timer?
     private var providers: [any UsageProvider] = []
-    /// Local log sources, used for model/cost views and local alerts.
-    private let localSources: [(name: String, source: any UsageSource)] = [
-        ("Claude", ClaudeUsageSource()),
-        ("OpenCode", OpenCodeUsageSource()),
-        ("Codex", CodexUsageSource()),
-    ]
-    private let modelUsageViewModel = ModelUsageViewModel(sources: [
-        ("Claude", ClaudeUsageSource()),
-        ("OpenCode", OpenCodeUsageSource()),
-        ("Codex", CodexUsageSource()),
-    ])
+    /// One shared instance per local source: model/cost views, local alerts
+    /// and the Codex fallback all read the same incremental caches.
+    private var localSources: [(name: String, source: any UsageSource)] = []
+    private var modelUsageViewModel: ModelUsageViewModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single instance: a second copy would double every notification.
@@ -38,10 +31,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             NSApp.applicationIconImage = AppIconRenderer.appIconImage(size: 256)
         }
+        // One instance per source: duplicate actors would each re-parse the
+        // same logs (Claude's ~560MB → double memory + CPU on first poll).
+        let sharedSources: [(name: String, source: any UsageSource)] = [
+            ("Claude", ClaudeUsageSource()),
+            ("OpenCode", OpenCodeUsageSource()),
+            ("Codex", CodexUsageSource()),
+        ]
+        localSources = sharedSources
+        modelUsageViewModel = ModelUsageViewModel(sources: sharedSources)
         providers = [
             ClaudeUsageAPIProvider(),
             OpenCodeGoUsageAPIProvider(),
-            LocalUsageProvider(source: CodexUsageSource()),
+            LocalUsageProvider(source: sharedSources[2].source),
         ]
 
         let manager = StatusItemManager(usageStore: usageStore, settingsStore: settingsStore)
@@ -69,36 +71,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func poll() {
         Task { [providers, usageStore, notifier, statusManager, settingsStore, localSources, modelUsageViewModel] in
-            var snapshots: [ProviderUsage] = []
-            for provider in providers {
-                if let usage = await provider.fetchUsage(capacities: settingsStore.planCapacities) {
-                    snapshots.append(usage)
+            let capacities = settingsStore.planCapacities
+
+            // Phase 1: vendor quota APIs in parallel — authoritative %, fast.
+            // Update the menu immediately so a cold start doesn't sit on
+            // "Loading usage…" while local logs (Claude: ~560MB) parse.
+            let apiSnapshots = await withTaskGroup(of: ProviderUsage?.self) { group in
+                for provider in providers where !(provider is LocalUsageProvider) {
+                    group.addTask { await provider.fetchUsage(capacities: capacities) }
                 }
+                var out: [ProviderUsage] = []
+                for await usage in group { if let usage { out.append(usage) } }
+                return out
+            }
+            if !apiSnapshots.isEmpty {
+                // Keep previous readings for providers the APIs didn't return
+                // (e.g. rate-limit reuse), so the menu never goes partial.
+                let carried = usageStore.current.filter { usage in
+                    !apiSnapshots.contains { $0.providerName == usage.providerName }
+                }
+                usageStore.update(apiSnapshots + carried)
+                notifier?.evaluate(usage: apiSnapshots + carried)
+                statusManager?.refreshMenu()
             }
 
-            // Local logs: per-model usage for the Models view, daily cost and
-            // model-burn alerts. Cheap thanks to incremental caches.
-            var buckets: [(provider: String, samples: [UsageSample])] = []
-            var costs: [(provider: String, cost: Double)] = []
+            // Phase 2: local logs in parallel — model/cost views, local
+            // alerts, and the local Codex % (its cache is warm by now).
+            let buckets: [(provider: String, samples: [UsageSample])] = await withTaskGroup(
+                of: (String, [UsageSample]).self
+            ) { group in
+                for (name, source) in localSources {
+                    group.addTask { (name, (try? await source.collectSamples()) ?? []) }
+                }
+                var out: [(provider: String, samples: [UsageSample])] = []
+                for await (name, samples) in group {
+                    out.append((provider: name, samples: samples))
+                }
+                return out
+            }
             let todayStart = Calendar.current.startOfDay(for: Date())
-            for (name, source) in localSources {
-                let samples = (try? await source.collectSamples()) ?? []
-                buckets.append((name, samples))
-                let todayCost = samples
+            let costs: [(provider: String, cost: Double)] = buckets.map { bucket in
+                (bucket.provider, bucket.samples
                     .filter { $0.timestamp >= todayStart }
-                    .reduce(0.0) { $0 + PricingService.shared.cost(of: $1) }
-                costs.append((name, todayCost))
+                    .reduce(0.0) { $0 + PricingService.shared.cost(of: $1) })
             }
 
+            let localSnapshots = await withTaskGroup(of: ProviderUsage?.self) { group in
+                for provider in providers where provider is LocalUsageProvider {
+                    group.addTask { await provider.fetchUsage(capacities: capacities) }
+                }
+                var out: [ProviderUsage] = []
+                for await usage in group { if let usage { out.append(usage) } }
+                return out
+            }
+
+            let snapshots = apiSnapshots.filter { api in
+                !localSnapshots.contains { $0.providerName == api.providerName }
+            } + localSnapshots
             usageStore.update(snapshots)
             notifier?.evaluate(usage: snapshots)
             notifier?.evaluateCosts(costs)
             notifier?.evaluateModelBurn(buckets)
-            modelUsageViewModel.appendRemaining(snapshots: snapshots)
+            modelUsageViewModel?.appendRemaining(snapshots: snapshots)
 
             // Refresh the Models view data + persist its snapshot.
             let daily = ModelUsageAggregator.daily(buckets: buckets, days: 30)
-            modelUsageViewModel.ingest(daily: daily, totals: ModelUsageAggregator.totals(buckets: buckets))
+            modelUsageViewModel?.ingest(daily: daily, totals: ModelUsageAggregator.totals(buckets: buckets))
 
             statusManager?.refreshMenu()
         }
@@ -122,8 +160,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: SettingsView(
                 store: settingsStore,
                 providerNames: usageStore.current.map(\.providerName),
-                modelNames: Array(Set(modelUsageViewModel.totals.map(\.model))).sorted(),
-                viewModel: modelUsageViewModel,
+                modelNames: Array(Set(modelUsageViewModel?.totals.map(\.model) ?? []).sorted()),
+                viewModel: modelUsageViewModel ?? ModelUsageViewModel(sources: []),
                 remaining: usageStore.current
                     .compactMap { $0.window(withLabel: "Rolling")?.percentRemaining }
                     .min(),
@@ -134,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // otherwise wide panes push the sidebar out of view.
         hostingView.sizingOptions = []
         appWindow?.contentView = hostingView
-        modelUsageViewModel.reload()        // Dock presence while the UI is open; back to accessory when closed.
+        modelUsageViewModel?.reload()       // Dock presence while the UI is open; back to accessory when closed.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         appWindow?.makeKeyAndOrderFront(nil)

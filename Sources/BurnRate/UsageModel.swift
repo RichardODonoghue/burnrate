@@ -19,7 +19,7 @@ struct TokenUsage: Codable, Equatable {
 }
 
 /// One usage event: tokens consumed at a point in time.
-struct UsageSample: Equatable {
+struct UsageSample: Codable, Equatable {
     let timestamp: Date
     let tokens: TokenUsage
     /// Vendor request identifier, when present (Claude). Used to dedupe

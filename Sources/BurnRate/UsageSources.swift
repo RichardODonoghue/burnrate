@@ -41,17 +41,33 @@ enum LogDate {
 actor ClaudeUsageSource: UsageSource {
     nonisolated let name = "Claude"
     private let baseURL: URL
+    /// Persisted incremental-cache state (see `collectSamples`). Survives app
+    /// restarts so the ~560MB first parse happens once, not every launch.
+    private struct CachedFile: Codable {
+        var mtime: Date
+        var size: Int
+        var samples: [UsageSample]
+    }
     /// path -> (mtime, size consumed, parsed samples)
-    private var cache: [String: (mtime: Date, size: Int, samples: [UsageSample])] = [:]
+    private var cache: [String: CachedFile] = [:]
+    private var cacheLoaded = false
+    private let cacheURL: URL
 
-    init(baseURL: URL? = nil) {
+    init(baseURL: URL? = nil, cacheURL: URL? = nil) {
         self.baseURL = baseURL
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".claude/projects")
+        self.cacheURL = cacheURL
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("BurnRate/claude-cache.json")
     }
 
     func collectSamples() throws -> [UsageSample] {
         guard FileManager.default.fileExists(atPath: baseURL.path) else { return [] }
+        if !cacheLoaded {
+            cache = Self.loadCache(from: cacheURL)
+            cacheLoaded = true
+        }
         let files = FileManager.default.enumerator(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey])?
             .compactMap { $0 as? URL }
             .filter { $0.pathExtension == "jsonl" } ?? []
@@ -80,14 +96,29 @@ actor ClaudeUsageSource: UsageSource {
                 samples = (try? Self.parseFile(at: file)) ?? []
             }
             samples = samples.filter { $0.timestamp > cutoff }
-            cache[file.path] = (mtime, newSize, samples)
+            cache[file.path] = CachedFile(mtime: mtime, size: newSize, samples: samples)
             all.append(contentsOf: samples)
         }
         // Drop entries for files that were deleted or rotated away.
         cache = cache.filter { seenPaths.contains($0.key) }
+        Self.saveCache(cache, to: cacheURL)
         // The same requestId can appear in multiple files (resumed/copied
         // sessions): dedupe globally, keeping the latest reading.
         return Self.dedupe(all)
+    }
+
+    private static func loadCache(from url: URL) -> [String: CachedFile] {
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([String: CachedFile].self, from: data)
+        else { return [:] }
+        return decoded
+    }
+
+    private static func saveCache(_ cache: [String: CachedFile], to url: URL) {
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
     }
 
     /// Each line: {"timestamp":"...","type":"assistant","message":{"usage":{...}}}
