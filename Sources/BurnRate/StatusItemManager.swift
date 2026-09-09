@@ -147,7 +147,7 @@ final class StatusItemManager: NSObject {
         }
 
         let models = NSMenuItem(
-            title: "Usage by Model…",
+            title: "Usage Dashboard…",
             action: #selector(openModels),
             keyEquivalent: "m"
         )

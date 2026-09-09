@@ -143,9 +143,9 @@ struct ModelsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if filteredDaily.isEmpty {
                 ContentUnavailableView(
-                    "No model usage",
+                    "No usage data",
                     systemImage: "chart.bar.doc.horizontal",
-                    description: Text("Usage by model appears here once the local logs contain model data.")
+                    description: Text("Usage appears here once the local logs contain data.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -198,7 +198,7 @@ struct ModelsView: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
-            Text("Usage by Model")
+            Text("Usage Dashboard")
                 .font(.headline)
             Spacer()
             Picker("Provider", selection: $providerFilter) {

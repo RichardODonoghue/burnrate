@@ -460,7 +460,7 @@ private struct AboutView: View {
 
             Section("What it does") {
                 Label("Live menu-bar usage for your AI plan subscriptions", systemImage: "gauge.medium")
-                Label("Per-model usage dashboard with trends and breakdowns", systemImage: "chart.bar.doc.horizontal")
+                Label("Usage dashboard: plan windows, remaining-% trends, per-model stats and breakdowns", systemImage: "chart.bar.doc.horizontal")
                 Label("Desktop notifications: milestones, burn-rate spikes, cost caps, window resets", systemImage: "bell.badge")
                 Label("Optional extra menu-bar widgets per provider", systemImage: "menubar.dock.rectangle")
             }
