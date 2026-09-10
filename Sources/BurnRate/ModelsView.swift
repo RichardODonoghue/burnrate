@@ -126,16 +126,28 @@ struct ModelsView: View {
     @State private var trendWindow: String = "Rolling"
 
     /// Window labels actually present in history (for the selected provider
-    /// filter). Claude reports Rolling/Weekly/Fable, OpenCode Go
-    /// Rolling/Weekly/Monthly — a hardcoded picker would offer labels with
-    /// no data (e.g. Monthly for Claude) and hide real ones (Fable).
+    /// filter). Claude reports Rolling/Weekly plus model-scoped weeklies
+    /// (Fable); OpenCode Go reports Rolling/Weekly/Monthly. Scoped weeklies
+    /// fold into Weekly (see canonicalTrendLabel), so they never appear as
+    /// their own picker option.
     private var availableTrendLabels: [String] {
         let labels = Set(viewModel.remainingHistory
             .filter { providerFilter == nil || $0.provider == providerFilter }
-            .map(\.label))
+            .map { canonicalTrendLabel($0.label) })
         guard !labels.isEmpty else { return ["Rolling", "Weekly", "Monthly"] }
         let preferred = ["Rolling", "Weekly", "Monthly"]
         return preferred.filter { labels.contains($0) } + labels.subtracting(preferred).sorted()
+    }
+
+    /// Model-scoped quotas (Fable today) come from weekly_scoped kinds, so
+    /// they chart on the Weekly graph. The only exotic labels our sources can
+    /// record are scoped weeklies — anything outside the three known windows
+    /// belongs to Weekly.
+    private func canonicalTrendLabel(_ label: String) -> String {
+        switch label {
+        case "Rolling", "Weekly", "Monthly": label
+        default: "Weekly"
+        }
     }
 
     /// Selected label if it has data, else the first available one (e.g.
@@ -368,15 +380,16 @@ struct ModelsView: View {
                     .frame(height: 140)
             } else {
                 Chart {
-                    ForEach(trendSeries, id: \.provider) { series in
+                    ForEach(trendSeries, id: \.key) { series in
                         ForEach(series.samples, id: \.date) { point in
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Remaining", point.remaining)
                             )
-                            .foregroundStyle(by: .value("Provider", series.provider))
+                            .foregroundStyle(by: .value("Series", series.name))
                             .interpolationMethod(.catmullRom)
-                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round,
+                                                   dash: series.scoped ? [6, 4] : []))
                         }
                     }
                 }
@@ -406,26 +419,40 @@ struct ModelsView: View {
                         }
                     }
                 }
-                // By-value coloring + automatic legend: one entry per provider
-                // with data, colors matched to the scale.
+                // By-value coloring + automatic legend: one entry per series,
+                // colors matched to the provider (scoped weeklies faded).
                 .chartLegend(position: .bottom)
                 .chartForegroundStyleScale(
-                    domain: trendSeries.map(\.provider),
-                    range: trendSeries.map { SettingsView.color(for: $0.provider) }
+                    domain: trendSeries.map(\.name),
+                    range: trendSeries.map {
+                        SettingsView.color(for: $0.provider).opacity($0.scoped ? 0.55 : 1)
+                    }
                 )
                 .frame(height: 180)
             }
         }
     }
 
-    /// Per-provider series for the selected window label.
-    private var trendSeries: [(provider: String, samples: [(date: Date, remaining: Double)])] {
-        let dict = Dictionary(grouping: viewModel.remainingHistory.filter {
-            $0.label == effectiveTrendLabel && (providerFilter == nil || $0.provider == providerFilter)
-        }, by: \.provider)
-        return dict.keys.sorted().map { provider in
-            (provider, dict[provider]!.map { (date: $0.date, remaining: $0.remaining) }.sorted { $0.date < $1.date })
+    /// Per-provider series for the selected window. A provider can contribute
+    /// several lines (Claude Weekly + Claude Fable): the main window keeps
+    /// the provider color, scoped weeklies draw dashed and faded.
+    private var trendSeries: [(key: String, name: String, provider: String, scoped: Bool,
+                               samples: [(date: Date, remaining: Double)])] {
+        let filtered = viewModel.remainingHistory.filter {
+            canonicalTrendLabel($0.label) == effectiveTrendLabel
+                && (providerFilter == nil || $0.provider == providerFilter)
         }
+        let dict = Dictionary(grouping: filtered, by: { "\($0.provider)|\($0.label)" })
+        return dict.keys.sorted().map { key in
+            let points = dict[key]!.sorted { $0.date < $1.date }
+            let provider = points[0].provider
+            let label = points[0].label
+            let scoped = label != effectiveTrendLabel
+            let name = scoped ? "\(provider) \(label)" : provider
+            return (key, name, provider, scoped,
+                    points.map { (date: $0.date, remaining: $0.remaining) })
+        }
+    }
     }
 
     private func emptyHint(_ text: String) -> some View {
