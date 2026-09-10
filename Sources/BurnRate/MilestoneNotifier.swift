@@ -16,6 +16,8 @@ final class MilestoneNotifier {
     private var costFired: Set<String> = []
     /// Cooldown per model-burn alert key.
     private var modelBurnCooldown: [String: Date] = [:]
+    /// Last-seen window reset time per window id (reset detection).
+    private var lastResetsAt: [String: Date] = [:]
     /// Recently sent notifications (title|body → time), to suppress duplicates.
     private var recentSends: [String: Date] = [:]
     private let defaults: UserDefaults
@@ -34,6 +36,30 @@ final class MilestoneNotifier {
         var costFired: [String] = []
         var burnCooldown: [String: Date] = [:]
         var modelBurnCooldown: [String: Date] = [:]
+        /// Last-seen window reset time per window id — a vendor API moving a
+        /// window's resetsAt forward means a fresh window began.
+        var resetsAt: [String: Date] = [:]
+
+        // Custom decoding: resetsAt was added later; older persisted states
+        // must still decode.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            lastRemaining = try c.decodeIfPresent([String: Double].self, forKey: .lastRemaining) ?? [:]
+            costFired = try c.decodeIfPresent([String].self, forKey: .costFired) ?? []
+            burnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .burnCooldown) ?? [:]
+            modelBurnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .modelBurnCooldown) ?? [:]
+            resetsAt = try c.decodeIfPresent([String: Date].self, forKey: .resetsAt) ?? [:]
+        }
+
+        init(lastRemaining: [String: Double], costFired: [String],
+             burnCooldown: [String: Date], modelBurnCooldown: [String: Date],
+             resetsAt: [String: Date]) {
+            self.lastRemaining = lastRemaining
+            self.costFired = costFired
+            self.burnCooldown = burnCooldown
+            self.modelBurnCooldown = modelBurnCooldown
+            self.resetsAt = resetsAt
+        }
     }
 
     init(settingsStore: SettingsStore, defaults: UserDefaults = .standard) {
@@ -45,6 +71,7 @@ final class MilestoneNotifier {
             costFired = Set(state.costFired)
             burnCooldown = state.burnCooldown
             modelBurnCooldown = state.modelBurnCooldown
+            lastResetsAt = state.resetsAt
         }
         Task { await requestAuthorization() }
     }
@@ -54,7 +81,8 @@ final class MilestoneNotifier {
             lastRemaining: lastRemaining,
             costFired: Array(costFired),
             burnCooldown: burnCooldown,
-            modelBurnCooldown: modelBurnCooldown
+            modelBurnCooldown: modelBurnCooldown,
+            resetsAt: lastResetsAt
         )
         if let data = try? JSONEncoder().encode(state) {
             defaults.set(data, forKey: Self.stateKey)
@@ -80,8 +108,25 @@ final class MilestoneNotifier {
                 let previous = lastRemaining[window.id]
                 lastRemaining[window.id] = current
 
-                // Window reset: remaining jumped up sharply (e.g. rolling over).
-                if settingsStore.notifyOnReset, let previous, current - previous >= 40 {
+                // Window reset. Primary signal: the vendor API moved the
+                // window's resetsAt forward — a fresh window began, no
+                // matter how much remaining jumped (the old window may end
+                // at >60% remaining, e.g. after hours of idle). Fallback
+                // for sources without resetsAt: remaining jumped up ≥40.
+                var isReset = false
+                if let previousResets = lastResetsAt[window.id],
+                   let resetsAt = window.resetsAt,
+                   resetsAt > previousResets,
+                   current > (previous ?? 0) {
+                    isReset = true
+                }
+                if let previous, current - previous >= 40 {
+                    isReset = true
+                }
+                if let resetsAt = window.resetsAt {
+                    lastResetsAt[window.id] = resetsAt
+                }
+                if settingsStore.notifyOnReset, let previous, isReset {
                     send(title: "\(provider.providerName) \(window.label) reset",
                          body: String(format: "Window reset — %.0f%% remaining.", current))
                 }
