@@ -120,15 +120,29 @@ struct ModelsView: View {
         case tokens = "Tokens", cost = "Cost"
         var id: String { rawValue }
     }
-    enum TrendWindow: String, CaseIterable, Identifiable {
-        case rolling = "Rolling", weekly = "Weekly", monthly = "Monthly"
-        var id: String { rawValue }
-    }
-
     @State private var range: Range = .week
     @State private var metric: Metric = .tokens
     @State private var providerFilter: String?
-    @State private var trendWindow: TrendWindow = .rolling
+    @State private var trendWindow: String = "Rolling"
+
+    /// Window labels actually present in history (for the selected provider
+    /// filter). Claude reports Rolling/Weekly/Fable, OpenCode Go
+    /// Rolling/Weekly/Monthly — a hardcoded picker would offer labels with
+    /// no data (e.g. Monthly for Claude) and hide real ones (Fable).
+    private var availableTrendLabels: [String] {
+        let labels = Set(viewModel.remainingHistory
+            .filter { providerFilter == nil || $0.provider == providerFilter }
+            .map(\.label))
+        guard !labels.isEmpty else { return ["Rolling", "Weekly", "Monthly"] }
+        let preferred = ["Rolling", "Weekly", "Monthly"]
+        return preferred.filter { labels.contains($0) } + labels.subtracting(preferred).sorted()
+    }
+
+    /// Selected label if it has data, else the first available one (e.g.
+    /// Monthly selected, then provider filtered to Claude-only).
+    private var effectiveTrendLabel: String {
+        availableTrendLabels.contains(trendWindow) ? trendWindow : availableTrendLabels[0]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -339,14 +353,14 @@ struct ModelsView: View {
     private var trendChart: some View {
         GroupBox {
             HStack {
-                Text("Remaining over time — \(trendWindow.rawValue)")
+                Text("Remaining over time — \(effectiveTrendLabel)")
                     .font(.headline)
                 Spacer()
                 Picker("Window", selection: $trendWindow) {
-                    ForEach(TrendWindow.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(availableTrendLabels, id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 260)
+                .frame(width: CGFloat(max(availableTrendLabels.count, 3)) * 86)
             }
             let series = trendSeries
             if series.isEmpty {
@@ -368,15 +382,14 @@ struct ModelsView: View {
                 }
                 .chartYScale(domain: 0...100)
                 .chartXAxis {
-                    // Rolling covers ~days: tick every 6 hours. Weekly/Monthly
-                    // windows get one tick per day.
-                    switch trendWindow {
-                    case .rolling:
+                    // Rolling covers ~days: tick every 6 hours. Longer
+                    // windows (Weekly/Monthly/Fable) get one tick per day.
+                    if effectiveTrendLabel == "Rolling" {
                         AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())
                         }
-                    case .weekly, .monthly:
+                    } else {
                         AxisMarks(values: .stride(by: .day)) { value in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.weekday(.abbreviated))
@@ -408,7 +421,7 @@ struct ModelsView: View {
     /// Per-provider series for the selected window label.
     private var trendSeries: [(provider: String, samples: [(date: Date, remaining: Double)])] {
         let dict = Dictionary(grouping: viewModel.remainingHistory.filter {
-            $0.label == trendWindow.rawValue && (providerFilter == nil || $0.provider == providerFilter)
+            $0.label == effectiveTrendLabel && (providerFilter == nil || $0.provider == providerFilter)
         }, by: \.provider)
         return dict.keys.sorted().map { provider in
             (provider, dict[provider]!.map { (date: $0.date, remaining: $0.remaining) }.sorted { $0.date < $1.date })

@@ -187,9 +187,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 providerNames: usageStore.current.map(\.providerName),
                 modelNames: Array(Set(modelUsageViewModel?.totals.map(\.model) ?? []).sorted()),
                 viewModel: modelUsageViewModel ?? ModelUsageViewModel(sources: []),
-                remaining: usageStore.current
-                    .compactMap { $0.window(withLabel: "Rolling")?.percentRemaining }
-                    .min(),
                 initialPane: pane
             )
         )

@@ -16,7 +16,6 @@ struct SettingsView: View {
     let providerNames: [String]
     let modelNames: [String]
     let viewModel: ModelUsageViewModel
-    let remaining: Double?
 
     @State private var selection: AppPane
 
@@ -25,14 +24,12 @@ struct SettingsView: View {
         providerNames: [String],
         modelNames: [String],
         viewModel: ModelUsageViewModel,
-        remaining: Double? = nil,
         initialPane: AppPane = .notifications
     ) {
         self.store = store
         self.providerNames = providerNames
         self.modelNames = modelNames
         self.viewModel = viewModel
-        self.remaining = remaining
         _selection = State(initialValue: initialPane)
     }
 
@@ -60,7 +57,7 @@ struct SettingsView: View {
             case .widgets:
                 WidgetsView(store: store, providerNames: providerNames)
             case .about:
-                AboutView(remaining: remaining)
+                AboutView()
             }
         }
         .frame(minWidth: 860, minHeight: 560)
@@ -495,13 +492,20 @@ private struct WidgetsView: View {
 // MARK: - About
 
 private struct AboutView: View {
-    let remaining: Double?
+    /// The shipped bundle icon — identical to Dock and notification banners.
+    /// (The live renderer tints by severity; About must not.)
+    private static func bundleIcon() -> NSImage {
+        if let named = NSImage(named: "AppIcon") { return named }
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icns = NSImage(contentsOf: url) { return icns }
+        return AppIconRenderer.appIconImage(size: 256)
+    }
 
     var body: some View {
         Form {
             Section {
                 VStack(spacing: 10) {
-                    Image(nsImage: AppIconRenderer.appIconImage(size: 256, remaining: remaining))
+                    Image(nsImage: Self.bundleIcon())
                         .resizable()
                         .frame(width: 72, height: 72)
                     Text("BurnRate")

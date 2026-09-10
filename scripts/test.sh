@@ -15,4 +15,6 @@ fi
 swift test \
   -Xswiftc -F -Xswiftc "$CT/Library/Developer/Frameworks" \
   -Xlinker -rpath -Xlinker "$CT/Library/Developer/Frameworks" \
-  -Xlinker -rpath -Xlinker "$CT/Library/Developer/usr/lib"
+  -Xlinker -rpath -Xlinker "$CT/Library/Developer/usr/lib" \
+  -Xswiftc -load-plugin-library \
+  -Xswiftc "$CT/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib"

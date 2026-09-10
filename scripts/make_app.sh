@@ -19,6 +19,8 @@ CT=/Library/Developer/CommandLineTools
 # CLT 27.0's MacOSX27.0 SDK is missing the SwiftUI macro plugin
 # (libSwiftUIMacros) — @State etc. cannot expand. Pin the last-good SDK
 # until the CLT ships a fixed 27.x SDK. Honor an explicit SDKROOT.
+# (Also: CLT 27's driver no longer auto-discovers the Testing macro plugin
+# in plugins/testing/ — test.sh passes -load-plugin-library explicitly.)
 if [[ -z "$SDKROOT" ]]; then
   good="$(ls -d "$CT"/SDKs/MacOSX2*.sdk 2>/dev/null | grep -v 'MacOSX\.sdk$' | sort -V | grep -v 'MacOSX27' | tail -1)"
   [[ -n "$good" ]] && export SDKROOT="$good"
