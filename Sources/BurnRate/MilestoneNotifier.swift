@@ -175,13 +175,6 @@ final class MilestoneNotifier {
                           hit.drop, alert.minutes, hit.baseline, hit.current))
     }
 
-    /// Test notification to verify banner/drawer icon rendering.
-    func sendTest() {
-        send(title: "BurnRate test",
-             body: "Dial Core check — this banner should show the flame-and-dial icon.",
-             dedupe: false)
-    }
-
     private func send(title: String, body: String, dedupe: Bool = true) {
         // Suppress duplicates (double polls, stray second instances, etc.).
         let key = title + "|" + body

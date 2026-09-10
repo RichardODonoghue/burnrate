@@ -55,8 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let manager = StatusItemManager(usageStore: usageStore, settingsStore: settingsStore)
         manager.start(
             onOpenDashboard: { [weak self] in self?.openAppWindow(pane: .usage) },
-            onOpenSettings: { [weak self] in self?.openAppWindow(pane: .notifications) },
-            onTestNotification: { [weak self] in self?.notifier?.sendTest() }
+            onOpenSettings: { [weak self] in self?.openAppWindow(pane: .notifications) }
         )
         statusManager = manager
 
