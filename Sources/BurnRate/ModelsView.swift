@@ -469,14 +469,18 @@ struct ModelsView: View {
                             x: .value("Day", day.day, unit: .day),
                             y: .value(metric.rawValue, metricValue(entry))
                         )
-                        .foregroundStyle(byModel(entry.model))
+                        // Data-driven color (not a fixed color): this is what
+                        // makes Charts generate the legend key automatically.
+                        .foregroundStyle(by: .value("Model", entry.model))
                         .cornerRadius(2)
                     }
                 }
             }
-            .chartLegend(position: .bottom) {
-                modelLegend
-            }
+            .chartLegend(position: .bottom)
+            .chartForegroundStyleScale(
+                domain: legendModels,
+                range: legendModels.map(byModel)
+            )
             .frame(height: 220)
         }
         
@@ -510,17 +514,9 @@ struct ModelsView: View {
             : String(format: "$%.2f", entry.cost)
     }
 
-    private var modelLegend: some View {
-        let models = Array(Set(filteredRangeDaily.flatMap { entries(for: $0).map(\.model) })).sorted()
-        return HStack(spacing: 12) {
-            ForEach(models, id: \.self) { model in
-                HStack(spacing: 4) {
-                    Circle().fill(byModel(model)).frame(width: 7, height: 7)
-                    Text(model).font(.caption2)
-                }
-            }
-        }
-        .foregroundStyle(.secondary)
+    /// Models visible in the daily chart, in stable order — the legend domain.
+    private var legendModels: [String] {
+        Array(Set(filteredRangeDaily.flatMap { entries(for: $0).map(\.model) })).sorted()
     }
 
     // MARK: Breakdown table
