@@ -1,14 +1,61 @@
 import Foundation
 
-/// One notification threshold: notify when a provider window's remaining %
-/// drops to or below `percentRemaining`.
+/// One notification rule: notify each time a provider window's remaining %
+/// drops past another `step` increment (e.g. step 10 fires at 90, 80, 70…
+/// remaining). One rule per provider+window — `id` excludes the step so the
+/// same window can never hold duplicate rules.
 struct Milestone: Codable, Identifiable, Hashable {
     var provider: String
     var windowLabel: String
-    var percentRemaining: Double
+    /// Increment in percentage points (e.g. 10 = notify at 90/80/70… remaining).
+    var step: Double
 
     var id: String { key }
-    var key: String { "\(provider)|\(windowLabel)|\(percentRemaining)" }
+    var key: String { "\(provider)|\(windowLabel)" }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, windowLabel, step, percentRemaining
+    }
+
+    init(provider: String, windowLabel: String, step: Double) {
+        self.provider = provider
+        self.windowLabel = windowLabel
+        self.step = step
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try c.decode(String.self, forKey: .provider)
+        windowLabel = try c.decode(String.self, forKey: .windowLabel)
+        if let s = try c.decodeIfPresent(Double.self, forKey: .step) {
+            step = s
+        } else if let legacy = try c.decodeIfPresent(Double.self, forKey: .percentRemaining) {
+            // Legacy fixed-threshold rule: keep its level covered by reusing
+            // the threshold itself as the increment (`coalesce` keeps the
+            // smallest step when several legacy rules collapse to one window).
+            step = min(max(legacy.rounded(), 1), 50)
+        } else {
+            step = 20
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(provider, forKey: .provider)
+        try c.encode(windowLabel, forKey: .windowLabel)
+        try c.encode(step, forKey: .step)
+    }
+
+    /// Collapse duplicates to one rule per provider+window, keeping the
+    /// smallest increment (covers the most levels).
+    static func coalesce(_ milestones: [Milestone]) -> [Milestone] {
+        var best: [String: Milestone] = [:]
+        for m in milestones {
+            if let existing = best[m.key], existing.step <= m.step { continue }
+            best[m.key] = m
+        }
+        return best.values.sorted { $0.key < $1.key }
+    }
 }
 
 /// One burn-rate alert: notify when a provider window's remaining % drops by
@@ -23,14 +70,34 @@ struct BurnAlert: Codable, Identifiable, Hashable {
     var key: String { "\(provider)|\(windowLabel)|\(percentDrop)|\(minutes)" }
 }
 
-/// Pure threshold logic, kept testable and UI-free.
+/// Pure increment logic, kept testable and UI-free.
 enum MilestoneEvaluator {
-    /// True when usage crossed from above the threshold to at/below it.
-    static func crossed(previousRemaining: Double?, currentRemaining: Double, threshold: Double) -> Bool {
-        guard let previous = previousRemaining else {
-            return currentRemaining <= threshold
+    /// Grid levels below 100 for an increment, descending (20 → 80, 60, 40, 20).
+    static func thresholds(step: Double) -> [Double] {
+        guard step > 0, step < 100 else { return [] }
+        var levels: [Double] = []
+        var k = 1.0
+        while k * step < 100 {
+            levels.append((k * step).rounded())
+            k += 1
         }
-        return previous > threshold && currentRemaining <= threshold
+        return levels.sorted(by: >)
+    }
+
+    /// Highest grid level crossed downward from previous to current, else nil.
+    /// A nil previous (first observation) never fires — no crossing seen yet.
+    static func crossedThreshold(
+        previousRemaining: Double?,
+        currentRemaining: Double,
+        step: Double
+    ) -> Double? {
+        guard let previous = previousRemaining else { return nil }
+        return thresholds(step: step).first { previous > $0 && currentRemaining <= $0 }
+    }
+
+    /// True when usage dropped past another increment of the grid.
+    static func crossed(previousRemaining: Double?, currentRemaining: Double, step: Double) -> Bool {
+        crossedThreshold(previousRemaining: previousRemaining, currentRemaining: currentRemaining, step: step) != nil
     }
 }
 
@@ -132,8 +199,8 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let decoder = JSONDecoder()
-        milestones = (defaults.data(forKey: Self.milestonesKey))
-            .flatMap { try? decoder.decode([Milestone].self, from: $0) } ?? Self.defaultMilestones
+        milestones = Milestone.coalesce((defaults.data(forKey: Self.milestonesKey))
+            .flatMap { try? decoder.decode([Milestone].self, from: $0) } ?? Self.defaultMilestones)
         widgetProviders = (defaults.data(forKey: Self.widgetsKey))
             .flatMap { try? decoder.decode([String].self, from: $0) } ?? []
         planCapacities = (defaults.data(forKey: Self.capacitiesKey))
@@ -153,9 +220,9 @@ final class SettingsStore: ObservableObject {
 
     static var defaultMilestones: [Milestone] {
         [
-            Milestone(provider: "Claude", windowLabel: "Rolling", percentRemaining: 20),
-            Milestone(provider: "Claude", windowLabel: "Weekly", percentRemaining: 10),
-            Milestone(provider: "Codex", windowLabel: "Rolling", percentRemaining: 20),
+            Milestone(provider: "Claude", windowLabel: "Rolling", step: 20),
+            Milestone(provider: "Claude", windowLabel: "Weekly", step: 20),
+            Milestone(provider: "Codex", windowLabel: "Rolling", step: 20),
         ]
     }
 
@@ -163,6 +230,12 @@ final class SettingsStore: ObservableObject {
         [
             BurnAlert(provider: "Claude", windowLabel: "Rolling", percentDrop: 15, minutes: 30),
         ]
+    }
+
+    /// Insert or replace the rule for a provider+window — duplicates impossible.
+    func upsertMilestone(_ milestone: Milestone) {
+        milestones.removeAll { $0.key == milestone.key }
+        milestones.append(milestone)
     }
 
     private func persist() {
