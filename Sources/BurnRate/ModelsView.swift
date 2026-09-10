@@ -453,7 +453,6 @@ struct ModelsView: View {
                     points.map { (date: $0.date, remaining: $0.remaining) })
         }
     }
-    }
 
     private func emptyHint(_ text: String) -> some View {
         Label(text, systemImage: "waveform.path")
