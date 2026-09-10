@@ -212,7 +212,13 @@ struct ModelsView: View {
     }
 
     private var filteredTotals: [ModelUsageEntry] {
-        viewModel.totals.filter { providerFilter == nil || $0.provider == providerFilter }
+        // Aggregate from the in-range daily buckets. viewModel.totals spans
+        // the full 30 days — using it here leaked out-of-range models (and
+        // their cost) into narrow ranges like Today.
+        let days = filteredRangeDaily.map { day in
+            DailyModelUsage(day: day.day, entries: entries(for: day))
+        }
+        return ModelUsageAggregator.totals(fromCache: days)
     }
 
     private var filteredRangeDaily: [DailyModelUsage] {
