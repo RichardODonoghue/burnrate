@@ -21,13 +21,34 @@ Cost figures are list-price estimates (LiteLLM pricing table) where vendors don'
 ## Build
 
 Requires macOS 15+ and Swift 6 (Command Line Tools are sufficient).
+Targets **Apple Silicon only** (arm64).
 
 ```sh
 swift build                      # debug build
 scripts/test.sh                  # run tests
 swift run                        # run the menu-bar app
-scripts/make_app.sh [version]    # build dist/BurnRate.app
+scripts/make_app.sh [version]    # build dist/BurnRate.app (arm64-only)
 ```
+
+## Install
+
+Grab `BurnRate-<version>-arm64.zip` (or the `.dmg`) from the
+[latest release](https://github.com/RichardODonoghue/burnrate/releases/latest).
+Drag `BurnRate.app` to `/Applications` (the DMG includes an Applications
+link) and launch it — the menu-bar flame appears.
+
+The bundle is ad-hoc signed, so Gatekeeper warns on first launch:
+right-click → **Open**, then Open again. Clearing quarantine also works:
+`xattr -dr com.apple.quarantine /Applications/BurnRate.app`.
+
+## Releases
+
+Versions are managed by [release-please](https://github.com/googleapis/release-please):
+commit with conventional-commit messages (`feat:`, `fix:` …), and it opens a
+"chore(main): release X.Y.Z" PR on `main`. Merging that PR tags the version,
+which builds an arm64 `.zip` + `.dmg` and publishes the GitHub Release
+automatically. Version = the git tag; `scripts/make_app.sh` stamps it into
+the bundle's `CFBundleShortVersionString`.
 
 ## How it works
 

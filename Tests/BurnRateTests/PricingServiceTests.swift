@@ -36,7 +36,10 @@ struct PricingServiceTests {
     @Test func costCalculationWeightsCaches() {
         let pricing = PricingService.lookup("claude-opus-5", in: table)!
         let tokens = TokenUsage(input: 1_000_000, output: 100_000, cacheRead: 10_000_000, cacheWrite: 1_000_000)
-        let expected = 1_000_000 * 5e-6 + 100_000 * 2.5e-5 + 10_000_000 * 5e-7 + 1_000_000 * 6.25e-6
+        let expected: Double = Double(1_000_000) * 5e-6
+            + Double(100_000) * 2.5e-5
+            + Double(10_000_000) * 5e-7
+            + Double(1_000_000) * 6.25e-6
         var cost = Double(tokens.input) * pricing.input + Double(tokens.output) * pricing.output
         cost += Double(tokens.cacheRead) * (pricing.cacheRead ?? 0)
         cost += Double(tokens.cacheWrite) * (pricing.cacheWrite ?? 0)
