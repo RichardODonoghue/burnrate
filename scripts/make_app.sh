@@ -11,11 +11,11 @@ APP_NAME="BurnRate"
 # bundle ID, and the old ID ("com.burnrate.app") had a blank icon baked in
 # from an early iconless build that no cache clearing would dislodge.
 BUNDLE_ID="com.burnrate.desktop"
-VERSION="${1:-0.1.0}"
+VERSION="${1:-}"
 DIST="dist"
 
-echo "==> swift build -c release"
-swift build -c release
+echo "==> swift build -c release (arm64)"
+swift build -c release --arch arm64
 
 BINARY=".build/release/${APP_NAME}"
 [[ -x "$BINARY" ]] || { echo "error: $BINARY not found"; exit 1; }
@@ -25,6 +25,12 @@ APP="${DIST}/${APP_NAME}.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+
+# Version: explicit arg wins, else latest semver tag, else 0.0.0.
+if [[ -z "$VERSION" ]]; then
+  VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+  VERSION="${VERSION:-0.0.0}"
+fi
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,6 +55,16 @@ cat > "$APP/Contents/Info.plist" <<EOF
 EOF
 
 cp "$BINARY" "$APP/Contents/MacOS/${APP_NAME}"
+
+echo "==> verifying arm64-only slice"
+ARCH_OUT="$(file "$APP/Contents/MacOS/${APP_NAME}")"
+case "$ARCH_OUT" in
+  *arm64*) ;;
+  *) echo "error: binary is not arm64: $ARCH_OUT"; exit 1 ;;
+esac
+case "$ARCH_OUT" in
+  *x86_64*) echo "error: universal build not allowed (arm64 only): $ARCH_OUT"; exit 1 ;;
+esac
 
 echo "==> ad-hoc codesign"
 codesign --force --sign - "$APP"

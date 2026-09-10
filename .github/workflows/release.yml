@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bundle (version from tag)
+        run: scripts/make_app.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Verify arm64-only binary
+        run: |
+          BIN="dist/BurnRate.app/Contents/MacOS/BurnRate"
+          file "$BIN" | grep -q "arm64" || { echo "not arm64"; exit 1; }
+          file "$BIN" | grep -q "x86_64" && { echo "universal build not allowed"; exit 1; } || true
+
+      - name: Zip app
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          ditto -c -k --keepParent dist/BurnRate.app "BurnRate-$VER-arm64.zip"
+
+      - name: Build DMG
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          rm -rf dmg-staging && mkdir dmg-staging
+          cp -R dist/BurnRate.app dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "BurnRate $VER" -srcfolder dmg-staging \
+            -format UDZO -ov "BurnRate-$VER-arm64.dmg"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            BurnRate-*-arm64.zip
+            BurnRate-*-arm64.dmg
