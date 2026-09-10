@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UserNotifications
 
 /// Unified app window: dashboard (usage by model), notifications, widgets, about.
 enum AppPane: Hashable {
@@ -100,9 +102,11 @@ private struct MilestonesView: View {
     @State private var modelBurnModel = "*"
     @State private var modelBurnTokens = ""
     @State private var modelBurnMinutes = 30
+    @State private var authStatus: UNAuthorizationStatus?
 
     var body: some View {
         Form {
+            systemPermissionSection
             milestoneSection
             resetSection
             burnRateSection
@@ -110,8 +114,60 @@ private struct MilestonesView: View {
             costSection
         }
         .formStyle(.grouped)
+        .task { await refreshAuth() }
         .onChange(of: newProvider) { _, _ in newWindow = "Rolling" }
         .onChange(of: burnProvider) { _, _ in burnWindow = "Rolling" }
+    }
+
+    // MARK: System permission
+
+    /// macOS prompts for notification permission at most once per install.
+    /// If the user missed or denied it, no prompt ever reappears — this row
+    /// surfaces the real status and offers the fix in place.
+    private var systemPermissionSection: some View {
+        Section {
+            HStack {
+                Text(authLabel)
+                Spacer()
+                switch authStatus {
+                case .authorized, .provisional, .ephemeral:
+                    Label("On", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                case .notDetermined:
+                    Button("Request permission") {
+                        Task {
+                            _ = try? await UNUserNotificationCenter.current()
+                                .requestAuthorization(options: [.alert, .sound])
+                            await refreshAuth()
+                        }
+                    }
+                default:
+                    Button("Open System Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("System permission")
+        } footer: {
+            Text("If permission is off, BurnRate still polls and updates the menu — only banners and sounds stop.")
+        }
+    }
+
+    private var authLabel: String {
+        switch authStatus {
+        case .authorized, .provisional, .ephemeral: "Notifications allowed"
+        case .denied: "Notifications blocked"
+        case .notDetermined: "Permission not requested yet"
+        default: "Checking permission…"
+        }
+    }
+
+    private func refreshAuth() async {
+        authStatus = await UNUserNotificationCenter.current()
+            .notificationSettings().authorizationStatus
     }
 
     // MARK: Shared pieces

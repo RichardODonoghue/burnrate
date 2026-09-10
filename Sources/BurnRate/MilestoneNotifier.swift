@@ -1,10 +1,23 @@
 import Foundation
 import UserNotifications
 
+/// Shows banners with sound even when the dashboard window is frontmost.
+/// Without a delegate, UNUserNotificationCenter delivers quietly to
+/// Notification Center while our app is active.
+private final class ForegroundNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+}
+
 /// Evaluates milestones and burn-rate alerts after each poll, posting
 /// desktop notifications.
 @MainActor
 final class MilestoneNotifier {
+    private let foregroundDelegate = ForegroundNotificationDelegate()
     private let settingsStore: SettingsStore
     /// Last observed remaining % per window id, used to detect threshold crossings.
     private var lastRemaining: [String: Double] = [:]
@@ -65,6 +78,9 @@ final class MilestoneNotifier {
     init(settingsStore: SettingsStore, defaults: UserDefaults = .standard) {
         self.settingsStore = settingsStore
         self.defaults = defaults
+        // Retained strongly (UNUserNotificationCenter holds its delegate
+        // weakly); set before any notification can be posted.
+        UNUserNotificationCenter.current().delegate = foregroundDelegate
         if let data = defaults.data(forKey: Self.stateKey),
            let state = try? JSONDecoder().decode(NotifierState.self, from: data) {
             lastRemaining = state.lastRemaining
@@ -94,7 +110,15 @@ final class MilestoneNotifier {
         // when run via `swift run` without one.
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
-        _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        // Only .notDetermined prompts; otherwise this is a no-op status read.
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .notDetermined else { return }
+        do {
+            let granted = try await center.requestAuthorization(options: [.alert, .sound])
+            NSLog("%@", "[milestone] notification authorization granted=\(granted)")
+        } catch {
+            NSLog("%@", "[milestone] notification authorization failed: \(error)")
+        }
     }
 
     func evaluate(usage: [ProviderUsage]) {
@@ -238,6 +262,7 @@ final class MilestoneNotifier {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
