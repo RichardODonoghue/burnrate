@@ -82,7 +82,13 @@ private struct MilestonesView: View {
     @ObservedObject var store: SettingsStore
     let providerNames: [String]
     let modelNames: [String]
-    private let windowLabels = ["Rolling", "Weekly", "Fable", "Monthly"]
+    /// Window options per provider. Fable is a Claude-only model-scoped
+    /// weekly quota — OpenCode and Codex only report Rolling/Weekly/Monthly.
+    private func windowLabels(for provider: String) -> [String] {
+        provider == "Claude"
+            ? ["Rolling", "Weekly", "Fable", "Monthly"]
+            : ["Rolling", "Weekly", "Monthly"]
+    }
 
     @State private var newProvider = "Claude"
     @State private var newWindow = "Rolling"
@@ -221,7 +227,7 @@ private struct MilestonesView: View {
                 }
             }
             Picker("Window", selection: $newWindow) {
-                ForEach(windowLabels, id: \.self) { Text($0) }
+                ForEach(windowLabels(for: newProvider), id: \.self) { Text($0) }
             }
             Picker("Notify every", selection: $newStep) {
                 ForEach(stepPresets, id: \.self) { step in
@@ -305,7 +311,7 @@ private struct MilestonesView: View {
                 }
             }
             Picker("Window", selection: $burnWindow) {
-                ForEach(windowLabels, id: \.self) { Text($0) }
+                ForEach(windowLabels(for: burnProvider), id: \.self) { Text($0) }
             }
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
