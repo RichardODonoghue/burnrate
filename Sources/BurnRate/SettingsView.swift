@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Unified app window: dashboard (usage by model), notifications, widgets, about.
 enum AppPane: Hashable {

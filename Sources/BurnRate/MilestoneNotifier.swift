@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Shows banners with sound even when the dashboard window is frontmost.
 /// Without a delegate, UNUserNotificationCenter delivers quietly to
@@ -150,7 +150,7 @@ final class MilestoneNotifier {
                 if let resetsAt = window.resetsAt {
                     lastResetsAt[window.id] = resetsAt
                 }
-                if settingsStore.notifyOnReset, let previous, isReset {
+                if settingsStore.notifyOnReset, previous != nil, isReset {
                     send(title: "\(provider.providerName) \(window.label) reset",
                          body: String(format: "Window reset — %.0f%% remaining.", current))
                 }
