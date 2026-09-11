@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Shows banners with sound even when the dashboard window is frontmost.
 /// Without a delegate, UNUserNotificationCenter delivers quietly to
@@ -42,8 +42,8 @@ final class MilestoneNotifier {
     private static let stateKey = "notifierState"
 
     /// Alert bookkeeping persisted across launches — otherwise every restart
-    /// re-fires all breached milestones (previousRemaining empty → "crossing")
-    /// and resets cost/burn cooldowns.
+    /// would treat the first poll as a fresh baseline and shift burn/cooldown
+    /// windows (cost/burn cooldowns would also reset).
     private struct NotifierState: Codable {
         var lastRemaining: [String: Double] = [:]
         var costFired: [String] = []
@@ -127,8 +127,8 @@ final class MilestoneNotifier {
             for window in provider.windows {
                 guard let current = window.percentRemaining else { continue }
 
-                // Milestone crossing (one notification per window per crossing,
-                // even if several thresholds match).
+                // Milestone crossing (one notification per window per poll,
+                // naming the increment level just dropped past).
                 let previous = lastRemaining[window.id]
                 lastRemaining[window.id] = current
 
@@ -150,24 +150,25 @@ final class MilestoneNotifier {
                 if let resetsAt = window.resetsAt {
                     lastResetsAt[window.id] = resetsAt
                 }
-                if settingsStore.notifyOnReset, let previous, isReset {
+                if settingsStore.notifyOnReset, previous != nil, isReset {
                     send(title: "\(provider.providerName) \(window.label) reset",
                          body: String(format: "Window reset — %.0f%% remaining.", current))
                 }
 
-                let milestoneMatched = settingsStore.milestones.contains { milestone in
-                    milestone.provider == provider.providerName
+                let matchedBand: Double? = settingsStore.milestones.compactMap { milestone in
+                    guard milestone.provider == provider.providerName
                         && milestone.windowLabel == window.label
-                        && MilestoneEvaluator.crossed(
-                            previousRemaining: previous,
-                            currentRemaining: current,
-                            threshold: milestone.percentRemaining
-                        )
-                }
-                if milestoneMatched {
+                    else { return nil }
+                    return MilestoneEvaluator.crossedThreshold(
+                        previousRemaining: previous,
+                        currentRemaining: current,
+                        step: milestone.step
+                    )
+                }.max()
+                if let band = matchedBand {
                     send(title: "\(provider.providerName) \(window.label) milestone",
-                         body: String(format: "Only %.0f%% of your %@ window remaining.",
-                                      current, window.label))
+                         body: String(format: "Only %.0f%% of your %@ window remaining (crossed below %.0f%%).",
+                                      current, window.label, band))
                 }
 
                 // Burn-rate detection over trailing history.

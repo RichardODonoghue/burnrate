@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Unified app window: dashboard (usage by model), notifications, widgets, about.
 enum AppPane: Hashable {
@@ -86,7 +86,8 @@ private struct MilestonesView: View {
 
     @State private var newProvider = "Claude"
     @State private var newWindow = "Rolling"
-    @State private var newThreshold = 20.0
+    @State private var newStep = 20.0
+    private let stepPresets = [5.0, 10.0, 20.0, 25.0]
 
     @State private var burnProvider = "Claude"
     @State private var burnWindow = "Rolling"
@@ -195,7 +196,7 @@ private struct MilestonesView: View {
     private var milestoneSection: some View {
         Section {
             if store.milestones.isEmpty {
-                emptyHint("No milestones yet — get notified when usage runs low.", icon: "bell.slash")
+                emptyHint("No milestones yet — get notified as usage runs low.", icon: "bell.slash")
             }
             ForEach(store.milestones) { milestone in
                 HStack(spacing: 12) {
@@ -207,7 +208,7 @@ private struct MilestonesView: View {
                         Text(milestone.windowLabel).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    chip(String(format: "≤ %.0f%% left", milestone.percentRemaining),
+                    chip("Every \(Int(milestone.step))%",
                          tint: SettingsView.color(for: milestone.provider))
                     Button { store.milestones.removeAll { $0.id == milestone.id } } label: { deleteIcon }
                         .buttonStyle(.plain)
@@ -222,32 +223,46 @@ private struct MilestonesView: View {
             Picker("Window", selection: $newWindow) {
                 ForEach(windowLabels, id: \.self) { Text($0) }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Alert threshold")
-                    Spacer()
-                    Text("\(Int(newThreshold.rounded()))% remaining")
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+            Picker("Notify every", selection: $newStep) {
+                ForEach(stepPresets, id: \.self) { step in
+                    Text("Every \(Int(step))%").tag(step)
                 }
-                Slider(value: $newThreshold, in: 1...99)
             }
+            .pickerStyle(.segmented)
             HStack {
                 Spacer()
-                Button("Add Milestone") {
-                    store.milestones.append(
-                        Milestone(provider: newProvider,
-                                  windowLabel: newWindow,
-                                  percentRemaining: newThreshold.rounded())
-                    )
+                if let existing = store.milestones.first(where: {
+                    $0.provider == newProvider && $0.windowLabel == newWindow
+                }) {
+                    if existing.step == newStep {
+                        Text("Already added")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Update to every \(Int(newStep))%") {
+                            store.upsertMilestone(
+                                Milestone(provider: newProvider,
+                                          windowLabel: newWindow,
+                                          step: newStep)
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    Button("Add Milestone") {
+                        store.upsertMilestone(
+                            Milestone(provider: newProvider,
+                                      windowLabel: newWindow,
+                                      step: newStep)
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(providerNames.isEmpty)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(providerNames.isEmpty)
             }
         } header: {
             Text("Plan milestones")
         } footer: {
-            Text("Percentages come from vendor quota APIs.")
+            Text("Fires each time remaining drops past another increment (every 20%: 80, 60, 40, 20). One rule per plan window.")
         }
     }
 
