@@ -132,8 +132,8 @@ struct ModelsView: View {
     /// their own picker option.
     private var availableTrendLabels: [String] {
         let labels = Set(viewModel.remainingHistory
-            .filter { providerFilter == nil || $0.provider == providerFilter }
-            .map { canonicalTrendLabel($0.label) })
+            .filter { (providerFilter == nil || $0.provider == providerFilter) && $0.date >= rangeCutoff }
+            .map { Self.canonicalTrendLabel($0.label) })
         guard !labels.isEmpty else { return ["Rolling", "Weekly", "Monthly"] }
         let preferred = ["Rolling", "Weekly", "Monthly"]
         return preferred.filter { labels.contains($0) } + labels.subtracting(preferred).sorted()
@@ -143,11 +143,22 @@ struct ModelsView: View {
     /// they chart on the Weekly graph. The only exotic labels our sources can
     /// record are scoped weeklies — anything outside the three known windows
     /// belongs to Weekly.
-    private func canonicalTrendLabel(_ label: String) -> String {
+    nonisolated static func canonicalTrendLabel(_ label: String) -> String {
         switch label {
         case "Rolling", "Weekly", "Monthly": label
         default: "Weekly"
         }
+    }
+
+    /// Start of the visible span for the range filter (mirrors
+    /// filteredRangeDaily) — the trend chart used to ignore `range` and
+    /// always plot the full retention.
+    nonisolated static func trendCutoff(for range: Range, now: Date) -> Date {
+        Calendar.current.startOfDay(for: now.addingTimeInterval(-Double(range.days - 1) * 86400))
+    }
+
+    private var rangeCutoff: Date {
+        Self.trendCutoff(for: range, now: Date())
     }
 
     /// Selected label if it has data, else the first available one (e.g.
@@ -401,9 +412,9 @@ struct ModelsView: View {
                 }
                 .chartYScale(domain: 0...100)
                 .chartXAxis {
-                    // Rolling covers ~days: tick every 6 hours. Longer
-                    // windows (Weekly/Monthly/Fable) get one tick per day.
-                    if effectiveTrendLabel == "Rolling" {
+                    // Sub-day spans (Rolling, or the Today range): tick every
+                    // 6 hours. Multi-day spans get one tick per day.
+                    if effectiveTrendLabel == "Rolling" || range == .today {
                         AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())
@@ -439,25 +450,46 @@ struct ModelsView: View {
         }
     }
 
-    /// Per-provider series for the selected window. A provider can contribute
-    /// several lines (Claude Weekly + Claude Fable): the main window keeps
-    /// the provider color, scoped weeklies draw dashed and faded.
-    private var trendSeries: [(key: String, name: String, provider: String, scoped: Bool,
-                               samples: [(date: Date, remaining: Double)])] {
-        let filtered = viewModel.remainingHistory.filter {
-            canonicalTrendLabel($0.label) == effectiveTrendLabel
+    /// Per-provider series for the selected window over the visible range.
+    /// A provider can contribute several lines (Claude Weekly + Claude
+    /// Fable): the main window keeps the provider color, scoped weeklies
+    /// draw dashed and faded.
+    typealias TrendSeries = (
+        key: String, name: String, provider: String, scoped: Bool,
+        samples: [(date: Date, remaining: Double)]
+    )
+
+    /// Pure series construction, tested.
+    nonisolated static func buildTrendSeries(
+        samples: [RemainingSample],
+        label: String,
+        providerFilter: String?,
+        cutoff: Date
+    ) -> [TrendSeries] {
+        let filtered = samples.filter {
+            canonicalTrendLabel($0.label) == label
                 && (providerFilter == nil || $0.provider == providerFilter)
+                && $0.date >= cutoff
         }
         let dict = Dictionary(grouping: filtered, by: { "\($0.provider)|\($0.label)" })
         return dict.keys.sorted().map { key in
             let points = dict[key]!.sorted { $0.date < $1.date }
             let provider = points[0].provider
-            let label = points[0].label
-            let scoped = label != effectiveTrendLabel
-            let name = scoped ? "\(provider) \(label)" : provider
+            let pointLabel = points[0].label
+            let scoped = pointLabel != label
+            let name = scoped ? "\(provider) \(pointLabel)" : provider
             return (key, name, provider, scoped,
                     points.map { (date: $0.date, remaining: $0.remaining) })
         }
+    }
+
+    private var trendSeries: [TrendSeries] {
+        Self.buildTrendSeries(
+            samples: viewModel.remainingHistory,
+            label: effectiveTrendLabel,
+            providerFilter: providerFilter,
+            cutoff: rangeCutoff
+        )
     }
 
     private func emptyHint(_ text: String) -> some View {
