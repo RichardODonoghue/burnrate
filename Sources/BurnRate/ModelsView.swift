@@ -552,15 +552,26 @@ struct ModelsView: View {
                     if let selectedDate {
                         RuleMark(x: .value("Selected", selectedDate))
                             .foregroundStyle(.secondary.opacity(0.4))
-                        // Fixed top-right corner: a cursor-anchored tooltip
-                        // collides with the window picker and clips at the
-                        // plot edge.
-                        .annotation(position: .topTrailing, alignment: .trailing, spacing: 4) {
-                            trendTooltip(for: selectedDate)
-                        }
                     }
                 }
                 .chartXSelection(value: $selectedDate)
+                // Tooltip as an overlay, not an annotation: an annotation
+                // re-lays-out the chart (pushing the plot sideways) and
+                // clips past the plot's top edge.
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let selectedDate,
+                           let x = proxy.position(forX: selectedDate),
+                           let plot = proxy.plotFrame {
+                            let plotFrame = geometry[plot]
+                            trendTooltip(for: selectedDate)
+                                .position(
+                                    x: plotFrame.minX + x,
+                                    y: plotFrame.minY + 44
+                                )
+                        }
+                    }
+                }
                 .chartYScale(domain: remainingDomain)
                 .chartXAxis {
                     // Tick stride follows the range span, not the window: a
