@@ -343,6 +343,40 @@ struct ModelsView: View {
         return StatusItemManager.formatTokens(Int(value))
     }
 
+    /// Auto-scaled Y domain for the trend chart: spans the visible data plus
+    /// padding so lines aren't flattened when the range is narrow, clamped to
+    /// 0…100 elsewhere. Empty series → full domain. Tested.
+    nonisolated static func remainingDomain(_ series: [TrendSeries]) -> ClosedRange<Double> {
+        let values = series.flatMap { $0.samples.map(\.remaining) }
+        guard let low = values.min(), let high = values.max() else { return 0...100 }
+        let pad = max((high - low) * 0.15, 5)
+        let lower = max(0, (low - pad).rounded(.down))
+        let upper = min(100, (high + pad).rounded(.up))
+        guard lower < upper else { return lower == 0 ? 0...10 : (lower - 10)...lower }
+        return lower...upper
+    }
+
+    /// Gridline values at multiples of 10 inside the domain (5 when that
+    /// would leave fewer than three lines). Tested.
+    nonisolated static func yTicks(in domain: ClosedRange<Double>) -> [Double] {
+        for step in [10.0, 5.0] {
+            let ticks = stride(from: (domain.lowerBound / step).rounded(.up) * step,
+                               through: domain.upperBound, by: step)
+                .map { ($0 / step).rounded() * step }
+                .filter { $0 >= domain.lowerBound && $0 <= domain.upperBound }
+            if ticks.count >= 3 { return ticks }
+        }
+        return [domain.lowerBound, domain.upperBound]
+    }
+
+    private var remainingDomain: ClosedRange<Double> {
+        Self.remainingDomain(trendSeries)
+    }
+
+    private var trendYTicks: [Double] {
+        Self.yTicks(in: remainingDomain)
+    }
+
     // MARK: Toolbar
 
     private var toolbar: some View {
@@ -538,7 +572,7 @@ struct ModelsView: View {
                         }
                     }
                 }
-                .chartYScale(domain: 0...100)
+                .chartYScale(domain: remainingDomain)
                 .chartXAxis {
                     // Tick stride follows the range span, not the window: a
                     // Rolling window in a 7d range gets daily ticks, not 28
@@ -561,7 +595,7 @@ struct ModelsView: View {
                     }
                 }
                 .chartYAxis {
-                    AxisMarks(position: .trailing, values: [0, 25, 50, 75, 100]) { value in
+                    AxisMarks(position: .trailing, values: trendYTicks) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let remaining = value.as(Double.self) {
