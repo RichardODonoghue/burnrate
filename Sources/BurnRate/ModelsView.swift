@@ -112,9 +112,16 @@ struct ModelsView: View {
     @ObservedObject var viewModel: ModelUsageViewModel
 
     enum Range: String, CaseIterable, Identifiable {
-        case today = "Today", week = "7d", month = "30d"
+        case today = "24h", week = "7d", month = "30d"
         var id: String { rawValue }
-        var days: Int { self == .today ? 1 : (self == .week ? 7 : 30) }
+        /// Trailing window behind "now" — ranges are rolling, not calendar.
+        var span: TimeInterval {
+            switch self {
+            case .today: 24 * 3600
+            case .week: 7 * 86400
+            case .month: 30 * 86400
+            }
+        }
     }
     enum Metric: String, CaseIterable, Identifiable {
         case tokens = "Tokens", cost = "Cost"
@@ -124,6 +131,7 @@ struct ModelsView: View {
     @State private var metric: Metric = .tokens
     @State private var providerFilter: String?
     @State private var trendWindow: String = "Rolling"
+    @State private var selectedDate: Date?
 
     /// Window labels actually present in history (for the selected provider
     /// filter). Claude reports Rolling/Weekly plus model-scoped weeklies
@@ -154,7 +162,7 @@ struct ModelsView: View {
     /// filteredRangeDaily) — the trend chart used to ignore `range` and
     /// always plot the full retention.
     nonisolated static func trendCutoff(for range: Range, now: Date) -> Date {
-        Calendar.current.startOfDay(for: now.addingTimeInterval(-Double(range.days - 1) * 86400))
+        now.addingTimeInterval(-range.span)
     }
 
     private var rangeCutoff: Date {
@@ -233,8 +241,106 @@ struct ModelsView: View {
     }
 
     private var filteredRangeDaily: [DailyModelUsage] {
-        let start = Calendar.current.startOfDay(for: Date().addingTimeInterval(-Double(range.days - 1) * 86400))
+        // Day buckets can't split: include whole buckets overlapping the
+        // trailing window (a 24h range shows today's + yesterday's bars).
+        let cutoff = Date().addingTimeInterval(-range.span)
+        let start = Calendar.current.startOfDay(for: cutoff)
         return filteredDaily.filter { $0.day >= start }
+    }
+
+    /// X-axis tick density follows the range span — a Rolling window in a 7d
+    /// range gets daily ticks, not 6-hourly ones. Tested.
+    nonisolated static func trendXHourly(range: Range) -> Bool {
+        range == .today
+    }
+
+    /// Midnight + noon ticks across the visible span (7d/30d ranges).
+    /// Explicit dates (not a stride) so ticks land exactly on 00:00/12:00.
+    /// Tested.
+    nonisolated static func trendTickDates(
+        cutoff: Date,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> [Date] {
+        var ticks: [Date] = []
+        var day = calendar.startOfDay(for: cutoff)
+        while day <= now {
+            if day >= cutoff { ticks.append(day) }
+            if let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day),
+               noon >= cutoff && noon <= now {
+                ticks.append(noon)
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return ticks.sorted()
+    }
+
+    /// Midnight ticks read as the weekday, noon ticks as 12pm. Tested.
+    nonisolated static func trendTickLabel(_ date: Date, calendar: Calendar = .current) -> String {
+        calendar.component(.hour, from: date) == 12
+            ? "12pm"
+            : date.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    /// Nearest point per series to the hovered date, for the tooltip. Tested.
+    nonisolated static func nearestRows(
+        series: [TrendSeries],
+        at date: Date
+    ) -> [(name: String, provider: String, scoped: Bool, remaining: Double)] {
+        series.compactMap { s in
+            guard let point = s.samples.min(by: {
+                abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+            }) else { return nil }
+            return (s.name, s.provider, s.scoped, point.remaining)
+        }
+    }
+
+    private var trendDayTicks: [Date] {
+        Self.trendTickDates(cutoff: rangeCutoff, now: Date())
+    }
+
+    private func trendTooltip(for date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            ForEach(Self.nearestRows(series: trendSeries, at: date), id: \.name) { row in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(SettingsView.color(for: row.provider).opacity(row.scoped ? 0.55 : 1))
+                        .frame(width: 7, height: 7)
+                    Text(row.name)
+                    Spacer(minLength: 12)
+                    Text("\(Int(row.remaining))%")
+                        .monospacedDigit()
+                        .fontWeight(.semibold)
+                }
+                .font(.caption)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .shadow(radius: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.quaternary, lineWidth: 1)
+        )
+        .fixedSize()
+    }
+
+    /// Compact Y-axis labels — Charts defaults to scientific notation for
+    /// large token counts (e.g. 2.5e+06). Tokens shorten k/m/b/t, cost as $.
+    nonisolated static func axisLabel(_ value: Double, metric: Metric) -> String {
+        if metric == .cost {
+            return abs(value) < 1000
+                ? String(format: "$%g", value)
+                : "$" + StatusItemManager.formatTokens(Int(value))
+        }
+        return StatusItemManager.formatTokens(Int(value))
     }
 
     // MARK: Toolbar
@@ -409,20 +515,37 @@ struct ModelsView: View {
                                                    dash: series.scoped ? [6, 4] : []))
                         }
                     }
+                    if let selectedDate {
+                        RuleMark(x: .value("Selected", selectedDate))
+                            .foregroundStyle(.secondary.opacity(0.4))
+                        // Fixed top-right corner: a cursor-anchored tooltip
+                        // collides with the window picker and clips at the
+                        // plot edge.
+                        .annotation(position: .topTrailing, alignment: .trailing, spacing: 4) {
+                            trendTooltip(for: selectedDate)
+                        }
+                    }
                 }
+                .chartXSelection(value: $selectedDate)
                 .chartYScale(domain: 0...100)
                 .chartXAxis {
-                    // Sub-day spans (Rolling, or the Today range): tick every
-                    // 6 hours. Multi-day spans get one tick per day.
-                    if effectiveTrendLabel == "Rolling" || range == .today {
+                    // Tick stride follows the range span, not the window: a
+                    // Rolling window in a 7d range gets daily ticks, not 28
+                    // crowded 6-hour ticks. Multi-day ranges label midnight
+                    // (weekday) plus noon (12pm) each day.
+                    if Self.trendXHourly(range: range) {
                         AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())
                         }
                     } else {
-                        AxisMarks(values: .stride(by: .day)) { value in
+                        AxisMarks(values: trendDayTicks) { value in
                             AxisGridLine()
-                            AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    Text(Self.trendTickLabel(date))
+                                }
+                            }
                         }
                     }
                 }
@@ -519,6 +642,16 @@ struct ModelsView: View {
                 domain: legendModels,
                 range: legendModels.map(byModel)
             )
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(Self.axisLabel(v, metric: metric))
+                        }
+                    }
+                }
+            }
             .frame(height: 220)
         }
         
@@ -540,7 +673,18 @@ struct ModelsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .chartXAxis(metric == .tokens ? .visible : .hidden)
+            .chartXAxis {
+                if metric == .tokens {
+                    AxisMarks { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text(Self.axisLabel(v, metric: metric))
+                            }
+                        }
+                    }
+                }
+            }
             .frame(height: CGFloat(min(filteredTotals.count, 8)) * 34 + 10)
         }
         
