@@ -112,9 +112,16 @@ struct ModelsView: View {
     @ObservedObject var viewModel: ModelUsageViewModel
 
     enum Range: String, CaseIterable, Identifiable {
-        case today = "Today", week = "7d", month = "30d"
+        case today = "24h", week = "7d", month = "30d"
         var id: String { rawValue }
-        var days: Int { self == .today ? 1 : (self == .week ? 7 : 30) }
+        /// Trailing window behind "now" — ranges are rolling, not calendar.
+        var span: TimeInterval {
+            switch self {
+            case .today: 24 * 3600
+            case .week: 7 * 86400
+            case .month: 30 * 86400
+            }
+        }
     }
     enum Metric: String, CaseIterable, Identifiable {
         case tokens = "Tokens", cost = "Cost"
@@ -154,7 +161,7 @@ struct ModelsView: View {
     /// filteredRangeDaily) — the trend chart used to ignore `range` and
     /// always plot the full retention.
     nonisolated static func trendCutoff(for range: Range, now: Date) -> Date {
-        Calendar.current.startOfDay(for: now.addingTimeInterval(-Double(range.days - 1) * 86400))
+        now.addingTimeInterval(-range.span)
     }
 
     private var rangeCutoff: Date {
@@ -233,8 +240,22 @@ struct ModelsView: View {
     }
 
     private var filteredRangeDaily: [DailyModelUsage] {
-        let start = Calendar.current.startOfDay(for: Date().addingTimeInterval(-Double(range.days - 1) * 86400))
+        // Day buckets can't split: include whole buckets overlapping the
+        // trailing window (a 24h range shows today's + yesterday's bars).
+        let cutoff = Date().addingTimeInterval(-range.span)
+        let start = Calendar.current.startOfDay(for: cutoff)
         return filteredDaily.filter { $0.day >= start }
+    }
+
+    /// Compact Y-axis labels — Charts defaults to scientific notation for
+    /// large token counts (e.g. 2.5e+06). Tokens shorten k/m/b/t, cost as $.
+    nonisolated static func axisLabel(_ value: Double, metric: Metric) -> String {
+        if metric == .cost {
+            return abs(value) < 1000
+                ? String(format: "$%g", value)
+                : "$" + StatusItemManager.formatTokens(Int(value))
+        }
+        return StatusItemManager.formatTokens(Int(value))
     }
 
     // MARK: Toolbar
@@ -519,6 +540,16 @@ struct ModelsView: View {
                 domain: legendModels,
                 range: legendModels.map(byModel)
             )
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(Self.axisLabel(v, metric: metric))
+                        }
+                    }
+                }
+            }
             .frame(height: 220)
         }
         
@@ -540,7 +571,18 @@ struct ModelsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .chartXAxis(metric == .tokens ? .visible : .hidden)
+            .chartXAxis {
+                if metric == .tokens {
+                    AxisMarks { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text(Self.axisLabel(v, metric: metric))
+                            }
+                        }
+                    }
+                }
+            }
             .frame(height: CGFloat(min(filteredTotals.count, 8)) * 34 + 10)
         }
         

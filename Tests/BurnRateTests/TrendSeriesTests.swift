@@ -19,13 +19,19 @@ struct TrendSeriesTests {
         )
     }
 
-    @Test func cutoffSpansRangeInWholeDays() {
-        let cal = Calendar.current
-        for (range, days) in [(ModelsView.Range.today, 0), (.week, 6), (.month, 29)] {
+    @Test func cutoffIsTrailingWindow() {
+        for (range, span) in [(ModelsView.Range.today, 24 * 3600.0), (.week, 7 * 86400.0), (.month, 30 * 86400.0)] {
             let cutoff = ModelsView.trendCutoff(for: range, now: now)
-            #expect(cal.component(.hour, from: cutoff) == 0)
-            #expect(cal.dateComponents([.day], from: cutoff, to: cal.startOfDay(for: now)).day == days)
+            #expect(abs(cutoff.timeIntervalSince(now.addingTimeInterval(-span))) < 0.001)
         }
+    }
+
+    @Test func axisLabelsShortenUnits() {
+        #expect(ModelsView.axisLabel(850, metric: .tokens) == "850")
+        #expect(ModelsView.axisLabel(2_500_000, metric: .tokens) == "2.5m")
+        #expect(ModelsView.axisLabel(3_600_000_000, metric: .tokens) == "3.6b")
+        #expect(ModelsView.axisLabel(0.5, metric: .cost) == "$0.5")
+        #expect(ModelsView.axisLabel(2500, metric: .cost) == "$2.5k")
     }
 
     @Test func todayRangeDropsOlderPoints() {
