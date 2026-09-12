@@ -31,7 +31,11 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
 
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
         let now = Date()
-        if now < errorBackoffUntil || now.timeIntervalSince(lastFetch) < Self.minInterval {
+        // Reset-due refresh: a window rolled over after our last fetch, so
+        // the snapshot predates the reset — skip the throttle and refetch.
+        let resetDue = ProviderThrottle.resetDue(windows: lastWindows, lastFetch: lastFetch, now: now)
+        if !resetDue,
+           now < errorBackoffUntil || now.timeIntervalSince(lastFetch) < Self.minInterval {
             return lastWindows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
         }
         lastFetch = now
@@ -43,6 +47,11 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
             errorBackoffUntil = now.addingTimeInterval(Self.backoff)
             return lastWindows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
         }
+    }
+
+    func invalidateCache() {
+        lastFetch = .distantPast
+        errorBackoffUntil = .distantPast
     }
 
     private func performFetch() async throws -> [UsageWindow] {
