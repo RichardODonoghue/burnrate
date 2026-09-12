@@ -586,7 +586,11 @@ struct ModelsView: View {
                         }
                     }
                 }
-                .chartYScale(domain: remainingDomain)
+                // Plot-dimension padding keeps data at exactly 0%/100% off
+                // the plot edge — flush marks are half-clipped by the frame
+                // and look like the line leaves the graph.
+                .chartYScale(domain: remainingDomain,
+                             range: .plotDimension(startPadding: 6, endPadding: 6))
                 .chartXAxis {
                     // Tick stride follows the range span, not the window: a
                     // Rolling window in a 7d range gets daily ticks, not 28
