@@ -134,4 +134,38 @@ struct TrendSeriesTests {
         #expect(series.count == 1)
         #expect(series[0].provider == "OpenCode")
     }
+
+    // MARK: Autoscale
+
+    private func series(_ values: [Double]) -> [ModelsView.TrendSeries] {
+        [("p|x", "P", "P", false, values.map { (date: now, remaining: $0) })]
+    }
+
+    @Test func emptySeriesUsesFullDomain() {
+        #expect(ModelsView.remainingDomain([]) == 0...100)
+    }
+
+    @Test func narrowRangePadsAndTightensDomain() {
+        // Data spans 78–82: pad 5 → 73…87, not 0…100 (which would look flat).
+        let domain = ModelsView.remainingDomain(series([82, 80, 78]))
+        #expect(domain == 73...87)
+    }
+
+    @Test func domainClampsTo0And100() {
+        #expect(ModelsView.remainingDomain(series([2, 0, 1])).lowerBound == 0)
+        #expect(ModelsView.remainingDomain(series([99, 100])).upperBound == 100)
+    }
+
+    @Test func flatSeriesGetsAWindow() {
+        let domain = ModelsView.remainingDomain(series([50, 50, 50]))
+        #expect(domain == 45...55)
+        #expect(domain.lowerBound < 50 && domain.upperBound > 50)
+    }
+
+    @Test func yTicksStayInsideDomain() {
+        // 73…87: decade would be a single line, so step 5 kicks in.
+        #expect(ModelsView.yTicks(in: 73...87) == [75, 80, 85])
+        let decade = ModelsView.yTicks(in: 30...70)
+        #expect(decade == [30, 40, 50, 60, 70])
+    }
 }
