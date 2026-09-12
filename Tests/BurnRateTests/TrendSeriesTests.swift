@@ -168,4 +168,23 @@ struct TrendSeriesTests {
         let decade = ModelsView.yTicks(in: 30...70)
         #expect(decade == [30, 40, 50, 60, 70])
     }
+
+    // MARK: Daily-chart tooltip lookup
+
+    @Test func dayBucketMatchesOnlySameDay() {
+        let cal = Calendar(identifier: .gregorian)
+        let day = cal.startOfDay(for: now)
+        let buckets = [
+            DailyModelUsage(day: day, entries: []),
+            DailyModelUsage(day: cal.date(byAdding: .day, value: -1, to: day)!, entries: []),
+        ]
+
+        // Any instant inside the day resolves to its bucket.
+        let noon = cal.date(byAdding: .hour, value: 12, to: day)!
+        #expect(ModelsView.dayBucket(for: noon, in: buckets, calendar: cal)?.day == day)
+
+        // Empty space between bars (a different day) resolves to nothing.
+        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: day)!
+        #expect(ModelsView.dayBucket(for: twoDaysAgo, in: buckets, calendar: cal) == nil)
+    }
 }
