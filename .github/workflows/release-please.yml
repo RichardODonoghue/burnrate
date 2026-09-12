@@ -1,8 +1,11 @@
 name: Release Please
 
 # Parses conventional commits (feat:/fix:), opens/updates a version-bump
-# PR titled "chore(main): release X.Y.Z"; merging it tags the release,
-# which triggers release.yml (zip + dmg + GitHub Release).
+# PR titled "chore(main): release X.Y.Z"; merging it tags the release and
+# creates the GitHub Release. The tag push itself does NOT trigger
+# release.yml: release-please tags with GITHUB_TOKEN, and GitHub does not
+# let that token raise workflow-triggering events. So we call the release
+# build explicitly when a release was created.
 on:
   push:
     branches: [main]
@@ -14,8 +17,23 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Builds the arm64 zip + dmg and attaches them to the release that
+  # release-please just published.
+  artifacts:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
