@@ -1,5 +1,19 @@
 # AGENTS.md
 
+## Contributing — PRs only (mandatory)
+
+All changes from now on must go through a pull request. Do not commit or push
+directly to `main`.
+
+- Branch from `main` (e.g. `fix/…`, `feat/…`), commit there, push the branch,
+  and open a PR.
+- CI must go green before merge.
+- Prefer squash/rebase merges; keep PRs focused on one change.
+- Commit messages follow conventional commits (`feat:`, `fix:`, `docs:` …) —
+  release-please parses them to version and tag releases.
+- Exception: nothing. Release-please's own "chore(main): release X.Y.Z" PR is
+  the only automated path to `main`.
+
 ## Project
 
 **BurnRate** — macOS native menu-bar app that tracks AI plan usage for OpenCode Go, Anthropic Claude, and OpenAI Codex plans. Swift + SwiftUI, Swift Package Manager only (no Xcode project file). Minimum target: macOS 15 Sequoia.
