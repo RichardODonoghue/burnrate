@@ -131,6 +131,7 @@ struct ModelsView: View {
     @State private var metric: Metric = .tokens
     @State private var providerFilter: String?
     @State private var trendWindow: String = "Rolling"
+    @State private var selectedDate: Date?
 
     /// Window labels actually present in history (for the selected provider
     /// filter). Claude reports Rolling/Weekly plus model-scoped weeklies
@@ -251,6 +252,75 @@ struct ModelsView: View {
     /// range gets daily ticks, not 6-hourly ones. Tested.
     nonisolated static func trendXHourly(range: Range) -> Bool {
         range == .today
+    }
+
+    /// Midnight + noon ticks across the visible span (7d/30d ranges).
+    /// Explicit dates (not a stride) so ticks land exactly on 00:00/12:00.
+    /// Tested.
+    nonisolated static func trendTickDates(
+        cutoff: Date,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> [Date] {
+        var ticks: [Date] = []
+        var day = calendar.startOfDay(for: cutoff)
+        while day <= now {
+            if day >= cutoff { ticks.append(day) }
+            if let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day),
+               noon >= cutoff && noon <= now {
+                ticks.append(noon)
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return ticks.sorted()
+    }
+
+    /// Midnight ticks read as the weekday, noon ticks as 12pm. Tested.
+    nonisolated static func trendTickLabel(_ date: Date, calendar: Calendar = .current) -> String {
+        calendar.component(.hour, from: date) == 12
+            ? "12pm"
+            : date.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    /// Nearest point per series to the hovered date, for the tooltip. Tested.
+    nonisolated static func nearestRows(
+        series: [TrendSeries],
+        at date: Date
+    ) -> [(name: String, provider: String, scoped: Bool, remaining: Double)] {
+        series.compactMap { s in
+            guard let point = s.samples.min(by: {
+                abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+            }) else { return nil }
+            return (s.name, s.provider, s.scoped, point.remaining)
+        }
+    }
+
+    private var trendDayTicks: [Date] {
+        Self.trendTickDates(cutoff: rangeCutoff, now: Date())
+    }
+
+    private func trendTooltip(for date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            ForEach(Self.nearestRows(series: trendSeries, at: date), id: \.name) { row in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(SettingsView.color(for: row.provider).opacity(row.scoped ? 0.55 : 1))
+                        .frame(width: 7, height: 7)
+                    Text(row.name)
+                    Spacer(minLength: 12)
+                    Text("\(Int(row.remaining))%")
+                        .monospacedDigit()
+                        .fontWeight(.semibold)
+                }
+                .font(.caption)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.regularMaterial))
     }
 
     /// Compact Y-axis labels — Charts defaults to scientific notation for
@@ -436,21 +506,34 @@ struct ModelsView: View {
                                                    dash: series.scoped ? [6, 4] : []))
                         }
                     }
+                    if let selectedDate {
+                        RuleMark(x: .value("Selected", selectedDate))
+                            .foregroundStyle(.secondary.opacity(0.4))
+                            .annotation(position: .top, alignment: .center, spacing: 6) {
+                                trendTooltip(for: selectedDate)
+                            }
+                    }
                 }
+                .chartXSelection(value: $selectedDate)
                 .chartYScale(domain: 0...100)
                 .chartXAxis {
                     // Tick stride follows the range span, not the window: a
-                    // Rolling window in a 7d range gets one tick per day at
-                    // midnight, not 28 crowded 6-hour ticks.
+                    // Rolling window in a 7d range gets daily ticks, not 28
+                    // crowded 6-hour ticks. Multi-day ranges label midnight
+                    // (weekday) plus noon (12pm) each day.
                     if Self.trendXHourly(range: range) {
                         AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())
                         }
                     } else {
-                        AxisMarks(values: .stride(by: .day)) { value in
+                        AxisMarks(values: trendDayTicks) { value in
                             AxisGridLine()
-                            AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    Text(Self.trendTickLabel(date))
+                                }
+                            }
                         }
                     }
                 }

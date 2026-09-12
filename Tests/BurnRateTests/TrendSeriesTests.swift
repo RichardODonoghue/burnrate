@@ -40,6 +40,38 @@ struct TrendSeriesTests {
         #expect(!ModelsView.trendXHourly(range: .month))
     }
 
+    @Test func tickDatesAreMidnightsAndNoonsInSpan() {
+        let cal = Calendar.current
+        let cutoff = cal.startOfDay(for: now).addingTimeInterval(-2 * 86400)
+        let ticks = ModelsView.trendTickDates(cutoff: cutoff, now: now)
+        #expect(!ticks.isEmpty)
+        #expect(ticks == ticks.sorted())
+        #expect(ticks.allSatisfy { $0 >= cutoff && $0 <= now })
+        #expect(ticks.allSatisfy {
+            let hour = cal.component(.hour, from: $0)
+            return hour == 0 || hour == 12
+        })
+        // Each spanned day contributes its midnight; each full day a noon.
+        let midnights = ticks.filter { cal.component(.hour, from: $0) == 0 }
+        #expect(midnights.count == 3)
+        #expect(ModelsView.trendTickLabel(cal.date(bySettingHour: 12, minute: 0, second: 0, of: now)!) == "12pm")
+        #expect(ModelsView.trendTickLabel(midnights[0]) != "12pm")
+    }
+
+    @Test func tooltipPicksNearestPointPerSeries() {
+        let series: [ModelsView.TrendSeries] = [
+            (key: "Claude|Rolling", name: "Claude", provider: "Claude", scoped: false, samples: [
+                (date: now.addingTimeInterval(-3600), remaining: 70),
+                (date: now.addingTimeInterval(-1800), remaining: 68),
+            ]),
+            (key: "Empty|x", name: "Empty", provider: "Empty", scoped: false, samples: []),
+        ]
+        let rows = ModelsView.nearestRows(series: series, at: now.addingTimeInterval(-2000))
+        #expect(rows.count == 1)
+        #expect(rows[0].name == "Claude")
+        #expect(rows[0].remaining == 68)
+    }
+
     @Test func todayRangeDropsOlderPoints() {
         let samples = [
             sample("Claude", "Rolling", hoursAgo: 0.2, remaining: 70),
