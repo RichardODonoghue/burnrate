@@ -247,6 +247,12 @@ struct ModelsView: View {
         return filteredDaily.filter { $0.day >= start }
     }
 
+    /// X-axis tick density follows the range span — a Rolling window in a 7d
+    /// range gets daily ticks, not 6-hourly ones. Tested.
+    nonisolated static func trendXHourly(range: Range) -> Bool {
+        range == .today
+    }
+
     /// Compact Y-axis labels — Charts defaults to scientific notation for
     /// large token counts (e.g. 2.5e+06). Tokens shorten k/m/b/t, cost as $.
     nonisolated static func axisLabel(_ value: Double, metric: Metric) -> String {
@@ -433,9 +439,10 @@ struct ModelsView: View {
                 }
                 .chartYScale(domain: 0...100)
                 .chartXAxis {
-                    // Sub-day spans (Rolling, or the Today range): tick every
-                    // 6 hours. Multi-day spans get one tick per day.
-                    if effectiveTrendLabel == "Rolling" || range == .today {
+                    // Tick stride follows the range span, not the window: a
+                    // Rolling window in a 7d range gets one tick per day at
+                    // midnight, not 28 crowded 6-hour ticks.
+                    if Self.trendXHourly(range: range) {
                         AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())

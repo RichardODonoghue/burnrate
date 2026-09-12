@@ -34,6 +34,12 @@ struct TrendSeriesTests {
         #expect(ModelsView.axisLabel(2500, metric: .cost) == "$2.5k")
     }
 
+    @Test func tickStrideFollowsRangeNotWindow() {
+        #expect(ModelsView.trendXHourly(range: .today))
+        #expect(!ModelsView.trendXHourly(range: .week))
+        #expect(!ModelsView.trendXHourly(range: .month))
+    }
+
     @Test func todayRangeDropsOlderPoints() {
         let samples = [
             sample("Claude", "Rolling", hoursAgo: 0.2, remaining: 70),
