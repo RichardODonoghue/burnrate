@@ -546,7 +546,11 @@ struct ModelsView: View {
                                 y: .value("Remaining", point.remaining)
                             )
                             .foregroundStyle(by: .value("Series", series.name))
-                            .interpolationMethod(.catmullRom)
+                            // Monotone, not catmullRom: a spline through a
+                            // sharp reset overshoots past the data (below 0%
+                            // / above 100%), and Charts doesn't clip marks to
+                            // the plot, so the line escaped the graph.
+                            .interpolationMethod(.monotone)
                             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round,
                                                    dash: series.scoped ? [6, 4] : []))
                         }
