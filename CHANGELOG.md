@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/RichardODonoghue/burnrate/compare/v0.2.0...v0.2.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* attach zip + dmg to releases ([523a9cc](https://github.com/RichardODonoghue/burnrate/commit/523a9ccc02115f9d8140af5d1c6861c0aca0e1f0))
+* attach zip + dmg to releases (release-please tags don't trigger workflows) ([5d00fd8](https://github.com/RichardODonoghue/burnrate/commit/5d00fd8aa0e86c4fe2993af0cc9343896848d91a))
+
 ## [0.2.0](https://github.com/RichardODonoghue/burnrate/compare/v0.1.1...v0.2.0) (2026-09-12)
 
 
