@@ -62,7 +62,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier = MilestoneNotifier(settingsStore: settingsStore)
 
         poll()
-        // Poll every 5 minutes; keep running while backgrounded.
+        startPollTimer()
+        // Sleep freezes snapshots and throttle state; a window may have reset
+        // while the Mac was asleep, so refresh immediately on wake.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshAfterWake()
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        pollTimer?.invalidate()
+    }
+
+    /// (Re)starts the 5-minute poll cadence; keep running while backgrounded.
+    private func startPollTimer() {
+        pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.poll()
@@ -70,8 +88,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        pollTimer?.invalidate()
+    /// Fresh data after sleep: drop pre-sleep throttle state, poll now, and
+    /// restart the cadence so the timer doesn't fire on its stale schedule.
+    private func refreshAfterWake() {
+        Task { [weak self, providers] in
+            for provider in providers { await provider.invalidateCache() }
+            self?.poll()
+        }
+        startPollTimer()
     }
 
     /// Copies user settings/history from the legacy bundle-ID defaults

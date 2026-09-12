@@ -6,6 +6,22 @@ protocol UsageProvider: Actor {
     nonisolated var name: String { get }
     /// `capacities` comes from settings at call time (weighted-token units).
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage?
+    /// Drop throttle state so the next fetch hits the network (sleep/wake,
+    /// passed reset). Keeps the last snapshot for offline fallback.
+    func invalidateCache()
+}
+
+/// Shared throttle policy for vendor quota providers.
+enum ProviderThrottle {
+    /// True when a window's reset moment passed after our last fetch — the
+    /// snapshot predates the reset (the Mac slept through it, or fetches
+    /// were backing off), so fetch fresh instead of serving cache.
+    static func resetDue(windows: [UsageWindow]?, lastFetch: Date, now: Date) -> Bool {
+        windows?.contains {
+            guard let resetsAt = $0.resetsAt else { return false }
+            return now >= resetsAt && lastFetch < resetsAt
+        } ?? false
+    }
 }
 
 /// Wraps a local UsageSource (token log parsing) as a UsageProvider.
@@ -32,6 +48,10 @@ actor LocalUsageProvider: UsageProvider {
                 capacities: capacities
             )
         )
+    }
+
+    func invalidateCache() {
+        // No cache — every fetch re-reads the logs.
     }
 }
 
@@ -70,7 +90,11 @@ actor ClaudeUsageAPIProvider: UsageProvider {
 
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
         let now = Date()
-        if now < errorBackoffUntil || now.timeIntervalSince(lastFetch) < Self.minInterval {
+        // Reset-due refresh: a window rolled over after our last fetch, so
+        // the snapshot predates the reset — skip the throttle and refetch.
+        let resetDue = ProviderThrottle.resetDue(windows: lastWindows, lastFetch: lastFetch, now: now)
+        if !resetDue,
+           now < errorBackoffUntil || now.timeIntervalSince(lastFetch) < Self.minInterval {
             return lastWindows.map { ProviderUsage(providerName: name, plan: plan, windows: $0) }
         }
         lastFetch = now
@@ -83,6 +107,11 @@ actor ClaudeUsageAPIProvider: UsageProvider {
             errorBackoffUntil = now.addingTimeInterval(Self.backoff)
             return lastWindows.map { ProviderUsage(providerName: name, plan: plan, windows: $0) }
         }
+    }
+
+    func invalidateCache() {
+        lastFetch = .distantPast
+        errorBackoffUntil = .distantPast
     }
 
     private func performFetch() async throws -> [UsageWindow] {
