@@ -132,6 +132,8 @@ struct ModelsView: View {
     @State private var providerFilter: String?
     @State private var trendWindow: String = "Rolling"
     @State private var selectedDate: Date?
+    /// Measured tooltip size, so it can be kept inside the plot at the edges.
+    @State private var tooltipSize: CGSize = .zero
 
     /// Window labels actually present in history (for the selected provider
     /// filter). Claude reports Rolling/Weekly plus model-scoped weeklies
@@ -544,7 +546,11 @@ struct ModelsView: View {
                                 y: .value("Remaining", point.remaining)
                             )
                             .foregroundStyle(by: .value("Series", series.name))
-                            .interpolationMethod(.catmullRom)
+                            // Monotone, not catmullRom: a spline through a
+                            // sharp reset overshoots past the data (below 0%
+                            // / above 100%), and Charts doesn't clip marks to
+                            // the plot, so the line escaped the graph.
+                            .interpolationMethod(.monotone)
                             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round,
                                                    dash: series.scoped ? [6, 4] : []))
                         }
@@ -564,15 +570,31 @@ struct ModelsView: View {
                            let x = proxy.position(forX: selectedDate),
                            let plot = proxy.plotFrame {
                             let plotFrame = geometry[plot]
+                            let halfW = tooltipSize.width / 2
+                            let halfH = tooltipSize.height / 2
                             trendTooltip(for: selectedDate)
+                                // Keep the whole tooltip inside the plot:
+                                // centring it on the cursor clips it at the
+                                // left/right/top edges.
+                                .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                                    tooltipSize = $0
+                                }
                                 .position(
-                                    x: plotFrame.minX + x,
-                                    y: plotFrame.minY + 44
+                                    x: min(max(plotFrame.minX + x,
+                                               plotFrame.minX + halfW),
+                                           plotFrame.maxX - halfW),
+                                    y: min(max(plotFrame.minY + 44,
+                                               plotFrame.minY + halfH),
+                                           plotFrame.maxY - halfH)
                                 )
                         }
                     }
                 }
-                .chartYScale(domain: remainingDomain)
+                // Plot-dimension padding keeps data at exactly 0%/100% off
+                // the plot edge — flush marks are half-clipped by the frame
+                // and look like the line leaves the graph.
+                .chartYScale(domain: remainingDomain,
+                             range: .plotDimension(startPadding: 6, endPadding: 6))
                 .chartXAxis {
                     // Tick stride follows the range span, not the window: a
                     // Rolling window in a 7d range gets daily ticks, not 28
