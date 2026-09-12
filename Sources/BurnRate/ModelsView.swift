@@ -320,7 +320,16 @@ struct ModelsView: View {
             }
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.regularMaterial))
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .shadow(radius: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.quaternary, lineWidth: 1)
+        )
+        .fixedSize()
     }
 
     /// Compact Y-axis labels — Charts defaults to scientific notation for
@@ -509,9 +518,12 @@ struct ModelsView: View {
                     if let selectedDate {
                         RuleMark(x: .value("Selected", selectedDate))
                             .foregroundStyle(.secondary.opacity(0.4))
-                            .annotation(position: .top, alignment: .center, spacing: 6) {
-                                trendTooltip(for: selectedDate)
-                            }
+                        // Fixed top-right corner: a cursor-anchored tooltip
+                        // collides with the window picker and clips at the
+                        // plot edge.
+                        .annotation(position: .topTrailing, alignment: .trailing, spacing: 4) {
+                            trendTooltip(for: selectedDate)
+                        }
                     }
                 }
                 .chartXSelection(value: $selectedDate)
