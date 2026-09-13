@@ -187,4 +187,25 @@ struct TrendSeriesTests {
         let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: day)!
         #expect(ModelsView.dayBucket(for: twoDaysAgo, in: buckets, calendar: cal) == nil)
     }
+
+    // MARK: Usage-card filters
+
+    @Test func rollingCardHonorsProviderFilter() {
+        let samples = [
+            sample("Claude", "Rolling", hoursAgo: 2, remaining: 40),
+            sample("Claude", "Rolling", hoursAgo: 1, remaining: 35),   // newest wins
+            sample("OpenCode", "Rolling", hoursAgo: 1, remaining: 80),
+            sample("Claude", "Weekly", hoursAgo: 1, remaining: 90),    // wrong window
+        ]
+
+        let unfiltered = ModelsView.latestRolling(samples: samples, providerFilter: nil)
+        #expect(unfiltered.count == 2)
+
+        let claudeOnly = ModelsView.latestRolling(samples: samples, providerFilter: "Claude")
+        #expect(claudeOnly.count == 1)
+        #expect(claudeOnly.first?.provider == "Claude")
+        #expect(claudeOnly.first?.remaining == 35)
+
+        #expect(ModelsView.latestRolling(samples: samples, providerFilter: "Codex").isEmpty)
+    }
 }
