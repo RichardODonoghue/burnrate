@@ -6,6 +6,7 @@ import AppKit
 final class StatusItemManager: NSObject {
     private let usageStore: UsageStore
     private let settingsStore: SettingsStore
+    private let updater: Updater
     private var onOpenDashboard: (() -> Void)?
     private var onOpenSettings: (() -> Void)?
 
@@ -13,9 +14,10 @@ final class StatusItemManager: NSObject {
     /// Extra widgets, keyed by provider name.
     private var widgetItems: [String: NSStatusItem] = [:]
 
-    init(usageStore: UsageStore, settingsStore: SettingsStore) {
+    init(usageStore: UsageStore, settingsStore: SettingsStore, updater: Updater) {
         self.usageStore = usageStore
         self.settingsStore = settingsStore
+        self.updater = updater
         super.init()
     }
 
@@ -152,6 +154,30 @@ final class StatusItemManager: NSObject {
         models.target = self
         menu.addItem(models)
 
+        // Surface an available update right in the dropdown; otherwise offer
+        // a manual check next to Settings.
+        if let update = updater.available {
+            let item = NSMenuItem(
+                title: "Update to \(update.version)…",
+                action: #selector(installUpdate),
+                keyEquivalent: ""
+            )
+            item.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
+            item.target = self
+            item.isEnabled = !updater.status.isBusy
+            menu.addItem(item)
+        } else {
+            let check = NSMenuItem(
+                title: "Check for Updates…",
+                action: #selector(checkForUpdates),
+                keyEquivalent: ""
+            )
+            check.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)
+            check.target = self
+            check.isEnabled = !updater.status.isBusy
+            menu.addItem(check)
+        }
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         settings.target = self
@@ -168,6 +194,15 @@ final class StatusItemManager: NSObject {
 
     @objc private func openModels() {
         onOpenDashboard?()
+    }
+
+    @objc private func checkForUpdates() {
+        Task { await updater.check() }
+    }
+
+    @objc private func installUpdate() {
+        guard let update = updater.available else { return }
+        Task { await updater.install(update) }
     }
 
     /// Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t.
