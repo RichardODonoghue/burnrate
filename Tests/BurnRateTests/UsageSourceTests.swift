@@ -23,6 +23,18 @@ struct UsageSourceTests {
         #expect(try ClaudeUsageSource.parseFile(at: url).isEmpty)
     }
 
+    @Test func skipsSyntheticClaudeTurns() throws {
+        // Claude Code writes "<synthetic>" zero-usage placeholders for
+        // locally generated turns; they must not appear as a model.
+        let synthetic = #"{"timestamp":"2026-09-08T10:00:00.000Z","type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#
+        let real = #"{"timestamp":"2026-09-08T10:00:01.000Z","type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#
+        let url = try writeTemp(synthetic + "\n" + real + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let samples = try ClaudeUsageSource.parseFile(at: url)
+        #expect(samples.count == 1)
+        #expect(samples[0].model == "claude-opus-5")
+    }
+
     @Test func dedupesRepeatedRequestIdsKeepingLast() throws {
         // Same request logged three times (streaming/resume); last is final.
         let lines = #"""
@@ -50,10 +62,14 @@ struct UsageSourceTests {
     }
 
     @Test func parsesOpenCodeMessageJSON() throws {
-        let json = #"{"role":"assistant","cost":0.11,"tokens":{"total":56022,"input":55815,"output":53,"reasoning":154,"cache":{"write":0,"read":0}},"providerID":"opencode-go","time":{"created":1788830155613}}"#
+        let json = #"{"role":"assistant","cost":0.11,"tokens":{"total":56022,"input":55815,"output":53,"reasoning":154,"cache":{"write":0,"read":0}},"providerID":"opencode-go","modelID":"deepseek-v4-flash","time":{"created":1788830155613}}"#
         let sample = OpenCodeUsageSource.parseMessageJSON(json)
-        #expect(sample?.tokens == TokenUsage(input: 55815, output: 53, cacheRead: 0, cacheWrite: 0))
+        #expect(sample?.tokens == TokenUsage(input: 55815, output: 53, cacheRead: 0, cacheWrite: 0, reasoning: 154))
+        // Reasoning counts toward the total, matching OpenCode's own `total`.
+        #expect(sample?.tokens.total == 56022)
         #expect(sample?.timestamp.timeIntervalSince1970 == 1788830155.613)
+        #expect(sample?.model == "deepseek-v4-flash")
+        #expect(sample?.sourceTag == "opencode-go")
     }
 
     @Test func parsesOpenCodeSQLiteSnapshot() throws {
@@ -70,6 +86,10 @@ struct UsageSourceTests {
         let samples = try OpenCodeUsageSource.querySamples(from: db, providerIDFilter: "opencode-go", cutoffMs: cutoffMs)
         #expect(samples.count == 1)
         #expect(samples[0].tokens.total == 1150)
+        #expect(samples[0].sourceTag == "opencode-go")
+        // providerIDFilter still excludes other providers' rows.
+        let all = try OpenCodeUsageSource.querySamples(from: db, providerIDFilter: nil, cutoffMs: cutoffMs)
+        #expect(all.count == 1)
     }
 
     private func writeTemp(_ content: String) throws -> URL {

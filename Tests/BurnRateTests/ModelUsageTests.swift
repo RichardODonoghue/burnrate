@@ -72,4 +72,69 @@ struct ModelUsageTests {
         let samples = [sample("claude-haiku-4", 900_000, minutesAgo: 5)]
         #expect(ModelBurnEvaluator.detect(samples: samples, alert: alert, now: now, pollInterval: 300) != nil)
     }
+
+    // MARK: Sub-source tags (OpenCode Go vs Zen)
+
+    private func taggedSample(_ model: String, tag: String, tokens: Int, minutesAgo: Double) -> UsageSample {
+        UsageSample(
+            timestamp: now.addingTimeInterval(-minutesAgo * 60),
+            tokens: TokenUsage(input: tokens, output: 0, cacheRead: 0, cacheWrite: 0),
+            model: model,
+            cost: nil,
+            sourceTag: tag
+        )
+    }
+
+    @Test func sameModelOnDifferentSourcesStaysSeparate() {
+        let buckets = [(provider: "OpenCode", samples: [
+            taggedSample("deepseek-v4-flash", tag: "opencode-go", tokens: 100, minutesAgo: 10),
+            taggedSample("deepseek-v4-flash", tag: "opencode", tokens: 40, minutesAgo: 20),
+        ])]
+        let entries = ModelUsageAggregator.totals(buckets: buckets)
+        #expect(entries.count == 2)
+        #expect(entries.first { $0.sourceTag == "opencode-go" }?.totalTokens == 100)
+        #expect(entries.first { $0.sourceTag == "opencode" }?.totalTokens == 40)
+        // Distinct ids so SwiftUI lists and cache merges don't collide.
+        #expect(Set(entries.map(\.id)).count == 2)
+    }
+
+    @Test func tagLabelsReadAsServices() {
+        #expect(ModelUsageEntry.tagLabel(for: "opencode-go") == "Go")
+        #expect(ModelUsageEntry.tagLabel(for: "opencode") == "Zen")
+        #expect(ModelUsageEntry.tagLabel(for: "ollama") == "Ollama")
+        #expect(ModelUsageEntry.tagLabel(for: "custom-thing") == "custom-thing")
+
+        let entry = ModelUsageEntry(provider: "OpenCode", model: "deepseek-v4-flash", tokens: .zero,
+                                    cost: 0, requests: 0, sourceTag: "opencode-go")
+        #expect(entry.displayName == "deepseek-v4-flash · Go")
+
+        // Untagged sources (Claude, Codex) keep their plain names.
+        let plain = ModelUsageEntry(provider: "Claude", model: "claude-opus-5", tokens: .zero,
+                                    cost: 0, requests: 0, sourceTag: nil)
+        #expect(plain.displayName == "claude-opus-5")
+        #expect(plain.tagLabel == nil)
+    }
+
+    @Test func reasoningTokensCountTowardTotals() {
+        let samples = [
+            UsageSample(
+                timestamp: now.addingTimeInterval(-60),
+                tokens: TokenUsage(input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 40),
+                model: "deepseek-v4-flash",
+                cost: nil,
+                sourceTag: "opencode-go"
+            )
+        ]
+        let entries = ModelUsageAggregator.totals(buckets: [("OpenCode", samples)])
+        #expect(entries.first?.tokens.reasoning == 40)
+        #expect(entries.first?.totalTokens == 150)
+    }
+
+    @Test func legacyTokenUsageDecodesWithoutReasoning() throws {
+        // Samples were persisted before `reasoning` existed.
+        let json = #"{"input":10,"output":2,"cacheRead":3,"cacheWrite":4}"#
+        let decoded = try JSONDecoder().decode(TokenUsage.self, from: Data(json.utf8))
+        #expect(decoded.reasoning == 0)
+        #expect(decoded.total == 19)
+    }
 }
