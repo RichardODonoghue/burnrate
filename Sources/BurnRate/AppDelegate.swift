@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// and the Codex fallback all read the same incremental caches.
     private var localSources: [(name: String, source: any UsageSource)] = []
     private var modelUsageViewModel: ModelUsageViewModel?
+    private let updater = Updater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single instance: a second copy would double every notification.
@@ -52,12 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LocalUsageProvider(source: sharedSources[2].source),
         ]
 
-        let manager = StatusItemManager(usageStore: usageStore, settingsStore: settingsStore)
+        let manager = StatusItemManager(usageStore: usageStore, settingsStore: settingsStore, updater: updater)
         manager.start(
             onOpenDashboard: { [weak self] in self?.openAppWindow(pane: .usage) },
             onOpenSettings: { [weak self] in self?.openAppWindow(pane: .notifications) }
         )
         statusManager = manager
+        // Rebuild the menu when an update is found / its state changes.
+        updater.onStateChange = { [weak self] in self?.statusManager?.refreshMenu() }
+        updater.start()
 
         notifier = MilestoneNotifier(settingsStore: settingsStore)
 
@@ -211,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 providerNames: usageStore.current.map(\.providerName),
                 modelNames: Array(Set(modelUsageViewModel?.totals.map(\.model) ?? []).sorted()),
                 viewModel: modelUsageViewModel ?? ModelUsageViewModel(sources: []),
+                updater: updater,
                 initialPane: pane
             )
         )

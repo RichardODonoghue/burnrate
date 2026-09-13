@@ -66,17 +66,24 @@ jobs:
           hdiutil create -volname "BurnRate $VER" -srcfolder dmg-staging \
             -format UDZO -ov "BurnRate-$VER-arm64.dmg"
 
+      # Publish checksums: the in-app updater refuses to install a release
+      # that doesn't include a matching SHA256SUMS entry.
+      - name: Generate checksums
+        run: |
+          shasum -a 256 BurnRate-*.zip BurnRate-*.dmg > SHA256SUMS
+          cat SHA256SUMS
+
       # gh CLI rather than a release action: when release-please already
       # published the release we only add assets and leave its notes intact;
       # for a manual tag we create the release first.
-      - name: Attach zip + dmg to the GitHub release
+      - name: Attach zip, dmg + checksums to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
         run: |
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" BurnRate-*.zip BurnRate-*.dmg --clobber
+          gh release upload "$TAG" BurnRate-*.zip BurnRate-*.dmg SHA256SUMS --clobber
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

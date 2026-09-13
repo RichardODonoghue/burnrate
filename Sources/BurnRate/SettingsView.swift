@@ -16,6 +16,7 @@ struct SettingsView: View {
     let providerNames: [String]
     let modelNames: [String]
     let viewModel: ModelUsageViewModel
+    @ObservedObject var updater: Updater
 
     @State private var selection: AppPane
 
@@ -24,12 +25,14 @@ struct SettingsView: View {
         providerNames: [String],
         modelNames: [String],
         viewModel: ModelUsageViewModel,
+        updater: Updater,
         initialPane: AppPane = .notifications
     ) {
         self.store = store
         self.providerNames = providerNames
         self.modelNames = modelNames
         self.viewModel = viewModel
+        self.updater = updater
         _selection = State(initialValue: initialPane)
     }
 
@@ -57,7 +60,7 @@ struct SettingsView: View {
             case .widgets:
                 WidgetsView(store: store, providerNames: providerNames)
             case .about:
-                AboutView()
+                AboutView(updater: updater)
             }
         }
         .frame(minWidth: 860, minHeight: 560)
@@ -513,6 +516,8 @@ private struct WidgetsView: View {
 // MARK: - About
 
 private struct AboutView: View {
+    @ObservedObject var updater: Updater
+
     /// The shipped bundle icon — identical to Dock and notification banners.
     /// (The live renderer tints by severity; About must not.)
     private static func bundleIcon() -> NSImage {
@@ -539,6 +544,10 @@ private struct AboutView: View {
                 .padding(.vertical, 8)
             }
 
+            Section("Updates") {
+                updateRow
+            }
+
             Section("What it does") {
                 Label("Live menu-bar usage for your AI plan subscriptions", systemImage: "gauge.medium")
                 Label("Usage dashboard: plan windows, remaining-% trends, per-model stats and breakdowns", systemImage: "chart.bar.doc.horizontal")
@@ -553,8 +562,59 @@ private struct AboutView: View {
         }
         .formStyle(.grouped)
     }
+
+    // MARK: Updates
+
+    @ViewBuilder
+    private var updateRow: some View {
+        if let update = updater.available {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Version \(update.version) is available", systemImage: "arrow.down.circle.fill")
+                    .foregroundStyle(.orange)
+                HStack {
+                    Button("Install Update") {
+                        Task { await updater.install(update) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(updater.status.isBusy)
+                    Button("Release Notes") {
+                        NSWorkspace.shared.open(update.releaseURL)
+                    }
+                    Spacer()
+                    updateStatusText
+                }
+            }
+        } else {
+            HStack {
+                Text("Version \(AppInfo.version)")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                updateStatusText
+                Button("Check for Updates") {
+                    Task { await updater.check() }
+                }
+                .disabled(updater.status.isBusy)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var updateStatusText: some View {
+        switch updater.status {
+        case .checking: Text("Checking…").foregroundStyle(.secondary)
+        case .downloading: Text("Downloading…").foregroundStyle(.secondary)
+        case .installing: Text("Installing — BurnRate will relaunch").foregroundStyle(.secondary)
+        case .upToDate: Text("Up to date").foregroundStyle(.secondary)
+        case .failed(let message): Text(message).foregroundStyle(.red)
+        default: EmptyView()
+        }
+    }
 }
 
 enum AppInfo {
-    static let version = "0.1.0"
+    /// Marketing version from the bundle ("0.0.0" for `swift run`, which has
+    /// no Info.plist) — update checks compare against this.
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
 }
