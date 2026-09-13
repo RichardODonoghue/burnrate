@@ -527,10 +527,15 @@ struct ModelsView: View {
         }
     }
 
-    /// Latest vendor-reported Rolling remaining % per provider.
-    private var latestRolling: [(provider: String, remaining: Double)] {
+    /// Latest vendor-reported Rolling remaining % per provider, honoring the
+    /// provider filter. Pure (tested).
+    nonisolated static func latestRolling(
+        samples: [RemainingSample],
+        providerFilter: String?
+    ) -> [(provider: String, remaining: Double)] {
         var latest: [String: (date: Date, remaining: Double)] = [:]
-        for sample in viewModel.remainingHistory where sample.label == "Rolling" {
+        for sample in samples
+        where sample.label == "Rolling" && (providerFilter == nil || sample.provider == providerFilter) {
             if let current = latest[sample.provider] {
                 if sample.date > current.date { latest[sample.provider] = (sample.date, sample.remaining) }
             } else {
@@ -541,9 +546,14 @@ struct ModelsView: View {
             .sorted { $0.remaining < $1.remaining }
     }
 
+    private var latestRolling: [(provider: String, remaining: Double)] {
+        Self.latestRolling(samples: viewModel.remainingHistory, providerFilter: providerFilter)
+    }
+
+    /// Today's entries for the cards, honoring the provider filter.
     private var todayEntries: [ModelUsageEntry] {
-        let start = Calendar.current.startOfDay(for: Date())
-        return viewModel.daily.first { $0.day >= start }?.entries ?? []
+        guard let day = Self.dayBucket(for: Date(), in: viewModel.daily) else { return [] }
+        return entries(for: day)
     }
 
     private var rollingCard: some View {
