@@ -162,6 +162,10 @@ actor ClaudeUsageSource: UsageSource {
                   let timestamp = (obj["timestamp"] as? String).flatMap(LogDate.parse)
             else { continue }
 
+            // Claude Code writes zero-usage placeholder lines for synthetic
+            // (locally generated) turns; they are not a model.
+            if (message["model"] as? String) == "<synthetic>" { continue }
+
             let tokens = TokenUsage(
                 input: usage["input_tokens"] as? Int ?? 0,
                 output: usage["output_tokens"] as? Int ?? 0,
@@ -343,10 +347,12 @@ actor OpenCodeUsageSource: UsageSource {
                 input: tokens["input"] as? Int ?? 0,
                 output: tokens["output"] as? Int ?? 0,
                 cacheRead: cache?["read"] as? Int ?? 0,
-                cacheWrite: cache?["write"] as? Int ?? 0
+                cacheWrite: cache?["write"] as? Int ?? 0,
+                reasoning: tokens["reasoning"] as? Int ?? 0
             ),
             model: obj["modelID"] as? String,
-            cost: obj["cost"] as? Double
+            cost: obj["cost"] as? Double,
+            sourceTag: obj["providerID"] as? String
         )
     }
 }

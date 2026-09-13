@@ -2,16 +2,38 @@ import Foundation
 
 // MARK: - Aggregation
 
-/// Usage totals for one (provider, model) pair.
+/// Usage totals for one (provider, model[, sub-source]) triple.
 struct ModelUsageEntry: Identifiable, Codable, Equatable {
     var provider: String
     var model: String
     var tokens: TokenUsage
     var cost: Double
     var requests: Int
+    /// Sub-source tag (OpenCode's providerID: "opencode-go", "opencode", …).
+    var sourceTag: String?
 
-    var id: String { "\(provider)|\(model)" }
+    var id: String {
+        sourceTag.map { "\(provider)|\($0)|\(model)" } ?? "\(provider)|\(model)"
+    }
     var totalTokens: Int { tokens.total }
+
+    /// Friendly sub-source name: "Go", "Zen", "Ollama", "LM Studio", "OMLX".
+    var tagLabel: String? { sourceTag.map(Self.tagLabel(for:)) }
+
+    /// Model name, qualified by the sub-source when there is one — Go's
+    /// models and Zen's are distinct services and must read differently.
+    var displayName: String { tagLabel.map { "\(model) · \($0)" } ?? model }
+
+    static func tagLabel(for tag: String) -> String {
+        switch tag {
+        case "opencode-go": "Go"
+        case "opencode": "Zen"
+        case "ollama": "Ollama"
+        case "lmstudio": "LM Studio"
+        case "omlx": "OMLX"
+        default: tag
+        }
+    }
 }
 
 /// One day of per-model usage (day is local start-of-day).
@@ -35,13 +57,16 @@ enum ModelUsageAggregator {
             for sample in bucket.samples where sample.timestamp >= start {
                 let day = calendar.startOfDay(for: sample.timestamp)
                 let model = sample.model ?? "unknown"
-                let key = "\(bucket.provider)|\(model)"
+                let tag = sample.sourceTag
+                let key = tag.map { "\(bucket.provider)|\($0)|\(model)" } ?? "\(bucket.provider)|\(model)"
                 var entry = byDay[day]?[key]
-                    ?? ModelUsageEntry(provider: bucket.provider, model: model, tokens: .zero, cost: 0, requests: 0)
+                    ?? ModelUsageEntry(provider: bucket.provider, model: model, tokens: .zero,
+                                       cost: 0, requests: 0, sourceTag: tag)
                 entry.tokens.input += sample.tokens.input
                 entry.tokens.output += sample.tokens.output
                 entry.tokens.cacheRead += sample.tokens.cacheRead
                 entry.tokens.cacheWrite += sample.tokens.cacheWrite
+                entry.tokens.reasoning += sample.tokens.reasoning
                 entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
                 entry.requests += 1
                 byDay[day, default: [:]][key] = entry
@@ -58,13 +83,16 @@ enum ModelUsageAggregator {
         for bucket in buckets {
             for sample in bucket.samples {
                 let model = sample.model ?? "unknown"
-                let key = "\(bucket.provider)|\(model)"
+                let tag = sample.sourceTag
+                let key = tag.map { "\(bucket.provider)|\($0)|\(model)" } ?? "\(bucket.provider)|\(model)"
                 var entry = byKey[key]
-                    ?? ModelUsageEntry(provider: bucket.provider, model: model, tokens: .zero, cost: 0, requests: 0)
+                    ?? ModelUsageEntry(provider: bucket.provider, model: model, tokens: .zero,
+                                       cost: 0, requests: 0, sourceTag: tag)
                 entry.tokens.input += sample.tokens.input
                 entry.tokens.output += sample.tokens.output
                 entry.tokens.cacheRead += sample.tokens.cacheRead
                 entry.tokens.cacheWrite += sample.tokens.cacheWrite
+                entry.tokens.reasoning += sample.tokens.reasoning
                 entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
                 entry.requests += 1
                 byKey[key] = entry

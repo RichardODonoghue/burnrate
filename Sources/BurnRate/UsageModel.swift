@@ -6,15 +6,39 @@ struct TokenUsage: Codable, Equatable {
     var output: Int
     var cacheRead: Int
     var cacheWrite: Int
+    /// Reasoning/thinking tokens. Providers that report these separately
+    /// (OpenCode's DeepSeek et al.) exclude them from `output` — confirmed
+    /// against rows where reasoning > output.
+    var reasoning: Int = 0
+
+    init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int, reasoning: Int = 0) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.reasoning = reasoning
+    }
+
+    // `reasoning` was added after samples were first persisted (Claude's
+    // incremental cache), so decode older payloads without it.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = try container.decode(Int.self, forKey: .input)
+        output = try container.decode(Int.self, forKey: .output)
+        cacheRead = try container.decode(Int.self, forKey: .cacheRead)
+        cacheWrite = try container.decode(Int.self, forKey: .cacheWrite)
+        reasoning = try container.decodeIfPresent(Int.self, forKey: .reasoning) ?? 0
+    }
 
     static var zero: TokenUsage { TokenUsage(input: 0, output: 0, cacheRead: 0, cacheWrite: 0) }
 
-    var total: Int { input + output + cacheRead + cacheWrite }
+    var total: Int { input + output + cacheRead + cacheWrite + reasoning }
 
     /// Cache-discounted tokens (Anthropic-style billing weights): cache reads
     /// count 0.1x, cache writes 1.25x. Use this for plan-limit %.
     var weighted: Double {
-        Double(input) + Double(output) + Double(cacheRead) * 0.1 + Double(cacheWrite) * 1.25
+        Double(input) + Double(output) + Double(reasoning)
+            + Double(cacheRead) * 0.1 + Double(cacheWrite) * 1.25
     }
 }
 
@@ -29,6 +53,10 @@ struct UsageSample: Codable, Equatable {
     var model: String?
     /// Vendor-reported cost in USD when available (OpenCode only).
     var cost: Double?
+    /// Sub-source within a multi-provider source. OpenCode records the
+    /// upstream provider here: "opencode-go" (Go), "opencode" (Zen),
+    /// "ollama"/"lmstudio"/"omlx" (local runtimes).
+    var sourceTag: String?
 }
 
 /// Aggregated usage for one plan window (Rolling / Weekly / Monthly).

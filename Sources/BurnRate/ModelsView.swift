@@ -97,6 +97,7 @@ private extension ModelUsageAggregator {
                 merged.tokens.output += entry.tokens.output
                 merged.tokens.cacheRead += entry.tokens.cacheRead
                 merged.tokens.cacheWrite += entry.tokens.cacheWrite
+                merged.tokens.reasoning += entry.tokens.reasoning
                 merged.cost += entry.cost
                 merged.requests += entry.requests
                 byKey[entry.id] = merged
@@ -368,8 +369,8 @@ struct ModelsView: View {
                     .foregroundStyle(.secondary)
                 ForEach(rows) { entry in
                     HStack(spacing: 6) {
-                        Circle().fill(byModel(entry.model)).frame(width: 7, height: 7)
-                        Text(entry.model)
+                        Circle().fill(byModel(entry.displayName)).frame(width: 7, height: 7)
+                        Text(entry.displayName)
                         Spacer(minLength: 12)
                         Text(metricText(entry))
                             .monospacedDigit()
@@ -398,8 +399,8 @@ struct ModelsView: View {
         tooltipCard {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Circle().fill(byModel(entry.model)).frame(width: 7, height: 7)
-                    Text(entry.model)
+                    Circle().fill(byModel(entry.displayName)).frame(width: 7, height: 7)
+                    Text(entry.displayName)
                         .fontWeight(.semibold)
                 }
                 .font(.caption)
@@ -422,6 +423,16 @@ struct ModelsView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                if entry.tokens.reasoning > 0 {
+                    HStack(spacing: 6) {
+                        Text("Reasoning")
+                        Spacer(minLength: 12)
+                        Text(StatusItemManager.formatTokens(entry.tokens.reasoning))
+                            .monospacedDigit()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -779,7 +790,7 @@ struct ModelsView: View {
                         )
                         // Data-driven color (not a fixed color): this is what
                         // makes Charts generate the legend key automatically.
-                        .foregroundStyle(by: .value("Model", entry.model))
+                        .foregroundStyle(by: .value("Model", entry.displayName))
                         .cornerRadius(2)
                     }
                 }
@@ -825,9 +836,9 @@ struct ModelsView: View {
             Chart(filteredTotals.prefix(8)) { entry in
                 BarMark(
                     x: .value(metric.rawValue, metricValue(entry)),
-                    y: .value("Model", entry.model)
+                    y: .value("Model", entry.displayName)
                 )
-                .foregroundStyle(byModel(entry.model))
+                .foregroundStyle(byModel(entry.displayName))
                 .cornerRadius(3)
                 .annotation(position: .trailing) {
                     Text(annotation(entry))
@@ -889,7 +900,7 @@ struct ModelsView: View {
 
     /// Models visible in the daily chart, in stable order — the legend domain.
     private var legendModels: [String] {
-        Array(Set(filteredRangeDaily.flatMap { entries(for: $0).map(\.model) })).sorted()
+        Array(Set(filteredRangeDaily.flatMap { entries(for: $0).map(\.displayName) })).sorted()
     }
 
     // MARK: Breakdown table
@@ -912,8 +923,8 @@ struct ModelsView: View {
                 ForEach(filteredTotals) { entry in
                     HStack {
                         HStack(spacing: 6) {
-                            Circle().fill(byModel(entry.model)).frame(width: 7, height: 7)
-                            Text(entry.model)
+                            Circle().fill(byModel(entry.displayName)).frame(width: 7, height: 7)
+                            Text(entry.displayName)
                             Text(entry.provider)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
