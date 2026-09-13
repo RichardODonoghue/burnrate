@@ -132,8 +132,9 @@ struct ModelsView: View {
     @State private var providerFilter: String?
     @State private var trendWindow: String = "Rolling"
     @State private var selectedDate: Date?
-    /// Measured tooltip size, so it can be kept inside the plot at the edges.
-    @State private var tooltipSize: CGSize = .zero
+    /// Hovered day in the daily chart / hovered model in the ranking chart.
+    @State private var selectedDay: Date?
+    @State private var selectedModel: String?
 
     /// Window labels actually present in history (for the selected provider
     /// filter). Claude reports Rolling/Weekly plus model-scoped weeklies
@@ -303,35 +304,126 @@ struct ModelsView: View {
     }
 
     private func trendTooltip(for date: Date) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            ForEach(Self.nearestRows(series: trendSeries, at: date), id: \.name) { row in
+        tooltipCard {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(Self.nearestRows(series: trendSeries, at: date), id: \.name) { row in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(SettingsView.color(for: row.provider).opacity(row.scoped ? 0.55 : 1))
+                            .frame(width: 7, height: 7)
+                        Text(row.name)
+                        Spacer(minLength: 12)
+                        Text("\(Int(row.remaining))%")
+                            .monospacedDigit()
+                            .fontWeight(.semibold)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+    }
+
+    /// Shared tooltip chrome: floating card with a hairline border + shadow.
+    private func tooltipCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .shadow(radius: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.quaternary, lineWidth: 1)
+            )
+            .fixedSize()
+    }
+
+    /// Tokens/cost for one entry, as shown on axes and in tooltips.
+    private func metricText(_ entry: ModelUsageEntry) -> String {
+        metric == .tokens
+            ? StatusItemManager.formatTokens(entry.totalTokens)
+            : String(format: "$%.2f", entry.cost)
+    }
+
+    /// Day bucket containing `date`. Bars span whole days, so hovering empty
+    /// space between them must not pop a tooltip.
+    nonisolated static func dayBucket(
+        for date: Date,
+        in days: [DailyModelUsage],
+        calendar: Calendar = .current
+    ) -> DailyModelUsage? {
+        days.first { calendar.isDate($0.day, inSameDayAs: date) }
+    }
+
+    private func dailyTooltip(for day: DailyModelUsage) -> some View {
+        let rows = entries(for: day).filter { metricValue($0) > 0 }
+        return tooltipCard {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(day.day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(rows) { entry in
+                    HStack(spacing: 6) {
+                        Circle().fill(byModel(entry.model)).frame(width: 7, height: 7)
+                        Text(entry.model)
+                        Spacer(minLength: 12)
+                        Text(metricText(entry))
+                            .monospacedDigit()
+                            .fontWeight(.semibold)
+                    }
+                    .font(.caption)
+                }
+                if rows.count > 1 {
+                    Divider()
+                    HStack(spacing: 6) {
+                        Text("Total")
+                        Spacer(minLength: 12)
+                        Text(metric == .tokens
+                             ? StatusItemManager.formatTokens(rows.reduce(0) { $0 + $1.totalTokens })
+                             : String(format: "$%.2f", rows.reduce(0) { $0 + $1.cost }))
+                            .monospacedDigit()
+                            .fontWeight(.semibold)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+    }
+
+    private func modelTooltip(for entry: ModelUsageEntry) -> some View {
+        tooltipCard {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(SettingsView.color(for: row.provider).opacity(row.scoped ? 0.55 : 1))
-                        .frame(width: 7, height: 7)
-                    Text(row.name)
+                    Circle().fill(byModel(entry.model)).frame(width: 7, height: 7)
+                    Text(entry.model)
+                        .fontWeight(.semibold)
+                }
+                .font(.caption)
+                Text(entry.provider)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text("\(metric == .tokens ? "Tokens" : "Cost")")
                     Spacer(minLength: 12)
-                    Text("\(Int(row.remaining))%")
+                    Text(metricText(entry))
                         .monospacedDigit()
                         .fontWeight(.semibold)
                 }
                 .font(.caption)
+                HStack(spacing: 6) {
+                    Text("Requests")
+                    Spacer(minLength: 12)
+                    Text("\(entry.requests)")
+                        .monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(radius: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.quaternary, lineWidth: 1)
-        )
-        .fixedSize()
     }
 
     /// Compact Y-axis labels — Charts defaults to scientific notation for
@@ -570,23 +662,11 @@ struct ModelsView: View {
                            let x = proxy.position(forX: selectedDate),
                            let plot = proxy.plotFrame {
                             let plotFrame = geometry[plot]
-                            let halfW = tooltipSize.width / 2
-                            let halfH = tooltipSize.height / 2
-                            trendTooltip(for: selectedDate)
-                                // Keep the whole tooltip inside the plot:
-                                // centring it on the cursor clips it at the
-                                // left/right/top edges.
-                                .onGeometryChange(for: CGSize.self) { $0.size } action: {
-                                    tooltipSize = $0
-                                }
-                                .position(
-                                    x: min(max(plotFrame.minX + x,
-                                               plotFrame.minX + halfW),
-                                           plotFrame.maxX - halfW),
-                                    y: min(max(plotFrame.minY + 44,
-                                               plotFrame.minY + halfH),
-                                           plotFrame.maxY - halfH)
-                                )
+                            PlotTooltip(anchor: CGPoint(x: plotFrame.minX + x,
+                                                        y: plotFrame.minY + 44),
+                                        plotFrame: plotFrame) {
+                                trendTooltip(for: selectedDate)
+                            }
                         }
                     }
                 }
@@ -704,6 +784,22 @@ struct ModelsView: View {
                     }
                 }
             }
+            .chartXSelection(value: $selectedDay)
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    if let selectedDay,
+                       let day = Self.dayBucket(for: selectedDay, in: filteredRangeDaily),
+                       let x = proxy.position(forX: day.day),
+                       let plot = proxy.plotFrame {
+                        let plotFrame = geometry[plot]
+                        PlotTooltip(anchor: CGPoint(x: plotFrame.minX + x,
+                                                    y: plotFrame.minY + 44),
+                                    plotFrame: plotFrame) {
+                            dailyTooltip(for: day)
+                        }
+                    }
+                }
+            }
             .chartLegend(position: .bottom)
             .chartForegroundStyleScale(
                 domain: legendModels,
@@ -748,6 +844,34 @@ struct ModelsView: View {
                             if let v = value.as(Double.self) {
                                 Text(Self.axisLabel(v, metric: metric))
                             }
+                        }
+                    }
+                }
+            }
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    // Hover tracking: the horizontal bar's category is the
+                    // model, so resolve the cursor's Y to a model name.
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                selectedModel = proxy.value(atY: location.y, as: String.self)
+                            case .ended:
+                                selectedModel = nil
+                            }
+                        }
+                    if let selectedModel,
+                       let entry = filteredTotals.first(where: { $0.model == selectedModel }),
+                       let y = proxy.position(forY: selectedModel),
+                       let plot = proxy.plotFrame {
+                        let plotFrame = geometry[plot]
+                        PlotTooltip(anchor: CGPoint(x: plotFrame.maxX,
+                                                    y: plotFrame.minY + y),
+                                    plotFrame: plotFrame) {
+                            modelTooltip(for: entry)
                         }
                     }
                 }
@@ -839,4 +963,42 @@ struct ModelsView: View {
         Color(red: 0.83, green: 0.36, blue: 0.55),
         Color(red: 0.55, green: 0.60, blue: 0.35),
     ]
+}
+
+// MARK: - Tooltip overlay
+
+/// Floating tooltip card positioned at an anchor, clamped so it stays fully
+/// inside the plot area — centring on the anchor clips at the chart edges.
+private struct PlotTooltip<Content: View>: View {
+    let anchor: CGPoint
+    let plotFrame: CGRect
+    let content: Content
+
+    @State private var size: CGSize = .zero
+
+    init(anchor: CGPoint, plotFrame: CGRect, @ViewBuilder content: () -> Content) {
+        self.anchor = anchor
+        self.plotFrame = plotFrame
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            // Never intercept the hover that drives the tooltip.
+            .allowsHitTesting(false)
+            .position(x: clampedX, y: clampedY)
+    }
+
+    private var clampedX: CGFloat {
+        guard plotFrame.width > size.width else { return plotFrame.midX }
+        return min(max(anchor.x, plotFrame.minX + size.width / 2),
+                   plotFrame.maxX - size.width / 2)
+    }
+
+    private var clampedY: CGFloat {
+        guard plotFrame.height > size.height else { return plotFrame.midY }
+        return min(max(anchor.y, plotFrame.minY + size.height / 2),
+                   plotFrame.maxY - size.height / 2)
+    }
 }
