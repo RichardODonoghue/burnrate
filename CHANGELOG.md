@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/RichardODonoghue/burnrate/compare/v0.2.0...v0.3.0) (2026-09-13)
+
+
+### Features
+
+* check GitHub releases for updates and self-install them ([a1478a4](https://github.com/RichardODonoghue/burnrate/commit/a1478a4f3557a1dba243b5dd44c3a6360bbc6212))
+* check GitHub releases for updates and self-install them ([fe16616](https://github.com/RichardODonoghue/burnrate/commit/fe1661608e9b3e4346c0c239608d8557f3161f0f))
+* tooltips for the daily usage and top-models bar charts ([9c8720d](https://github.com/RichardODonoghue/burnrate/commit/9c8720d652ca05ce2e799a9033e9150d67215860))
+* tooltips for the daily usage and top-models bar charts ([ef651c8](https://github.com/RichardODonoghue/burnrate/commit/ef651c8f93d04360e9e2742b085a1f18a1b2c22b))
+
+
+### Bug Fixes
+
+* attach zip + dmg to releases ([523a9cc](https://github.com/RichardODonoghue/burnrate/commit/523a9ccc02115f9d8140af5d1c6861c0aca0e1f0))
+* attach zip + dmg to releases (release-please tags don't trigger workflows) ([5d00fd8](https://github.com/RichardODonoghue/burnrate/commit/5d00fd8aa0e86c4fe2993af0cc9343896848d91a))
+* capture OpenCode reasoning tokens; tag Go vs Zen; drop Claude &lt;synthetic&gt; ([3251723](https://github.com/RichardODonoghue/burnrate/commit/3251723483ea529318bc3453ba6e2cbdf46feeab))
+* OpenCode reasoning tokens, Go/Zen tags, and Claude &lt;synthetic&gt; rows ([0c4a3cc](https://github.com/RichardODonoghue/burnrate/commit/0c4a3cc5eb43061ec1a1020ee5ccae2d29cc69d4))
+* usage cards honor the provider filter ([7e83cbd](https://github.com/RichardODonoghue/burnrate/commit/7e83cbdce678f67cb7030a0eb020864deb2decf6))
+* usage cards honor the provider filter ([93b83d5](https://github.com/RichardODonoghue/burnrate/commit/93b83d528ca529babb3895be72c82510f95b3ca8))
+
 ## [0.2.0](https://github.com/RichardODonoghue/burnrate/compare/v0.1.1...v0.2.0) (2026-09-12)
 
 
