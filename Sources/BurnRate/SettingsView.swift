@@ -475,21 +475,42 @@ private struct AboutView: View {
 
             Card("What it does") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Live menu-bar usage for your AI plan subscriptions", systemImage: "gauge.medium")
-                    Label("Usage dashboard: plan windows, remaining-% trends, per-model stats and breakdowns", systemImage: "chart.bar.doc.horizontal")
-                    Label("Desktop notifications: milestones, burn-rate spikes, cost caps, window resets", systemImage: "bell.badge")
-                    Label("Optional extra menu-bar widgets per provider", systemImage: "menubar.dock.rectangle")
+                    Label("Menu bar: per-provider % remaining, reset countdown and plan tier — no Dock icon", systemImage: "gauge.medium")
+                    Label("Usage dashboard: remaining-% trends, daily usage by model, model ranking and token/cost breakdowns", systemImage: "chart.bar.doc.horizontal")
+                    Label("Notifications: plan-% milestones, burn-rate spikes, daily cost caps and window resets", systemImage: "bell.badge")
+                    Label("Optional extra menu-bar widgets, one per provider", systemImage: "menubar.dock.rectangle")
+                    Label("Built-in updates from GitHub Releases", systemImage: "arrow.down.circle")
                 }
             }
 
             Card("Data sources") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Vendor quota APIs — percentages, reset times and plan tier, using the credentials already stored by each CLI", systemImage: "checkmark.seal")
-                    Label("Local session logs — per-model token statistics and cost estimates (LiteLLM pricing); nothing is sent anywhere", systemImage: "internaldrive")
+                    Label("Vendor quota APIs — Claude and OpenCode Go percentages, reset times and plan tier, using the credentials their CLIs already stored", systemImage: "checkmark.seal")
+                    Label("Local session logs — Codex usage, plus per-model token statistics and cost estimates (LiteLLM list pricing). Nothing is sent anywhere", systemImage: "internaldrive")
+                }
+            }
+
+            Card("Links") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        GitHubMark()
+                            .frame(width: 16, height: 16)
+                        Link("github.com/\(Updater.owner)/\(Updater.repo)",
+                             destination: Self.repositoryURL)
+                    }
+                    Label {
+                        Link("Report an issue or request a feature",
+                             destination: Self.issuesURL)
+                    } icon: {
+                        Image(systemName: "exclamationmark.bubble")
+                    }
                 }
             }
         }
     }
+
+    private static let repositoryURL = URL(string: "https://github.com/\(Updater.owner)/\(Updater.repo)")!
+    private static let issuesURL = URL(string: "https://github.com/\(Updater.owner)/\(Updater.repo)/issues")!
 
     // MARK: Updates
 

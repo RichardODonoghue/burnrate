@@ -10,7 +10,7 @@ Live % remaining and reset times for every usage window (5-hour, weekly, monthly
 - **Vendor-authoritative data** — the same numbers the vendors' own dashboards show
 - **Usage by model** — dashboard with daily stacked bars, model ranking, input/output/cache breakdowns and remaining-% trend lines (Swift Charts)
 - **Milestone notifications** — desktop alerts each time a window drops past another increment you choose (every 10%, 20%…)
-- **Burn-rate alerts** — detect usage spikes (fast % drops, per-model token surges)
+- **Burn-rate alerts** — detect usage spikes (fast % drops within a trailing window)
 - **Cost alerts** — daily spend caps (OpenCode reports vendor cost; others use LiteLLM list-price estimates)
 - **Reset notifications** — know when a window refills to 100%
 - **Extra menu-bar widgets** — spawn an additional status item per provider
