@@ -81,11 +81,30 @@ actor ClaudeUsageAPIProvider: UsageProvider {
     private var plan: String?
 
     private let credentialsURL: URL
+    private let claudeJSONURL: URL
 
-    init(credentialsURL: URL? = nil) {
+    /// Notified (on the main actor) when the signed-in Claude account
+    /// changes, so alert state can be rebased onto the new account.
+    private var credentialChangeHandler: (@MainActor @Sendable () -> Void)?
+    /// accountUuid|organizationUuid from ~/.claude.json's oauthAccount —
+    /// stable across OAuth token refreshes (a token hash is not).
+    private var credentialFingerprint: String?
+    /// Persisted so a switch detected after a relaunch still suppresses the
+    /// one-off false reset/milestone alerts.
+    private static let fingerprintKey = "claudeCredentialFingerprint"
+
+    init(credentialsURL: URL? = nil, claudeJSONURL: URL? = nil) {
         self.credentialsURL = credentialsURL
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".claude/.credentials.json")
+        self.claudeJSONURL = claudeJSONURL
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude.json")
+        self.credentialFingerprint = UserDefaults.standard.string(forKey: Self.fingerprintKey)
+    }
+
+    func setCredentialChangeHandler(_ handler: @escaping @MainActor @Sendable () -> Void) {
+        credentialChangeHandler = handler
     }
 
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
@@ -114,8 +133,51 @@ actor ClaudeUsageAPIProvider: UsageProvider {
         errorBackoffUntil = .distantPast
     }
 
+    // MARK: - Account identity (internal for tests)
+
+    /// Signed-in account identity from Claude Code's `~/.claude.json`:
+    /// `{"oauthAccount": {"accountUuid": "...", "organizationUuid": "..."}}`.
+    /// Returns nil when the file is missing or has no account block.
+    nonisolated static func accountFingerprint(fromClaudeJSON data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = obj["oauthAccount"] as? [String: Any],
+              let uuid = account["accountUuid"] as? String, !uuid.isEmpty
+        else { return nil }
+        let org = account["organizationUuid"] as? String ?? ""
+        return "\(uuid)|\(org)"
+    }
+
+    /// Falls back to the token itself when no account block exists; that can
+    /// false-positive on an OAuth refresh, hence the preference for the uuid.
+    nonisolated static func fallbackFingerprint(token: String) -> String {
+        "token|" + token.hashValue.description
+    }
+
+    private func noteCredentialIfChanged(token: String) async {
+        let fingerprint = currentFingerprint(token: token)
+        defer {
+            credentialFingerprint = fingerprint
+            UserDefaults.standard.set(fingerprint, forKey: Self.fingerprintKey)
+        }
+        guard let previous = credentialFingerprint, previous != fingerprint else { return }
+        // New account: drop the cached plan tier so it refreshes immediately.
+        plan = nil
+        if let handler = credentialChangeHandler {
+            await handler()
+        }
+    }
+
+    private func currentFingerprint(token: String) -> String {
+        if let data = try? Data(contentsOf: claudeJSONURL),
+           let identity = Self.accountFingerprint(fromClaudeJSON: data) {
+            return identity
+        }
+        return Self.fallbackFingerprint(token: token)
+    }
+
     private func performFetch() async throws -> [UsageWindow] {
         guard let token = try accessToken() else { throw URLError(.userAuthenticationRequired) }
+        await noteCredentialIfChanged(token: token)
         var request = URLRequest(url: Self.endpoint)
         request.timeoutInterval = 15
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

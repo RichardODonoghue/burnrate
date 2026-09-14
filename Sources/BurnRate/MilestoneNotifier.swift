@@ -31,6 +31,11 @@ final class MilestoneNotifier {
     private var modelBurnCooldown: [String: Date] = [:]
     /// Last-seen window reset time per window id (reset detection).
     private var lastResetsAt: [String: Date] = [:]
+    /// Set when a Claude account switch is detected; suppresses alerts on the
+    /// next evaluation, which only establishes new baselines.
+    private var pendingAccountSwitch = false
+    /// Recently sent notification titles (diagnostics + tests).
+    private(set) var sentTitles: [String] = []
     /// Recently sent notifications (title|body → time), to suppress duplicates.
     private var recentSends: [String: Date] = [:]
     private let defaults: UserDefaults
@@ -52,9 +57,13 @@ final class MilestoneNotifier {
         /// Last-seen window reset time per window id — a vendor API moving a
         /// window's resetsAt forward means a fresh window began.
         var resetsAt: [String: Date] = [:]
+        /// A Claude account switch was just detected: the next evaluation only
+        /// records baselines — comparing the old account's numbers against the
+        /// new account's would fire a phantom reset/milestone.
+        var pendingAccountSwitch: Bool = false
 
-        // Custom decoding: resetsAt was added later; older persisted states
-        // must still decode.
+        // Custom decoding: fields were added over time; older persisted
+        // states must still decode.
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             lastRemaining = try c.decodeIfPresent([String: Double].self, forKey: .lastRemaining) ?? [:]
@@ -62,16 +71,18 @@ final class MilestoneNotifier {
             burnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .burnCooldown) ?? [:]
             modelBurnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .modelBurnCooldown) ?? [:]
             resetsAt = try c.decodeIfPresent([String: Date].self, forKey: .resetsAt) ?? [:]
+            pendingAccountSwitch = try c.decodeIfPresent(Bool.self, forKey: .pendingAccountSwitch) ?? false
         }
 
         init(lastRemaining: [String: Double], costFired: [String],
              burnCooldown: [String: Date], modelBurnCooldown: [String: Date],
-             resetsAt: [String: Date]) {
+             resetsAt: [String: Date], pendingAccountSwitch: Bool = false) {
             self.lastRemaining = lastRemaining
             self.costFired = costFired
             self.burnCooldown = burnCooldown
             self.modelBurnCooldown = modelBurnCooldown
             self.resetsAt = resetsAt
+            self.pendingAccountSwitch = pendingAccountSwitch
         }
     }
 
@@ -79,8 +90,12 @@ final class MilestoneNotifier {
         self.settingsStore = settingsStore
         self.defaults = defaults
         // Retained strongly (UNUserNotificationCenter holds its delegate
-        // weakly); set before any notification can be posted.
-        UNUserNotificationCenter.current().delegate = foregroundDelegate
+        // weakly); set before any notification can be posted. Skipped when
+        // there is no app bundle — current() aborts under the test runner and
+        // for `swift run`, where notifications are logged instead.
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = foregroundDelegate
+        }
         if let data = defaults.data(forKey: Self.stateKey),
            let state = try? JSONDecoder().decode(NotifierState.self, from: data) {
             lastRemaining = state.lastRemaining
@@ -88,6 +103,7 @@ final class MilestoneNotifier {
             burnCooldown = state.burnCooldown
             modelBurnCooldown = state.modelBurnCooldown
             lastResetsAt = state.resetsAt
+            pendingAccountSwitch = state.pendingAccountSwitch
         }
         Task { await requestAuthorization() }
     }
@@ -98,7 +114,8 @@ final class MilestoneNotifier {
             costFired: Array(costFired),
             burnCooldown: burnCooldown,
             modelBurnCooldown: modelBurnCooldown,
-            resetsAt: lastResetsAt
+            resetsAt: lastResetsAt,
+            pendingAccountSwitch: pendingAccountSwitch
         )
         if let data = try? JSONEncoder().encode(state) {
             defaults.set(data, forKey: Self.stateKey)
@@ -123,6 +140,29 @@ final class MilestoneNotifier {
 
     func evaluate(usage: [ProviderUsage]) {
         let now = Date()
+
+        // Account switch: rebase instead of alerting. The new account's
+        // numbers are unrelated to the old account's, so comparing them
+        // would fire a phantom reset/milestone and poison burn history.
+        if pendingAccountSwitch {
+            for provider in usage {
+                for window in provider.windows {
+                    if let current = window.percentRemaining {
+                        lastRemaining[window.id] = current
+                    }
+                    if let resetsAt = window.resetsAt {
+                        lastResetsAt[window.id] = resetsAt
+                    }
+                    history[window.id] = []
+                }
+            }
+            burnCooldown.removeAll()
+            modelBurnCooldown.removeAll()
+            pendingAccountSwitch = false
+            saveState()
+            return
+        }
+
         for provider in usage {
             for window in provider.windows {
                 guard let current = window.percentRemaining else { continue }
@@ -177,6 +217,21 @@ final class MilestoneNotifier {
             }
         }
         saveState()
+    }
+
+    /// A Claude account switch was detected. Rebases alert state onto the new
+    /// account: burn history and cooldowns are discarded, the next evaluation
+    /// only records baselines (no comparisons across accounts), and the user
+    /// is told why the dashboard shows a discontinuity.
+    func accountChanged() {
+        history.removeAll()
+        burnCooldown.removeAll()
+        modelBurnCooldown.removeAll()
+        pendingAccountSwitch = true
+        saveState()
+        send(title: "Claude account changed",
+             body: "Quota history was rebased for the new account. Past local-log totals still cover both accounts.",
+             dedupe: false)
     }
 
     /// Daily local-log spend per provider vs configured cost alerts.
@@ -254,6 +309,8 @@ final class MilestoneNotifier {
             guard recentSends[key] == nil else { return }
         }
         recentSends[key] = now
+        sentTitles.append(title)
+        if sentTitles.count > 20 { sentTitles.removeFirst() }
 
         guard Bundle.main.bundleIdentifier != nil else {
             // Body contains "%" — never pass it as an NSLog format string.
