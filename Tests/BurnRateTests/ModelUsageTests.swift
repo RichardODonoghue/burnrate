@@ -49,8 +49,28 @@ struct ModelUsageTests {
         #expect(totals[0].model == "unknown")
     }
 
-    // MARK: Sub-source tags (OpenCode Go vs Zen)
+    // MARK: Synthetic placeholder rows
 
+    @Test func aggregatorSkipsSyntheticModels() {
+        let buckets = [(provider: "Claude", samples: [
+            sample("claude-opus-5", 100, minutesAgo: 5),
+            sample("<synthetic>", 0, minutesAgo: 5),
+        ])]
+        let daily = ModelUsageAggregator.daily(buckets: buckets, days: 30, now: now)
+        #expect(daily.allSatisfy { $0.entries.allSatisfy { $0.model != "<synthetic>" } })
+
+        let totals = ModelUsageAggregator.totals(buckets: buckets)
+        #expect(totals.count == 1)
+        #expect(!totals.contains { $0.model == "<synthetic>" })
+    }
+
+    @Test func displayablePredicate() {
+        #expect(ModelUsageAggregator.isDisplayable(model: "claude-opus-5"))
+        #expect(ModelUsageAggregator.isDisplayable(model: nil))
+        #expect(!ModelUsageAggregator.isDisplayable(model: "<synthetic>"))
+    }
+
+    // MARK: Sub-source tags (OpenCode Go vs Zen)
     private func taggedSample(_ model: String, tag: String, tokens: Int, minutesAgo: Double) -> UsageSample {
         UsageSample(
             timestamp: now.addingTimeInterval(-minutesAgo * 60),
@@ -112,5 +132,38 @@ struct ModelUsageTests {
         let decoded = try JSONDecoder().decode(TokenUsage.self, from: Data(json.utf8))
         #expect(decoded.reasoning == 0)
         #expect(decoded.total == 19)
+    }
+}
+
+/// The Models view's persisted snapshot must not resurrect synthetic rows
+/// written by older builds.
+@MainActor
+struct ModelUsageCacheTests {
+    @Test func cachedSyntheticEntriesAreScrubbed() throws {
+        let suite = UserDefaults(suiteName: "model-cache-\(UUID().uuidString)")!
+        let synthetic = ModelUsageEntry(provider: "Claude", model: "<synthetic>", tokens: .zero,
+                                        cost: 0, requests: 3, sourceTag: nil)
+        let real = ModelUsageEntry(provider: "Claude", model: "claude-opus-5",
+                                   tokens: TokenUsage(input: 5, output: 1, cacheRead: 0, cacheWrite: 0),
+                                   cost: 0, requests: 1, sourceTag: nil)
+        let cached = [DailyModelUsage(day: Date(), entries: [synthetic, real])]
+        suite.set(try JSONEncoder().encode(cached), forKey: "modelUsageHistory")
+
+        let viewModel = ModelUsageViewModel(sources: [], defaults: suite)
+        let models = viewModel.daily.flatMap { $0.entries.map(\.model) }
+        #expect(models == ["claude-opus-5"])
+        #expect(viewModel.totals.count == 1)
+    }
+
+    @Test func daysWithOnlySyntheticEntriesAreDropped() throws {
+        let suite = UserDefaults(suiteName: "model-cache-\(UUID().uuidString)")!
+        let synthetic = ModelUsageEntry(provider: "Claude", model: "<synthetic>", tokens: .zero,
+                                        cost: 0, requests: 1, sourceTag: nil)
+        suite.set(try JSONEncoder().encode([DailyModelUsage(day: Date(), entries: [synthetic])]),
+                  forKey: "modelUsageHistory")
+
+        let viewModel = ModelUsageViewModel(sources: [], defaults: suite)
+        #expect(viewModel.daily.isEmpty)
+        #expect(viewModel.totals.isEmpty)
     }
 }

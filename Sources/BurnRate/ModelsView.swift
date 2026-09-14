@@ -27,11 +27,17 @@ final class ModelUsageViewModel: ObservableObject {
     init(sources: [(name: String, source: any UsageSource)], defaults: UserDefaults = .standard) {
         self.sources = sources
         self.defaults = defaults
-        // Instant display from the last poll's persisted snapshot.
+        // Instant display from the last poll's persisted snapshot. Synthetic
+        // placeholder rows from older builds are scrubbed here too — the UI
+        // must never show them, even before the next poll rewrites the cache.
         if let data = defaults.data(forKey: Self.historyKey),
-           let cached = try? JSONDecoder().decode([DailyModelUsage].self, from: data), !cached.isEmpty {
+           let cached = try? JSONDecoder().decode([DailyModelUsage].self, from: data),
+           !cached.isEmpty {
             daily = cached
-            totals = ModelUsageAggregator.totals(fromCache: cached)
+                .map { DailyModelUsage(day: $0.day,
+                                       entries: $0.entries.filter { ModelUsageAggregator.isDisplayable(model: $0.model) }) }
+                .filter { !$0.entries.isEmpty }
+            totals = ModelUsageAggregator.totals(fromCache: daily)
             loading = false
         }
         if let data = defaults.data(forKey: Self.remainingKey),
@@ -252,10 +258,44 @@ struct ModelsView: View {
         return filteredDaily.filter { $0.day >= start }
     }
 
-    /// X-axis tick density follows the range span — a Rolling window in a 7d
-    /// range gets daily ticks, not 6-hourly ones. Tested.
-    nonisolated static func trendXHourly(range: Range) -> Bool {
-        range == .today
+    /// X-axis tick style follows the *visible* span, so a chart scaled down to
+    /// a few hours of data gets hourly ticks even in a 7d range. Tested.
+    nonisolated static func trendXHourly(span: TimeInterval) -> Bool {
+        span < 3 * 86400
+    }
+
+    /// Hourly gridline stride for a span: 1h when zoomed in, 6h for a couple
+    /// of days, 12h beyond. Tested.
+    nonisolated static func trendHourStride(span: TimeInterval) -> Int {
+        switch span {
+        case ..<(6 * 3600): return 1
+        case ..<(36 * 3600): return 6
+        default: return 12
+        }
+    }
+
+    /// The X domain for the trend chart. Scales down to the data actually
+    /// available: with only an hour of history in a 7-day range, the plot
+    /// spans that hour instead of leaving 6.9 empty days. Empty series fall
+    /// back to the full selected range. Tested.
+    nonisolated static func trendXDomain(
+        series: [TrendSeries],
+        cutoff: Date,
+        now: Date
+    ) -> ClosedRange<Date> {
+        let dates = series.flatMap { $0.samples.map(\.date) }
+        guard let earliest = dates.min(), let latest = dates.max() else {
+            return cutoff...now
+        }
+        // A little lead-in so the first point isn't glued to the edge.
+        let span = max(latest.timeIntervalSince(earliest), 60)
+        let lower = max(cutoff, earliest.addingTimeInterval(-span * 0.02))
+        let upper = max(now, latest)
+        let minimumSpan: TimeInterval = 5 * 60
+        guard upper.timeIntervalSince(lower) >= minimumSpan else {
+            return lower...(lower.addingTimeInterval(minimumSpan))
+        }
+        return lower...upper
     }
 
     /// Midnight + noon ticks across the visible span (7d/30d ranges).
@@ -301,7 +341,12 @@ struct ModelsView: View {
     }
 
     private var trendDayTicks: [Date] {
-        Self.trendTickDates(cutoff: rangeCutoff, now: Date())
+        let domain = trendXDomain
+        return Self.trendTickDates(cutoff: domain.lowerBound, now: domain.upperBound)
+    }
+
+    private var trendXDomain: ClosedRange<Date> {
+        Self.trendXDomain(series: trendSeries, cutoff: rangeCutoff, now: Date())
     }
 
     private func trendTooltip(for date: Date) -> some View {
@@ -615,7 +660,7 @@ struct ModelsView: View {
     }
 
     private func card<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        GroupBox {
+        cardSurface {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: icon)
@@ -627,15 +672,38 @@ struct ModelsView: View {
                 }
                 content()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Rounded card surface: continuous corners, hairline border, control
+    /// background — GroupBox in this layout drew broken/partial outlines.
+    private func cardSurface<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+            )
+    }
+
+    /// Section header used by the chart/table cards.
+    private func cardTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.headline)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Charts
 
     /// Vendor-reported remaining-% over time, one line per provider.
     private var trendChart: some View {
-        GroupBox {
+        cardSurface {
+            VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Remaining over time — \(effectiveTrendLabel)")
                     .font(.headline)
@@ -696,13 +764,16 @@ struct ModelsView: View {
                 // and look like the line leaves the graph.
                 .chartYScale(domain: remainingDomain,
                              range: .plotDimension(startPadding: 6, endPadding: 6))
+                .chartXScale(domain: trendXDomain)
                 .chartXAxis {
-                    // Tick stride follows the range span, not the window: a
-                    // Rolling window in a 7d range gets daily ticks, not 28
-                    // crowded 6-hour ticks. Multi-day ranges label midnight
+                    // Ticks follow the visible span — scaled down to a few
+                    // hours, hourly marks; multi-day spans label midnight
                     // (weekday) plus noon (12pm) each day.
-                    if Self.trendXHourly(range: range) {
-                        AxisMarks(values: .stride(by: .hour, count: 6)) { value in
+                    let domain = trendXDomain
+                    let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+                    if Self.trendXHourly(span: span) {
+                        AxisMarks(values: .stride(by: .hour,
+                                                  count: Self.trendHourStride(span: span))) { _ in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())
                         }
@@ -737,6 +808,7 @@ struct ModelsView: View {
                     }
                 )
                 .frame(height: 180)
+            }
             }
         }
     }
@@ -790,7 +862,9 @@ struct ModelsView: View {
     }
 
     private var dailyChart: some View {
-        GroupBox("Daily usage by model (\(metric.rawValue))") {
+        cardSurface {
+            VStack(alignment: .leading, spacing: 10) {
+            cardTitle("Daily usage by model (\(metric.rawValue))")
             Chart {
                 ForEach(filteredRangeDaily, id: \.day) { day in
                     ForEach(entries(for: day)) { entry in
@@ -821,7 +895,7 @@ struct ModelsView: View {
                     }
                 }
             }
-            .chartLegend(position: .bottom)
+            .chartLegend(.hidden)
             .chartForegroundStyleScale(
                 domain: legendModels,
                 range: legendModels.map(byModel)
@@ -837,12 +911,44 @@ struct ModelsView: View {
                 }
             }
             .frame(height: 220)
+            // Own wrapping legend instead of the automatic one: long model
+            // names (local MLX models especially) overflowed the card and
+            // became unreadable.
+            if !legendModels.isEmpty {
+                modelLegend(legendModels)
+            }
+            }
         }
-        
+    }
+
+    /// Wrapping legend for the daily chart: fixed-width columns, middle
+    /// truncation, full name on hover.
+    private func modelLegend(_ models: [String]) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 10, alignment: .leading)],
+            alignment: .leading,
+            spacing: 6
+        ) {
+            ForEach(models, id: \.self) { model in
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(byModel(model))
+                        .frame(width: 8, height: 8)
+                    Text(model)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .help(model)
+            }
+        }
     }
 
     private var rankingChart: some View {
-        GroupBox("Top models (\(range.rawValue))") {
+        cardSurface {
+            VStack(alignment: .leading, spacing: 10) {
+            cardTitle("Top models (\(range.rawValue))")
             Chart(filteredTotals.prefix(8)) { entry in
                 BarMark(
                     x: .value(metric.rawValue, metricValue(entry)),
@@ -885,7 +991,7 @@ struct ModelsView: View {
                             }
                         }
                     if let selectedModel,
-                       let entry = filteredTotals.first(where: { $0.model == selectedModel }),
+                       let entry = filteredTotals.first(where: { $0.displayName == selectedModel }),
                        let y = proxy.position(forY: selectedModel),
                        let plot = proxy.plotFrame {
                         let plotFrame = geometry[plot]
@@ -898,8 +1004,8 @@ struct ModelsView: View {
                 }
             }
             .frame(height: CGFloat(min(filteredTotals.count, 8)) * 34 + 10)
+            }
         }
-        
     }
 
     private func annotation(_ entry: ModelUsageEntry) -> String {
@@ -916,7 +1022,9 @@ struct ModelsView: View {
     // MARK: Breakdown table
 
     private var breakdownTable: some View {
-        GroupBox("Breakdown (\(range.rawValue))") {
+        cardSurface {
+            VStack(alignment: .leading, spacing: 10) {
+            cardTitle("Breakdown (\(range.rawValue))")
             VStack(spacing: 0) {
                 HStack {
                     Text("MODEL").frame(maxWidth: .infinity, alignment: .leading)
@@ -953,8 +1061,8 @@ struct ModelsView: View {
                     Divider()
                 }
             }
+            }
         }
-        
     }
 
     private func columnHeader(_ title: String) -> some View {

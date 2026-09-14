@@ -43,6 +43,14 @@ struct DailyModelUsage: Codable, Equatable {
 }
 
 enum ModelUsageAggregator {
+    /// Claude Code emits zero-usage placeholder turns with model
+    /// "<synthetic>"; they are not a model and must never be counted or
+    /// listed, including when they arrive from a persisted snapshot.
+    nonisolated static func isDisplayable(model: String?) -> Bool {
+        guard let model else { return true }
+        return model != "<synthetic>"
+    }
+
     /// Buckets samples into per-day per-model totals over the trailing
     /// `days`, merging across providers.
     static func daily(
@@ -54,7 +62,8 @@ enum ModelUsageAggregator {
         let start = calendar.startOfDay(for: now.addingTimeInterval(-Double(days - 1) * 86400))
         var byDay: [Date: [String: ModelUsageEntry]] = [:]
         for bucket in buckets {
-            for sample in bucket.samples where sample.timestamp >= start {
+            for sample in bucket.samples
+            where sample.timestamp >= start && isDisplayable(model: sample.model) {
                 let day = calendar.startOfDay(for: sample.timestamp)
                 let model = sample.model ?? "unknown"
                 let tag = sample.sourceTag
@@ -81,7 +90,7 @@ enum ModelUsageAggregator {
     static func totals(buckets: [(provider: String, samples: [UsageSample])]) -> [ModelUsageEntry] {
         var byKey: [String: ModelUsageEntry] = [:]
         for bucket in buckets {
-            for sample in bucket.samples {
+            for sample in bucket.samples where isDisplayable(model: sample.model) {
                 let model = sample.model ?? "unknown"
                 let tag = sample.sourceTag
                 let key = tag.map { "\(bucket.provider)|\($0)|\(model)" } ?? "\(bucket.provider)|\(model)"
