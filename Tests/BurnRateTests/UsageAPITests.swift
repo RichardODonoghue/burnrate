@@ -94,4 +94,25 @@ struct UsageAPITests {
         let key = OpenCodeGoUsageAPIProvider.readAPIKey(at: dir)
         #expect(key == "sk-test-123")
     }
+
+    // MARK: Claude account identity
+
+    @Test func claudeAccountFingerprintUsesAccountAndOrg() throws {
+        let json = #"{"oauthAccount":{"accountUuid":"acct-1","organizationUuid":"org-1","emailAddress":"a@example.com"}}"#
+        #expect(ClaudeUsageAPIProvider.accountFingerprint(fromClaudeJSON: Data(json.utf8)) == "acct-1|org-1")
+
+        // Missing org is still an identity; missing account is not.
+        let noOrg = #"{"oauthAccount":{"accountUuid":"acct-1"}}"#
+        #expect(ClaudeUsageAPIProvider.accountFingerprint(fromClaudeJSON: Data(noOrg.utf8)) == "acct-1|")
+        let noAccount = #"{"oauthAccount":{"emailAddress":"a@example.com"}}"#
+        #expect(ClaudeUsageAPIProvider.accountFingerprint(fromClaudeJSON: Data(noAccount.utf8)) == nil)
+        #expect(ClaudeUsageAPIProvider.accountFingerprint(fromClaudeJSON: Data("{}".utf8)) == nil)
+    }
+
+    @Test func tokenHashFallbackDiffersPerToken() {
+        #expect(ClaudeUsageAPIProvider.fallbackFingerprint(token: "abc")
+                != ClaudeUsageAPIProvider.fallbackFingerprint(token: "def"))
+        #expect(ClaudeUsageAPIProvider.fallbackFingerprint(token: "abc")
+                == ClaudeUsageAPIProvider.fallbackFingerprint(token: "abc"))
+    }
 }

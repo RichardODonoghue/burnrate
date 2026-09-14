@@ -47,8 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         localSources = sharedSources
         modelUsageViewModel = ModelUsageViewModel(sources: sharedSources)
+        let claudeProvider = ClaudeUsageAPIProvider()
         providers = [
-            ClaudeUsageAPIProvider(),
+            claudeProvider,
             OpenCodeGoUsageAPIProvider(),
             LocalUsageProvider(source: sharedSources[2].source),
         ]
@@ -64,6 +65,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.start()
 
         notifier = MilestoneNotifier(settingsStore: settingsStore)
+
+        // Claude account switch (different signed-in account) → rebase alert
+        // state so the old account's percentages aren't compared with the
+        // new account's.
+        Task { [weak self] in
+            await claudeProvider.setCredentialChangeHandler {
+                self?.notifier?.accountChanged()
+            }
+        }
 
         poll()
         startPollTimer()
