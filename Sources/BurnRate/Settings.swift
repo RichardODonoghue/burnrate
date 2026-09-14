@@ -169,11 +169,6 @@ final class SettingsStore: ObservableObject {
     @Published var costAlerts: [CostAlert] {
         didSet { persist() }
     }
-    /// Per-model token burn alerts.
-    @Published var modelBurnAlerts: [ModelBurnAlert] {
-        didSet { persist() }
-    }
-
     /// Placeholder capacities in weighted tokens (cache read ×0.1, write ×1.25),
     /// seeded from observed usage. Calibrate against your provider's usage page.
     static let defaultCapacities: [String: Int] = [
@@ -193,7 +188,6 @@ final class SettingsStore: ObservableObject {
     private static let capacitiesKey = "planCapacities"
     private static let burnAlertsKey = "burnAlerts"
     private static let costAlertsKey = "costAlerts"
-    private static let modelBurnAlertsKey = "modelBurnAlerts"
     private static let notifyOnResetKey = "notifyOnReset"
 
     init(defaults: UserDefaults = .standard) {
@@ -210,8 +204,6 @@ final class SettingsStore: ObservableObject {
         notifyOnReset = defaults.object(forKey: Self.notifyOnResetKey) as? Bool ?? true
         costAlerts = (defaults.data(forKey: Self.costAlertsKey))
             .flatMap { try? decoder.decode([CostAlert].self, from: $0) } ?? []
-        modelBurnAlerts = (defaults.data(forKey: Self.modelBurnAlertsKey))
-            .flatMap { try? decoder.decode([ModelBurnAlert].self, from: $0) } ?? []
         // Treat a persisted empty set as "no user config" so shipped defaults apply.
         if planCapacities.isEmpty {
             planCapacities = Self.defaultCapacities
@@ -254,9 +246,6 @@ final class SettingsStore: ObservableObject {
         }
         if let data = try? encoder.encode(costAlerts) {
             defaults.set(data, forKey: Self.costAlertsKey)
-        }
-        if let data = try? encoder.encode(modelBurnAlerts) {
-            defaults.set(data, forKey: Self.modelBurnAlertsKey)
         }
         defaults.set(notifyOnReset, forKey: Self.notifyOnResetKey)
     }

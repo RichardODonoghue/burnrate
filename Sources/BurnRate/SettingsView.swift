@@ -14,7 +14,6 @@ enum AppPane: Hashable {
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     let providerNames: [String]
-    let modelNames: [String]
     let viewModel: ModelUsageViewModel
     @ObservedObject var updater: Updater
 
@@ -23,14 +22,12 @@ struct SettingsView: View {
     init(
         store: SettingsStore,
         providerNames: [String],
-        modelNames: [String],
         viewModel: ModelUsageViewModel,
         updater: Updater,
         initialPane: AppPane = .notifications
     ) {
         self.store = store
         self.providerNames = providerNames
-        self.modelNames = modelNames
         self.viewModel = viewModel
         self.updater = updater
         _selection = State(initialValue: initialPane)
@@ -56,7 +53,7 @@ struct SettingsView: View {
             case .usage:
                 ModelsView(viewModel: viewModel)
             case .notifications:
-                MilestonesView(store: store, providerNames: providerNames, modelNames: modelNames)
+                MilestonesView(store: store, providerNames: providerNames)
             case .widgets:
                 WidgetsView(store: store, providerNames: providerNames)
             case .about:
@@ -84,7 +81,6 @@ struct SettingsView: View {
 private struct MilestonesView: View {
     @ObservedObject var store: SettingsStore
     let providerNames: [String]
-    let modelNames: [String]
     /// Window options per provider. Fable is a Claude-only model-scoped
     /// weekly quota — OpenCode and Codex only report Rolling/Weekly/Monthly.
     private func windowLabels(for provider: String) -> [String] {
@@ -105,10 +101,6 @@ private struct MilestonesView: View {
 
     @State private var costProvider = "OpenCode"
     @State private var costLimit = ""
-    @State private var modelBurnProvider = "Claude"
-    @State private var modelBurnModel = "*"
-    @State private var modelBurnTokens = ""
-    @State private var modelBurnMinutes = 30
     @State private var authStatus: UNAuthorizationStatus?
 
     var body: some View {
@@ -117,7 +109,6 @@ private struct MilestonesView: View {
             milestoneSection
             resetSection
             burnRateSection
-            modelBurnSection
             costSection
         }
         .formStyle(.grouped)
@@ -403,64 +394,6 @@ private struct MilestonesView: View {
         }
     }
 
-    // MARK: Model burn
-
-    private var modelBurnSection: some View {
-        Section {
-            if store.modelBurnAlerts.isEmpty {
-                emptyHint("No model burn alerts — get notified when a single model burns tokens fast.", icon: "flame")
-            }
-            ForEach(store.modelBurnAlerts) { alert in
-                HStack(spacing: 12) {
-                    Image(systemName: "flame.fill").foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(alert.provider) · \(alert.model)").fontWeight(.medium)
-                        Text("window \(alert.minutes) min").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    chip("\(StatusItemManager.formatTokens(alert.tokens)) tok", tint: .orange)
-                    Button { store.modelBurnAlerts.removeAll { $0.id == alert.id } } label: { deleteIcon }
-                        .buttonStyle(.plain)
-                }
-            }
-            Picker("Provider", selection: $modelBurnProvider) {
-                ForEach(providerNames, id: \.self) { Text($0) }
-            }
-            Picker("Model", selection: $modelBurnModel) {
-                Text("Any model").tag("*")
-                ForEach(modelNames, id: \.self) { Text($0).tag($0) }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Tokens")
-                TextField("2,000,000", text: $modelBurnTokens)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
-                    .monospacedDigit()
-            }
-            Picker("Window", selection: $modelBurnMinutes) {
-                ForEach([15, 30, 60, 120], id: \.self) { Text("\($0) min").tag($0) }
-            }
-            HStack {
-                Spacer()
-                Button("Add Model Burn Alert") {
-                    let parsed = Int(modelBurnTokens.replacingOccurrences(of: ",", with: ""))
-                    if let tokens = parsed, tokens > 0 {
-                        store.modelBurnAlerts.append(
-                            ModelBurnAlert(provider: modelBurnProvider, model: modelBurnModel,
-                                           tokens: tokens, minutes: modelBurnMinutes)
-                        )
-                        modelBurnTokens = ""
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled((Int(modelBurnTokens.replacingOccurrences(of: ",", with: "")) ?? 0) <= 0)
-            }
-        } header: {
-            Text("Model burn alerts")
-        } footer: {
-            Text("Fires when one model consumes the token threshold within the window. Models come from the Usage dashboard.")
-        }
-    }
 }
 
 // MARK: - Widgets

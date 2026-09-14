@@ -49,30 +49,6 @@ struct ModelUsageTests {
         #expect(totals[0].model == "unknown")
     }
 
-    @Test func modelBurnDetectsSpikingModel() {
-        let alert = ModelBurnAlert(provider: "Claude", model: "opus", tokens: 1_000_000, minutes: 30)
-        let samples = [
-            sample("claude-opus-5", 900_000, minutesAgo: 20),
-            sample("claude-haiku-4", 500_000, minutesAgo: 10),
-            sample("claude-opus-5", 300_000, minutesAgo: 5),
-        ]
-        let hit = ModelBurnEvaluator.detect(samples: samples, alert: alert, now: now, pollInterval: 300)
-        #expect(hit?.model == "claude-opus-5")
-        #expect(hit?.tokens == 1_200_000)
-    }
-
-    @Test func modelBurnIgnoresOutsideWindow() {
-        let alert = ModelBurnAlert(provider: "Claude", model: "*", tokens: 1_000_000, minutes: 30)
-        let samples = [sample("claude-opus-5", 2_000_000, minutesAgo: 90)]
-        #expect(ModelBurnEvaluator.detect(samples: samples, alert: alert, now: now, pollInterval: 300) == nil)
-    }
-
-    @Test func modelBurnWildcardMatchesAnyModel() {
-        let alert = ModelBurnAlert(provider: "Claude", model: "*", tokens: 800_000, minutes: 30)
-        let samples = [sample("claude-haiku-4", 900_000, minutesAgo: 5)]
-        #expect(ModelBurnEvaluator.detect(samples: samples, alert: alert, now: now, pollInterval: 300) != nil)
-    }
-
     // MARK: Sub-source tags (OpenCode Go vs Zen)
 
     private func taggedSample(_ model: String, tag: String, tokens: Int, minutesAgo: Double) -> UsageSample {

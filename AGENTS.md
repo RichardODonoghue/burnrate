@@ -99,5 +99,5 @@ directly to `main`.
   persisted to UserDefaults (`modelUsageHistory`) and refreshed each poll.
   OpenCode local source accepts `providerIDFilter: nil` (all providers).
 - Extra alerts: `CostAlert` (daily USD spend from local logs, OpenCode only)
-  and `ModelBurnAlert` (model tokens over trailing minutes, wildcard `*`
-  model allowed) — both in the notifier with once-per-day / cooldown logic.
+  in the notifier with once-per-day logic. Model-burn alerts were removed as
+  noise — the dashboard's per-model charts cover that ground.
