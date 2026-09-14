@@ -27,8 +27,6 @@ final class MilestoneNotifier {
     private var burnCooldown: [String: Date] = [:]
     /// Daily-spend alert already fired, keyed "provider|dayStart".
     private var costFired: Set<String> = []
-    /// Cooldown per model-burn alert key.
-    private var modelBurnCooldown: [String: Date] = [:]
     /// Last-seen window reset time per window id (reset detection).
     private var lastResetsAt: [String: Date] = [:]
     /// Set when a Claude account switch is detected; suppresses alerts on the
@@ -53,7 +51,6 @@ final class MilestoneNotifier {
         var lastRemaining: [String: Double] = [:]
         var costFired: [String] = []
         var burnCooldown: [String: Date] = [:]
-        var modelBurnCooldown: [String: Date] = [:]
         /// Last-seen window reset time per window id — a vendor API moving a
         /// window's resetsAt forward means a fresh window began.
         var resetsAt: [String: Date] = [:]
@@ -69,18 +66,16 @@ final class MilestoneNotifier {
             lastRemaining = try c.decodeIfPresent([String: Double].self, forKey: .lastRemaining) ?? [:]
             costFired = try c.decodeIfPresent([String].self, forKey: .costFired) ?? []
             burnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .burnCooldown) ?? [:]
-            modelBurnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .modelBurnCooldown) ?? [:]
             resetsAt = try c.decodeIfPresent([String: Date].self, forKey: .resetsAt) ?? [:]
             pendingAccountSwitch = try c.decodeIfPresent(Bool.self, forKey: .pendingAccountSwitch) ?? false
         }
 
         init(lastRemaining: [String: Double], costFired: [String],
-             burnCooldown: [String: Date], modelBurnCooldown: [String: Date],
+             burnCooldown: [String: Date],
              resetsAt: [String: Date], pendingAccountSwitch: Bool = false) {
             self.lastRemaining = lastRemaining
             self.costFired = costFired
             self.burnCooldown = burnCooldown
-            self.modelBurnCooldown = modelBurnCooldown
             self.resetsAt = resetsAt
             self.pendingAccountSwitch = pendingAccountSwitch
         }
@@ -101,7 +96,6 @@ final class MilestoneNotifier {
             lastRemaining = state.lastRemaining
             costFired = Set(state.costFired)
             burnCooldown = state.burnCooldown
-            modelBurnCooldown = state.modelBurnCooldown
             lastResetsAt = state.resetsAt
             pendingAccountSwitch = state.pendingAccountSwitch
         }
@@ -113,7 +107,6 @@ final class MilestoneNotifier {
             lastRemaining: lastRemaining,
             costFired: Array(costFired),
             burnCooldown: burnCooldown,
-            modelBurnCooldown: modelBurnCooldown,
             resetsAt: lastResetsAt,
             pendingAccountSwitch: pendingAccountSwitch
         )
@@ -157,7 +150,6 @@ final class MilestoneNotifier {
                 }
             }
             burnCooldown.removeAll()
-            modelBurnCooldown.removeAll()
             pendingAccountSwitch = false
             saveState()
             return
@@ -226,7 +218,6 @@ final class MilestoneNotifier {
     func accountChanged() {
         history.removeAll()
         burnCooldown.removeAll()
-        modelBurnCooldown.removeAll()
         pendingAccountSwitch = true
         saveState()
         send(title: "Claude account changed",
@@ -252,24 +243,6 @@ final class MilestoneNotifier {
     }
 
     /// Per-model token burn detection from local logs.
-    func evaluateModelBurn(_ buckets: [(provider: String, samples: [UsageSample])], date: Date = Date()) {
-        for alert in settingsStore.modelBurnAlerts {
-            if let until = modelBurnCooldown[alert.key], date < until { continue }
-            guard let bucket = buckets.first(where: { $0.provider == alert.provider }) else { continue }
-            guard let hit = ModelBurnEvaluator.detect(
-                samples: bucket.samples,
-                alert: alert,
-                now: date,
-                pollInterval: Self.pollInterval
-            ) else { continue }
-            modelBurnCooldown[alert.key] = date.addingTimeInterval(Self.burnCooldownInterval)
-            send(title: "\(alert.provider) \(hit.model) burning fast",
-                 body: String(format: "%@ tokens in %d min.",
-                              StatusItemManager.formatTokens(hit.tokens), alert.minutes))
-        }
-        saveState()
-    }
-
     private func recordHistory(windowID: String, date: Date, remaining: Double) {
         var entries = history[windowID] ?? []
         entries.append((date, remaining))

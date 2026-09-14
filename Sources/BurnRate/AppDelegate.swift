@@ -194,7 +194,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             usageStore.update(snapshots)
             notifier?.evaluate(usage: snapshots)
             notifier?.evaluateCosts(costs)
-            notifier?.evaluateModelBurn(buckets)
             modelUsageViewModel?.appendRemaining(snapshots: snapshots)
 
             // Refresh the Models view data + persist its snapshot.
@@ -223,7 +222,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: SettingsView(
                 store: settingsStore,
                 providerNames: usageStore.current.map(\.providerName),
-                modelNames: Array(Set(modelUsageViewModel?.totals.map(\.model) ?? []).sorted()),
                 viewModel: modelUsageViewModel ?? ModelUsageViewModel(sources: []),
                 updater: updater,
                 initialPane: pane
