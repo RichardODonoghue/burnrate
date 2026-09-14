@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/RichardODonoghue/burnrate/compare/v0.4.0...v0.5.0) (2026-09-14)
+
+
+### Features
+
+* accurate About page + GitHub links ([7ef28e8](https://github.com/RichardODonoghue/burnrate/commit/7ef28e83bc826eff797a0024f0511fb580c2540c))
+* describe BurnRate accurately on About, add GitHub links ([886cf6a](https://github.com/RichardODonoghue/burnrate/commit/886cf6ab637ce5a8ebdef31f6b2900998f7a1094))
+* remove model-burn alerts ([6e283a5](https://github.com/RichardODonoghue/burnrate/commit/6e283a5c50cdb17bd27a3892f010434094462895))
+* remove model-burn alerts ([022080a](https://github.com/RichardODonoghue/burnrate/commit/022080a2d38bf5821880bddf2d23e38d7c471b56))
+* same card treatment for notifications, widgets and about panes ([2f4b058](https://github.com/RichardODonoghue/burnrate/commit/2f4b0585312bd831663d92cd3633b66e9b9d48b8))
+* same card treatment for notifications, widgets and about panes ([1a5fe6b](https://github.com/RichardODonoghue/burnrate/commit/1a5fe6b1bf4e0122c38b9a7d23dbe4357c76ecb8))
+
+
+### Bug Fixes
+
+* dashboard polish — hide synthetic rows, legible legend, Tahoe cards, fitted x-scale ([3eeacd2](https://github.com/RichardODonoghue/burnrate/commit/3eeacd2a479374e7bc907ab7d89cdacc3b1d72d4))
+* dashboard polish — synthetic rows, legend, cards, fitted x-scale ([6e2d695](https://github.com/RichardODonoghue/burnrate/commit/6e2d695aaf9429d08a0eae9d4622c3dd0c2179d2))
+
 ## [0.4.0](https://github.com/RichardODonoghue/burnrate/compare/v0.3.0...v0.4.0) (2026-09-14)
 
 
