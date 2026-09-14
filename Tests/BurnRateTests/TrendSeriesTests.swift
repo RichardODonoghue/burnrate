@@ -34,10 +34,39 @@ struct TrendSeriesTests {
         #expect(ModelsView.axisLabel(2500, metric: .cost) == "$2.5k")
     }
 
-    @Test func tickStrideFollowsRangeNotWindow() {
-        #expect(ModelsView.trendXHourly(range: .today))
-        #expect(!ModelsView.trendXHourly(range: .week))
-        #expect(!ModelsView.trendXHourly(range: .month))
+    @Test func tickStyleFollowsVisibleSpanNotSelectedRange() {
+        // A 7d range holding only an hour of data must still get hourly ticks.
+        #expect(ModelsView.trendXHourly(span: 3600))
+        #expect(ModelsView.trendXHourly(span: 2 * 86400))
+        #expect(!ModelsView.trendXHourly(span: 7 * 86400))
+        #expect(!ModelsView.trendXHourly(span: 30 * 86400))
+    }
+
+    @Test func hourlyStrideWidensWithSpan() {
+        #expect(ModelsView.trendHourStride(span: 2 * 3600) == 1)
+        #expect(ModelsView.trendHourStride(span: 12 * 3600) == 6)
+        #expect(ModelsView.trendHourStride(span: 2 * 86400) == 12)
+    }
+
+    @Test func xDomainShrinksToAvailableData() {
+        let twoHoursAgo = now.addingTimeInterval(-2 * 3600)
+        let series: [ModelsView.TrendSeries] = [
+            ("Claude|Rolling", "Claude", "Claude", false,
+             [(twoHoursAgo, 90), (now, 80)]),
+        ]
+        // Selected range is a week, but only two hours of data exist: the
+        // domain spans the data (plus a sliver of lead-in), not the week.
+        let domain = ModelsView.trendXDomain(series: series, cutoff: now.addingTimeInterval(-7 * 86400), now: now)
+        #expect(domain.upperBound == now)
+        #expect(domain.lowerBound > now.addingTimeInterval(-3 * 3600))
+        #expect(domain.lowerBound <= twoHoursAgo)
+    }
+
+    @Test func xDomainFallsBackToFullRangeWhenEmpty() {
+        let cutoff = now.addingTimeInterval(-86400)
+        let domain = ModelsView.trendXDomain(series: [], cutoff: cutoff, now: now)
+        #expect(domain.lowerBound == cutoff)
+        #expect(domain.upperBound == now)
     }
 
     @Test func tickDatesAreMidnightsAndNoonsInSpan() {
