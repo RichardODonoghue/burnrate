@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/RichardODonoghue/burnrate/compare/v0.3.0...v0.4.0) (2026-09-14)
+
+
+### Features
+
+* detect Claude account switches and rebase alert state ([46dc4c9](https://github.com/RichardODonoghue/burnrate/commit/46dc4c988678a049cba23b706023ccd7c39987a2))
+* detect Claude account switches and rebase alert state ([79a7f01](https://github.com/RichardODonoghue/burnrate/commit/79a7f01c83a6387d701d5b9df17926487d38fb86))
+
 ## [0.3.0](https://github.com/RichardODonoghue/burnrate/compare/v0.2.0...v0.3.0) (2026-09-13)
 
 
