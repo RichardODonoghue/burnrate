@@ -104,14 +104,13 @@ private struct MilestonesView: View {
     @State private var authStatus: UNAuthorizationStatus?
 
     var body: some View {
-        Form {
-            systemPermissionSection
-            milestoneSection
-            resetSection
-            burnRateSection
-            costSection
+        CardPane {
+            systemPermissionCard
+            milestoneCard
+            resetCard
+            burnRateCard
+            costCard
         }
-        .formStyle(.grouped)
         .task { await refreshAuth() }
         .onChange(of: newProvider) { _, _ in newWindow = "Rolling" }
         .onChange(of: burnProvider) { _, _ in burnWindow = "Rolling" }
@@ -122,8 +121,9 @@ private struct MilestonesView: View {
     /// macOS prompts for notification permission at most once per install.
     /// If the user missed or denied it, no prompt ever reappears — this row
     /// surfaces the real status and offers the fix in place.
-    private var systemPermissionSection: some View {
-        Section {
+    private var systemPermissionCard: some View {
+        Card("System permission",
+             footnote: "If permission is off, BurnRate still polls and updates the menu — only banners and sounds stop.") {
             HStack {
                 Text(authLabel)
                 Spacer()
@@ -147,10 +147,6 @@ private struct MilestonesView: View {
                     }
                 }
             }
-        } header: {
-            Text("System permission")
-        } footer: {
-            Text("If permission is off, BurnRate still polls and updates the menu — only banners and sounds stop.")
         }
     }
 
@@ -193,26 +189,31 @@ private struct MilestonesView: View {
 
     // MARK: Plan milestones
 
-    private var milestoneSection: some View {
-        Section {
+    private var milestoneCard: some View {
+        Card("Plan milestones",
+             footnote: "Fires each time remaining drops past another increment (every 20%: 80, 60, 40, 20). One rule per plan window.") {
             if store.milestones.isEmpty {
                 emptyHint("No milestones yet — get notified as usage runs low.", icon: "bell.slash")
-            }
-            ForEach(store.milestones) { milestone in
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(SettingsView.color(for: milestone.provider))
-                        .frame(width: 8, height: 8)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(milestone.provider).fontWeight(.medium)
-                        Text(milestone.windowLabel).font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(store.milestones) { milestone in
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(SettingsView.color(for: milestone.provider))
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(milestone.provider).fontWeight(.medium)
+                                Text(milestone.windowLabel).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            chip("Every \(Int(milestone.step))%",
+                                 tint: SettingsView.color(for: milestone.provider))
+                            Button { store.milestones.removeAll { $0.id == milestone.id } } label: { deleteIcon }
+                                .buttonStyle(.plain)
+                        }
                     }
-                    Spacer()
-                    chip("Every \(Int(milestone.step))%",
-                         tint: SettingsView.color(for: milestone.provider))
-                    Button { store.milestones.removeAll { $0.id == milestone.id } } label: { deleteIcon }
-                        .buttonStyle(.plain)
                 }
+                Divider()
             }
             Picker("Provider", selection: $newProvider) {
                 ForEach(providerNames, id: \.self) { name in
@@ -259,44 +260,42 @@ private struct MilestonesView: View {
                     .disabled(providerNames.isEmpty)
                 }
             }
-        } header: {
-            Text("Plan milestones")
-        } footer: {
-            Text("Fires each time remaining drops past another increment (every 20%: 80, 60, 40, 20). One rule per plan window.")
         }
     }
 
     // MARK: Window resets
 
-    private var resetSection: some View {
-        Section {
+    private var resetCard: some View {
+        Card("Window resets",
+             footnote: "Fires when a plan window rolls over and refills to 100% remaining.") {
             Toggle("Notify when a window resets", isOn: $store.notifyOnReset)
-        } header: {
-            Text("Window resets")
-        } footer: {
-            Text("Fires when a plan window rolls over and refills to 100% remaining.")
         }
     }
 
     // MARK: Burn rate
 
-    private var burnRateSection: some View {
-        Section {
+    private var burnRateCard: some View {
+        Card("Burn-rate alerts",
+             footnote: "Detect usage spikes: a fast % drop within a trailing window.") {
             if store.burnAlerts.isEmpty {
                 emptyHint("No burn-rate alerts — get notified when usage accelerates.", icon: "flame")
-            }
-            ForEach(store.burnAlerts) { alert in
-                HStack(spacing: 12) {
-                    Image(systemName: "flame.fill").foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(alert.provider).fontWeight(.medium)
-                        Text(alert.windowLabel).font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(store.burnAlerts) { alert in
+                        HStack(spacing: 12) {
+                            Image(systemName: "flame.fill").foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(alert.provider).fontWeight(.medium)
+                                Text(alert.windowLabel).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            chip(String(format: "↓%.0f%% / %d min", alert.percentDrop, alert.minutes), tint: .orange)
+                            Button { store.burnAlerts.removeAll { $0.id == alert.id } } label: { deleteIcon }
+                                .buttonStyle(.plain)
+                        }
                     }
-                    Spacer()
-                    chip(String(format: "↓%.0f%% / %d min", alert.percentDrop, alert.minutes), tint: .orange)
-                    Button { store.burnAlerts.removeAll { $0.id == alert.id } } label: { deleteIcon }
-                        .buttonStyle(.plain)
                 }
+                Divider()
             }
             Picker("Provider", selection: $burnProvider) {
                 ForEach(providerNames, id: \.self) { name in
@@ -340,29 +339,30 @@ private struct MilestonesView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(providerNames.isEmpty)
             }
-        } header: {
-            Text("Burn-rate alerts")
-        } footer: {
-            Text("Detect usage spikes: a fast % drop within a trailing window.")
         }
     }
 
     // MARK: Cost
 
-    private var costSection: some View {
-        Section {
+    private var costCard: some View {
+        Card("Daily cost alerts",
+             footnote: "Spend is estimated from local logs at list prices. Only OpenCode reports vendor cost today.") {
             if store.costAlerts.isEmpty {
                 emptyHint("No cost alerts — get notified when daily spend crosses a limit.", icon: "dollarsign.circle")
-            }
-            ForEach(store.costAlerts) { alert in
-                HStack(spacing: 12) {
-                    Image(systemName: "dollarsign.circle.fill").foregroundStyle(.green)
-                    Text(alert.provider).fontWeight(.medium)
-                    Spacer()
-                    chip(String(format: "≥ $%.2f/day", alert.dailyLimitUSD), tint: .green)
-                    Button { store.costAlerts.removeAll { $0.id == alert.id } } label: { deleteIcon }
-                        .buttonStyle(.plain)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(store.costAlerts) { alert in
+                        HStack(spacing: 12) {
+                            Image(systemName: "dollarsign.circle.fill").foregroundStyle(.green)
+                            Text(alert.provider).fontWeight(.medium)
+                            Spacer()
+                            chip(String(format: "≥ $%.2f/day", alert.dailyLimitUSD), tint: .green)
+                            Button { store.costAlerts.removeAll { $0.id == alert.id } } label: { deleteIcon }
+                                .buttonStyle(.plain)
+                        }
+                    }
                 }
+                Divider()
             }
             Picker("Provider", selection: $costProvider) {
                 ForEach(providerNames, id: \.self) { Text($0) }
@@ -387,10 +387,6 @@ private struct MilestonesView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled((Double(costLimit) ?? 0) <= 0)
             }
-        } header: {
-            Text("Daily cost alerts")
-        } footer: {
-            Text("Spend is estimated from local logs at list prices. Only OpenCode reports vendor cost today.")
         }
     }
 
@@ -403,8 +399,10 @@ private struct WidgetsView: View {
     let providerNames: [String]
 
     var body: some View {
-        Form {
-            Section {
+        CardPane {
+            Card("Extra menu-bar widgets",
+                 footnote: "Each widget is an additional menu-bar item showing live usage % for that provider.") {
+                VStack(alignment: .leading, spacing: 10) {
                 ForEach(providerNames, id: \.self) { name in
                     HStack(spacing: 10) {
                         Circle()
@@ -434,15 +432,9 @@ private struct WidgetsView: View {
                     .foregroundStyle(.secondary)
                     .font(.callout)
                 }
-            } header: {
-                Text("Extra menu-bar widgets")
-            } footer: {
-                Text(
-                    "Each widget is an additional menu-bar item showing live usage % for that provider."
-                )
+                }
             }
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -461,8 +453,8 @@ private struct AboutView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
+        CardPane {
+            Card {
                 VStack(spacing: 10) {
                     Image(nsImage: Self.bundleIcon())
                         .resizable()
@@ -477,23 +469,26 @@ private struct AboutView: View {
                 .padding(.vertical, 8)
             }
 
-            Section("Updates") {
+            Card("Updates") {
                 updateRow
             }
 
-            Section("What it does") {
-                Label("Live menu-bar usage for your AI plan subscriptions", systemImage: "gauge.medium")
-                Label("Usage dashboard: plan windows, remaining-% trends, per-model stats and breakdowns", systemImage: "chart.bar.doc.horizontal")
-                Label("Desktop notifications: milestones, burn-rate spikes, cost caps, window resets", systemImage: "bell.badge")
-                Label("Optional extra menu-bar widgets per provider", systemImage: "menubar.dock.rectangle")
+            Card("What it does") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Live menu-bar usage for your AI plan subscriptions", systemImage: "gauge.medium")
+                    Label("Usage dashboard: plan windows, remaining-% trends, per-model stats and breakdowns", systemImage: "chart.bar.doc.horizontal")
+                    Label("Desktop notifications: milestones, burn-rate spikes, cost caps, window resets", systemImage: "bell.badge")
+                    Label("Optional extra menu-bar widgets per provider", systemImage: "menubar.dock.rectangle")
+                }
             }
 
-            Section("Data sources") {
-                Label("Vendor quota APIs — percentages, reset times and plan tier, using the credentials already stored by each CLI", systemImage: "checkmark.seal")
-                Label("Local session logs — per-model token statistics and cost estimates (LiteLLM pricing); nothing is sent anywhere", systemImage: "internaldrive")
+            Card("Data sources") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Vendor quota APIs — percentages, reset times and plan tier, using the credentials already stored by each CLI", systemImage: "checkmark.seal")
+                    Label("Local session logs — per-model token statistics and cost estimates (LiteLLM pricing); nothing is sent anywhere", systemImage: "internaldrive")
+                }
             }
         }
-        .formStyle(.grouped)
     }
 
     // MARK: Updates

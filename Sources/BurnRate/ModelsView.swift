@@ -204,15 +204,12 @@ struct ModelsView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        snapshotCards
-                        trendChart
-                        dailyChart
-                        rankingChart
-                        breakdownTable
-                    }
-                    .padding(20)
+                CardPane {
+                    snapshotCards
+                    trendChart
+                    dailyChart
+                    rankingChart
+                    breakdownTable
                 }
             }
         }
@@ -660,50 +657,15 @@ struct ModelsView: View {
     }
 
     private func card<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        cardSurface {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon)
-                        .foregroundStyle(.orange)
-                    Text(title)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-                }
-                content()
-            }
-        }
-    }
-
-    /// Rounded card surface: continuous corners, hairline border, control
-    /// background — GroupBox in this layout drew broken/partial outlines.
-    private func cardSurface<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
-            )
-    }
-
-    /// Section header used by the chart/table cards.
-    private func cardTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Card(title, icon: icon, subtleTitle: true) { content() }
     }
 
     // MARK: Charts
 
     /// Vendor-reported remaining-% over time, one line per provider.
     private var trendChart: some View {
-        cardSurface {
-            VStack(alignment: .leading, spacing: 10) {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Remaining over time — \(effectiveTrendLabel)")
                     .font(.headline)
@@ -862,9 +824,8 @@ struct ModelsView: View {
     }
 
     private var dailyChart: some View {
-        cardSurface {
-            VStack(alignment: .leading, spacing: 10) {
-            cardTitle("Daily usage by model (\(metric.rawValue))")
+        Card("Daily usage by model (\(metric.rawValue))") {
+            VStack(alignment: .leading, spacing: 12) {
             Chart {
                 ForEach(filteredRangeDaily, id: \.day) { day in
                     ForEach(entries(for: day)) { entry in
@@ -946,9 +907,8 @@ struct ModelsView: View {
     }
 
     private var rankingChart: some View {
-        cardSurface {
-            VStack(alignment: .leading, spacing: 10) {
-            cardTitle("Top models (\(range.rawValue))")
+        Card("Top models (\(range.rawValue))") {
+            VStack(alignment: .leading, spacing: 12) {
             Chart(filteredTotals.prefix(8)) { entry in
                 BarMark(
                     x: .value(metric.rawValue, metricValue(entry)),
@@ -1022,9 +982,8 @@ struct ModelsView: View {
     // MARK: Breakdown table
 
     private var breakdownTable: some View {
-        cardSurface {
-            VStack(alignment: .leading, spacing: 10) {
-            cardTitle("Breakdown (\(range.rawValue))")
+        Card("Breakdown (\(range.rawValue))") {
+            VStack(alignment: .leading, spacing: 12) {
             VStack(spacing: 0) {
                 HStack {
                     Text("MODEL").frame(maxWidth: .infinity, alignment: .leading)
