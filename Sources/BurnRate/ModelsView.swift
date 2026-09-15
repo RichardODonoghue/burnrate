@@ -720,6 +720,14 @@ struct ModelsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: CGFloat(max(availableTrendLabels.count, 3)) * 86)
             }
+            // Claude's quota has no monthly window (only 5-hour and weekly),
+            // so a Monthly view that looks sparse is expected, not a gap.
+            if effectiveTrendLabel == "Monthly" {
+                Label("Claude has no monthly limit — its windows are 5-hour and weekly.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             let series = trendSeries
             if series.isEmpty {
                 emptyHint("Collecting history… this chart fills in as BurnRate polls (a point every 5 minutes).")
