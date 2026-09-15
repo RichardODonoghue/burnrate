@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/RichardODonoghue/burnrate/compare/v0.5.0...v0.6.0) (2026-09-15)
+
+
+### Features
+
+* plan capacities UI + working Codex local usage, plus cleanup ([11a8601](https://github.com/RichardODonoghue/burnrate/commit/11a8601a5ea4495a87e15e3e598ee313ba8f64f4))
+* plan capacities UI + working Codex local usage, plus cleanup ([86f4446](https://github.com/RichardODonoghue/burnrate/commit/86f44467e3ad3a2c8024fb0fd844f80892b36101))
+
 ## [0.5.0](https://github.com/RichardODonoghue/burnrate/compare/v0.4.0...v0.5.0) (2026-09-14)
 
 
