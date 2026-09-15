@@ -167,3 +167,36 @@ struct ModelUsageCacheTests {
         #expect(viewModel.totals.isEmpty)
     }
 }
+
+struct ModelUsageTotalsTests {
+    private let now = Date()
+
+    private func entry(_ model: String, input: Int, cost: Double, requests: Int) -> ModelUsageEntry {
+        ModelUsageEntry(provider: "P", model: model,
+                        tokens: TokenUsage(input: input, output: 0, cacheRead: 0, cacheWrite: 0),
+                        cost: cost, requests: requests, sourceTag: nil)
+    }
+
+    @Test func totalsFromDailyMergesAcrossDays() {
+        let daily = [
+            DailyModelUsage(day: now, entries: [entry("m", input: 100, cost: 1, requests: 1)]),
+            DailyModelUsage(day: now.addingTimeInterval(-86400),
+                            entries: [entry("m", input: 50, cost: 0.5, requests: 2)]),
+        ]
+        let totals = ModelUsageAggregator.totals(fromDaily: daily)
+        #expect(totals.count == 1)
+        #expect(totals[0].totalTokens == 150)
+        #expect(totals[0].requests == 3)
+        #expect(abs(totals[0].cost - 1.5) < 0.0001)
+    }
+
+    @Test func totalsFromDailyKeepsSeparateModels() {
+        let daily = [
+            DailyModelUsage(day: now, entries: [
+                entry("a", input: 10, cost: 0, requests: 1),
+                entry("b", input: 20, cost: 0, requests: 1),
+            ]),
+        ]
+        #expect(ModelUsageAggregator.totals(fromDaily: daily).count == 2)
+    }
+}

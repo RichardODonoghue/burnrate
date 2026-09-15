@@ -10,8 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appWindow: NSWindow?
     private var pollTimer: Timer?
     private var providers: [any UsageProvider] = []
-    /// One shared instance per local source: model/cost views, local alerts
-    /// and the Codex fallback all read the same incremental caches.
+    /// The one shared instance per local source: model/cost views, local
+    /// alerts and the Codex fallback all read the same incremental caches.
     private var localSources: [(name: String, source: any UsageSource)] = []
     private var modelUsageViewModel: ModelUsageViewModel?
     private let updater = Updater()
@@ -154,7 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     !apiSnapshots.contains { $0.providerName == usage.providerName }
                 }
                 usageStore.update(apiSnapshots + carried)
-                notifier?.evaluate(usage: apiSnapshots + carried)
                 statusManager?.refreshMenu()
             }
 
@@ -188,8 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return out
             }
 
-            let snapshots = apiSnapshots.filter { api in
-                !localSnapshots.contains { $0.providerName == api.providerName }
+            // Local snapshots override the API ones where both cover a
+            // provider; anything the local pass didn't return keeps its
+            // phase-1 reading so a provider never drops off the menu.
+            let snapshots = usageStore.current.filter { existing in
+                !localSnapshots.contains { $0.providerName == existing.providerName }
             } + localSnapshots
             usageStore.update(snapshots)
             notifier?.evaluate(usage: snapshots)

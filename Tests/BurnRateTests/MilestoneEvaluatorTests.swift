@@ -12,21 +12,20 @@ struct MilestoneEvaluatorTests {
     }
 
     @Test func crossesDownPastLevel() {
-        #expect(MilestoneEvaluator.crossed(previousRemaining: 85, currentRemaining: 79, step: 20))
         #expect(MilestoneEvaluator.crossedThreshold(previousRemaining: 85, currentRemaining: 79, step: 20) == 80)
     }
 
     @Test func crossesOnExactLanding() {
-        #expect(MilestoneEvaluator.crossed(previousRemaining: 85, currentRemaining: 80, step: 20))
+        #expect(MilestoneEvaluator.crossedThreshold(previousRemaining: 85, currentRemaining: 80, step: 20) == 80)
     }
 
     @Test func noCrossWhenStillAbove() {
-        #expect(!MilestoneEvaluator.crossed(previousRemaining: 85, currentRemaining: 81, step: 20))
+        #expect(MilestoneEvaluator.crossedThreshold(previousRemaining: 85, currentRemaining: 81, step: 20) == nil)
     }
 
     @Test func noRepeatNotificationWhileBelowLevel() {
         // 75 → 70 stays inside the 80/60 band: nothing new crossed.
-        #expect(!MilestoneEvaluator.crossed(previousRemaining: 75, currentRemaining: 70, step: 20))
+        #expect(MilestoneEvaluator.crossedThreshold(previousRemaining: 75, currentRemaining: 70, step: 20) == nil)
     }
 
     @Test func bigDropReportsHighestLevel() {
@@ -34,12 +33,11 @@ struct MilestoneEvaluatorTests {
     }
 
     @Test func noFireOnFirstObservation() {
-        #expect(!MilestoneEvaluator.crossed(previousRemaining: nil, currentRemaining: 5, step: 10))
         #expect(MilestoneEvaluator.crossedThreshold(previousRemaining: nil, currentRemaining: 5, step: 10) == nil)
     }
 
     @Test func noCrossWhenRecoveringAboveLevel() {
-        #expect(!MilestoneEvaluator.crossed(previousRemaining: 60, currentRemaining: 85, step: 20))
+        #expect(MilestoneEvaluator.crossedThreshold(previousRemaining: 60, currentRemaining: 85, step: 20) == nil)
     }
 
     @Test func legacyThresholdDecodesToStep() throws {

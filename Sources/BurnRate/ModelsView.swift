@@ -24,6 +24,19 @@ final class ModelUsageViewModel: ObservableObject {
     private static let remainingKey = "remainingHistory"
     private static let remainingRetention: TimeInterval = 7 * 86400
 
+    // Derived-data caches. Rebuilding these walks the full remaining history
+    // (thousands of samples) and the daily buckets, and hover changes re-render
+    // the dashboard constantly — so cache until the underlying data changes.
+    private var trendCache: (key: String, series: [ModelsView.TrendSeries])?
+    private var labelCache: (key: String, labels: [String])?
+    private var rangeDailyCache: (key: String, days: [DailyModelUsage])?
+
+    private func invalidateDerivedCaches() {
+        trendCache = nil
+        labelCache = nil
+        rangeDailyCache = nil
+    }
+
     init(sources: [(name: String, source: any UsageSource)], defaults: UserDefaults = .standard) {
         self.sources = sources
         self.defaults = defaults
@@ -37,7 +50,7 @@ final class ModelUsageViewModel: ObservableObject {
                 .map { DailyModelUsage(day: $0.day,
                                        entries: $0.entries.filter { ModelUsageAggregator.isDisplayable(model: $0.model) }) }
                 .filter { !$0.entries.isEmpty }
-            totals = ModelUsageAggregator.totals(fromCache: daily)
+            totals = ModelUsageAggregator.totals(fromDaily: daily)
             loading = false
         }
         if let data = defaults.data(forKey: Self.remainingKey),
@@ -62,6 +75,7 @@ final class ModelUsageViewModel: ObservableObject {
             }
         }
         remainingHistory = remainingHistory.filter { $0.date >= cutoff }
+        invalidateDerivedCaches()
         if let data = try? JSONEncoder().encode(remainingHistory) {
             defaults.set(data, forKey: Self.remainingKey)
         }
@@ -71,9 +85,57 @@ final class ModelUsageViewModel: ObservableObject {
         self.daily = daily
         self.totals = totals
         loading = false
+        invalidateDerivedCaches()
         if let data = try? JSONEncoder().encode(daily) {
             defaults.set(data, forKey: Self.historyKey)
         }
+    }
+
+    /// Provider-filtered trend series for a window, over the range's trailing
+    /// span. Cached until new data arrives.
+    func trendSeries(label: String, providerFilter: String?, range: ModelsView.Range) -> [ModelsView.TrendSeries] {
+        let key = "\(label)|\(providerFilter ?? "*")|\(range.span)"
+        if let trendCache, trendCache.key == key { return trendCache.series }
+        let series = ModelsView.buildTrendSeries(
+            samples: remainingHistory,
+            label: label,
+            providerFilter: providerFilter,
+            cutoff: Date().addingTimeInterval(-range.span)
+        )
+        trendCache = (key, series)
+        return series
+    }
+
+    /// Window labels present in the range, for the window picker. Cached.
+    func trendLabels(providerFilter: String?, range: ModelsView.Range) -> [String] {
+        let key = "\(providerFilter ?? "*")|\(range.span)"
+        if let labelCache, labelCache.key == key { return labelCache.labels }
+        let cutoff = Date().addingTimeInterval(-range.span)
+        let present = Set(remainingHistory
+            .filter { (providerFilter == nil || $0.provider == providerFilter) && $0.date >= cutoff }
+            .map { ModelsView.canonicalTrendLabel($0.label) })
+        let preferred = ["Rolling", "Weekly", "Monthly"]
+        let labels = present.isEmpty
+            ? preferred
+            : preferred.filter { present.contains($0) } + present.subtracting(preferred).sorted()
+        labelCache = (key, labels)
+        return labels
+    }
+
+    /// Daily buckets overlapping the range's trailing span, with each day's
+    /// entries filtered to the provider. Cached until new data arrives.
+    func rangeDaily(range: ModelsView.Range, providerFilter: String?) -> [DailyModelUsage] {
+        let key = "\(providerFilter ?? "*")|\(range.span)"
+        if let rangeDailyCache, rangeDailyCache.key == key { return rangeDailyCache.days }
+        let start = Calendar.current.startOfDay(for: Date().addingTimeInterval(-range.span))
+        let days = daily.filter { $0.day >= start }.compactMap { day -> DailyModelUsage? in
+            let entries = providerFilter == nil
+                ? day.entries
+                : day.entries.filter { $0.provider == providerFilter }
+            return entries.isEmpty ? nil : DailyModelUsage(day: day.day, entries: entries)
+        }
+        rangeDailyCache = (key, days)
+        return days
     }
 
     func reload() {
@@ -89,27 +151,6 @@ final class ModelUsageViewModel: ObservableObject {
                 totals: ModelUsageAggregator.totals(buckets: buckets)
             )
         }
-    }
-}
-
-private extension ModelUsageAggregator {
-    /// Rebuild flat totals from cached daily buckets (for instant display).
-    static func totals(fromCache daily: [DailyModelUsage]) -> [ModelUsageEntry] {
-        var byKey: [String: ModelUsageEntry] = [:]
-        for day in daily {
-            for entry in day.entries {
-                var merged = byKey[entry.id] ?? entry
-                merged.tokens.input += entry.tokens.input
-                merged.tokens.output += entry.tokens.output
-                merged.tokens.cacheRead += entry.tokens.cacheRead
-                merged.tokens.cacheWrite += entry.tokens.cacheWrite
-                merged.tokens.reasoning += entry.tokens.reasoning
-                merged.cost += entry.cost
-                merged.requests += entry.requests
-                byKey[entry.id] = merged
-            }
-        }
-        return byKey.values.sorted { $0.totalTokens > $1.totalTokens }
     }
 }
 
@@ -143,20 +184,6 @@ struct ModelsView: View {
     @State private var selectedDay: Date?
     @State private var selectedModel: String?
 
-    /// Window labels actually present in history (for the selected provider
-    /// filter). Claude reports Rolling/Weekly plus model-scoped weeklies
-    /// (Fable); OpenCode Go reports Rolling/Weekly/Monthly. Scoped weeklies
-    /// fold into Weekly (see canonicalTrendLabel), so they never appear as
-    /// their own picker option.
-    private var availableTrendLabels: [String] {
-        let labels = Set(viewModel.remainingHistory
-            .filter { (providerFilter == nil || $0.provider == providerFilter) && $0.date >= rangeCutoff }
-            .map { Self.canonicalTrendLabel($0.label) })
-        guard !labels.isEmpty else { return ["Rolling", "Weekly", "Monthly"] }
-        let preferred = ["Rolling", "Weekly", "Monthly"]
-        return preferred.filter { labels.contains($0) } + labels.subtracting(preferred).sorted()
-    }
-
     /// Model-scoped quotas (Fable today) come from weekly_scoped kinds, so
     /// they chart on the Weekly graph. The only exotic labels our sources can
     /// record are scoped weeklies — anything outside the three known windows
@@ -168,9 +195,8 @@ struct ModelsView: View {
         }
     }
 
-    /// Start of the visible span for the range filter (mirrors
-    /// filteredRangeDaily) — the trend chart used to ignore `range` and
-    /// always plot the full retention.
+    /// Trailing start of the visible span for the range filter (matches
+    /// `filteredRangeDaily`).
     nonisolated static func trendCutoff(for range: Range, now: Date) -> Date {
         now.addingTimeInterval(-range.span)
     }
@@ -183,6 +209,13 @@ struct ModelsView: View {
     /// Monthly selected, then provider filtered to Claude-only).
     private var effectiveTrendLabel: String {
         availableTrendLabels.contains(trendWindow) ? trendWindow : availableTrendLabels[0]
+    }
+
+    /// Window labels actually present in the range, for the picker. Claude
+    /// adds model-scoped weeklies (Fable); those fold into Weekly (see
+    /// canonicalTrendLabel), so they never become their own picker option.
+    private var availableTrendLabels: [String] {
+        viewModel.trendLabels(providerFilter: providerFilter, range: range)
     }
 
     var body: some View {
@@ -238,21 +271,15 @@ struct ModelsView: View {
     }
 
     private var filteredTotals: [ModelUsageEntry] {
-        // Aggregate from the in-range daily buckets. viewModel.totals spans
-        // the full 30 days — using it here leaked out-of-range models (and
-        // their cost) into narrow ranges like Today.
-        let days = filteredRangeDaily.map { day in
-            DailyModelUsage(day: day.day, entries: entries(for: day))
-        }
-        return ModelUsageAggregator.totals(fromCache: days)
+        // Aggregate from the in-range buckets: viewModel.totals spans the full
+        // 30 days and would leak out-of-range models into narrow ranges.
+        ModelUsageAggregator.totals(fromDaily: filteredRangeDaily)
     }
 
+    /// Daily buckets overlapping the trailing range, entries already filtered
+    /// to the selected provider. Cached in the view model.
     private var filteredRangeDaily: [DailyModelUsage] {
-        // Day buckets can't split: include whole buckets overlapping the
-        // trailing window (a 24h range shows today's + yesterday's bars).
-        let cutoff = Date().addingTimeInterval(-range.span)
-        let start = Calendar.current.startOfDay(for: cutoff)
-        return filteredDaily.filter { $0.day >= start }
+        viewModel.rangeDaily(range: range, providerFilter: providerFilter)
     }
 
     /// X-axis tick style follows the *visible* span, so a chart scaled down to
@@ -330,11 +357,32 @@ struct ModelsView: View {
         at date: Date
     ) -> [(name: String, provider: String, scoped: Bool, remaining: Double)] {
         series.compactMap { s in
-            guard let point = s.samples.min(by: {
-                abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
-            }) else { return nil }
+            guard let point = nearestPoint(in: s.samples, to: date) else { return nil }
             return (s.name, s.provider, s.scoped, point.remaining)
         }
+    }
+
+    /// Nearest sample to `date` in a date-sorted series. Binary search: the
+    /// tooltip tracks the pointer, and a linear scan per hover event over
+    /// thousands of points is wasteful. Tested.
+    nonisolated static func nearestPoint(
+        in samples: [(date: Date, remaining: Double)],
+        to date: Date
+    ) -> (date: Date, remaining: Double)? {
+        guard !samples.isEmpty else { return nil }
+        var low = 0
+        var high = samples.count - 1
+        while low < high {
+            let mid = (low + high) / 2
+            if samples[mid].date < date { low = mid + 1 } else { high = mid }
+        }
+        // `low` is the first index at or after `date`; compare with its neighbour.
+        let candidate = samples[low]
+        guard low > 0 else { return candidate }
+        let previous = samples[low - 1]
+        return abs(previous.date.timeIntervalSince(date)) <= abs(candidate.date.timeIntervalSince(date))
+            ? previous
+            : candidate
     }
 
     private var trendDayTicks: [Date] {
@@ -403,7 +451,7 @@ struct ModelsView: View {
     }
 
     private func dailyTooltip(for day: DailyModelUsage) -> some View {
-        let rows = entries(for: day).filter { metricValue($0) > 0 }
+        let rows = day.entries.filter { metricValue($0) > 0 }
         return tooltipCard {
             VStack(alignment: .leading, spacing: 4) {
                 Text(day.day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
@@ -599,7 +647,7 @@ struct ModelsView: View {
     }
 
     private var rollingCard: some View {
-        card(title: "Rolling usage", icon: "gauge.with.needle") {
+        Card("Rolling usage", icon: "gauge.with.needle", subtleTitle: true) {
             let latest = latestRolling
             if latest.isEmpty {
                 Text("Collecting…")
@@ -625,7 +673,7 @@ struct ModelsView: View {
     }
 
     private var tokensTodayCard: some View {
-        card(title: "Tokens today", icon: "number") {
+        Card("Tokens today", icon: "number", subtleTitle: true) {
             let entries = todayEntries
             let total = entries.reduce(0) { $0 + $1.totalTokens }
             let requests = entries.reduce(0) { $0 + $1.requests }
@@ -642,7 +690,7 @@ struct ModelsView: View {
     }
 
     private var costTodayCard: some View {
-        card(title: "Cost today", icon: "dollarsign.circle") {
+        Card("Cost today", icon: "dollarsign.circle", subtleTitle: true) {
             let cost = todayEntries.reduce(0.0) { $0 + $1.cost }
             VStack(alignment: .leading, spacing: 4) {
                 Text(cost > 0 ? String(format: "$%.2f", cost) : "—")
@@ -654,10 +702,6 @@ struct ModelsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func card<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        Card(title, icon: icon, subtleTitle: true) { content() }
     }
 
     // MARK: Charts
@@ -809,12 +853,9 @@ struct ModelsView: View {
     }
 
     private var trendSeries: [TrendSeries] {
-        Self.buildTrendSeries(
-            samples: viewModel.remainingHistory,
-            label: effectiveTrendLabel,
-            providerFilter: providerFilter,
-            cutoff: rangeCutoff
-        )
+        viewModel.trendSeries(label: effectiveTrendLabel,
+                             providerFilter: providerFilter,
+                             range: range)
     }
 
     private func emptyHint(_ text: String) -> some View {
@@ -828,7 +869,7 @@ struct ModelsView: View {
             VStack(alignment: .leading, spacing: 12) {
             Chart {
                 ForEach(filteredRangeDaily, id: \.day) { day in
-                    ForEach(entries(for: day)) { entry in
+                    ForEach(day.entries) { entry in
                         BarMark(
                             x: .value("Day", day.day, unit: .day),
                             y: .value(metric.rawValue, metricValue(entry))
@@ -976,7 +1017,7 @@ struct ModelsView: View {
 
     /// Models visible in the daily chart, in stable order — the legend domain.
     private var legendModels: [String] {
-        Array(Set(filteredRangeDaily.flatMap { entries(for: $0).map(\.displayName) })).sorted()
+        Array(Set(filteredRangeDaily.flatMap { $0.entries.map(\.displayName) })).sorted()
     }
 
     // MARK: Breakdown table

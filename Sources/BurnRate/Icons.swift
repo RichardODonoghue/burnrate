@@ -53,7 +53,6 @@ enum AppIconRenderer {
             NSColor(calibratedRed: CGFloat(hex.0) / 255, green: CGFloat(hex.1) / 255, blue: CGFloat(hex.2) / 255, alpha: 1)
         }
         let stops: [(threshold: Double, a: (UInt8, UInt8, UInt8), b: (UInt8, UInt8, UInt8))] = [
-            (100, (0x8F, 0xE0, 0x7A), (0x33, 0xAE, 0x70)),
             (55, (0x8F, 0xE0, 0x7A), (0x33, 0xAE, 0x70)),
             (45, (0xFF, 0xC2, 0x4B), (0xFF, 0x7A, 0x3D)),
             (20, (0xFF, 0x8A, 0x5C), (0xE6, 0x40, 0x19)),
@@ -108,24 +107,22 @@ enum AppIconRenderer {
     /// Dock, notifications and About — macOS allows only a single app icon,
     /// and the dark plate keeps the amber flame + cream needle crisp on
     /// both dark banners and the light Dock grid.
-    static func appIconImage(size: CGFloat = 512, remaining: Double? = nil, plate: Bool = true) -> NSImage {
+    static func appIconImage(size: CGFloat = 512) -> NSImage {
         let scale = size / 72
-        let angle = needleAngle(forRemaining: remaining)
-        let tint = tint(forRemaining: remaining)
+        let angle = needleAngle(forRemaining: nil)
+        let tint = tint(forRemaining: nil)
         let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { _ in
             let context = NSGraphicsContext.current!.cgContext
             context.scaleBy(x: scale, y: scale)
             // Dark plate + light hairline border for definition on any surface.
-            if plate {
-                NSColor(calibratedRed: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1).setFill()
-                NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
-                             xRadius: 16, yRadius: 16).fill()
-                NSColor(calibratedWhite: 1, alpha: 0.28).setStroke()
-                let border = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
-                                          xRadius: 16, yRadius: 16)
-                border.lineWidth = 1
-                border.stroke()
-            }
+            NSColor(calibratedRed: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1).setFill()
+            NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
+                         xRadius: 16, yRadius: 16).fill()
+            NSColor(calibratedWhite: 1, alpha: 0.28).setStroke()
+            let border = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1.5, width: 69, height: 69),
+                                      xRadius: 16, yRadius: 16)
+            border.lineWidth = 1
+            border.stroke()
             // Flame filled with the severity gradient, clipped to its shape.
             context.saveGState()
             flamePath.addClip()

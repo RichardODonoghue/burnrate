@@ -20,6 +20,10 @@ final class PricingService: @unchecked Sendable {
     private var table: [String: ModelPricing] = [:]
     private var lastRefresh: Date?
     private var refreshTask: Task<Void, Never>?
+    /// Memoised `lookup` results: the LiteLLM table is large and lookups run
+    /// per usage sample. Cleared whenever the table is replaced.
+    private var resolved: [String: ModelPricing] = [:]
+    private var unresolved: Set<String> = []
     private let lock = NSLock()
     private let cacheURL: URL
 
@@ -69,7 +73,11 @@ final class PricingService: @unchecked Sendable {
     }
 
     private func setTable(_ newTable: [String: ModelPricing]) {
-        lock.withLock { table = newTable }
+        lock.withLock {
+            table = newTable
+            resolved.removeAll()
+            unresolved.removeAll()
+        }
     }
 
     private func loadCache() {
@@ -96,8 +104,16 @@ final class PricingService: @unchecked Sendable {
 
     /// Lookup order: exact bare key, longest bare-key prefix of the model
     /// (date/version suffixes), then keys whose bare name the model startsWith.
+    /// Results are memoised — the scan is otherwise O(table) per sample.
     nonisolated func lookup(_ model: String) -> ModelPricing? {
-        Self.lookup(model, in: table)
+        let key = model.lowercased()
+        if let hit: ModelPricing = lock.withLock({ resolved[key] }) { return hit }
+        if lock.withLock({ unresolved.contains(key) }) { return nil }
+        let result = lock.withLock { Self.lookup(key, in: table) }
+        lock.withLock {
+            if let result { resolved[key] = result } else { unresolved.insert(key) }
+        }
+        return result
     }
 
     nonisolated static func lookup(_ model: String, in table: [String: ModelPricing]) -> ModelPricing? {

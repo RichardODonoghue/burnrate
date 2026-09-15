@@ -33,6 +33,20 @@ struct PricingServiceTests {
         #expect(PricingService.lookup("mystery-model", in: table) == nil)
     }
 
+    @Test func instanceLookupMemoises() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pricing-cache-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let body = #"{"claude-opus-5":{"input_cost_per_token":5e-6,"output_cost_per_token":2.5e-5}}"#
+        try body.write(to: url, atomically: true, encoding: .utf8)
+
+        let service = PricingService(cacheURL: url)
+        #expect(service.lookup("claude-opus-5-20260101")?.input == 5e-6) // prefix hit
+        #expect(service.lookup("claude-opus-5-20260101")?.input == 5e-6) // memoised hit
+        #expect(service.lookup("mystery") == nil)
+        #expect(service.lookup("mystery") == nil) // memoised miss
+    }
+
     @Test func costCalculationWeightsCaches() {
         let pricing = PricingService.lookup("claude-opus-5", in: table)!
         let tokens = TokenUsage(input: 1_000_000, output: 100_000, cacheRead: 10_000_000, cacheWrite: 1_000_000)

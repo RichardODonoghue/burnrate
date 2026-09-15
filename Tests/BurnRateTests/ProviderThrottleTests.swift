@@ -57,4 +57,25 @@ struct ProviderThrottleTests {
             now: now
         ))
     }
+
+    @Test func quotaCacheThrottlesAndBacksOff() {
+        var cache = QuotaCache(minInterval: 60, backoff: 300)
+        #expect(cache.shouldFetch(now: now))
+        cache.noteFetch(now: now)
+        cache.noteSuccess([])
+        #expect(!cache.shouldFetch(now: now.addingTimeInterval(30)))
+        #expect(cache.shouldFetch(now: now.addingTimeInterval(61)))
+        cache.noteFailure(now: now)
+        #expect(!cache.shouldFetch(now: now.addingTimeInterval(100)))
+        cache.invalidate()
+        #expect(cache.shouldFetch(now: now))
+    }
+
+    @Test func quotaCacheSkipsThrottleWhenResetPassed() {
+        var cache = QuotaCache(minInterval: 600, backoff: 300)
+        cache.noteFetch(now: now)
+        // Reset lands 10s after the fetch; a check 20s later must refetch.
+        cache.noteSuccess([window(resetsAt: now.addingTimeInterval(10))])
+        #expect(cache.shouldFetch(now: now.addingTimeInterval(20)))
+    }
 }

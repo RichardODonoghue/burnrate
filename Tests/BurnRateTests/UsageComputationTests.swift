@@ -51,6 +51,21 @@ struct UsageComputationTests {
         #expect(windows.allSatisfy { $0.percentRemaining == nil })
     }
 
+    @Test func codexRollingCapacityProducesPercent() {
+        let now = Date()
+        let samples = [
+            UsageSample(timestamp: now, tokens: .init(input: 500_000, output: 0, cacheRead: 0, cacheWrite: 0)),
+        ]
+        let windows = UsageComputation.windows(
+            samples: samples,
+            provider: "Codex",
+            capacities: ["Codex|Rolling": 1_000_000],
+            now: now
+        )
+        #expect(windows.first { $0.label == "Rolling" }?.percentRemaining == 50)
+        #expect(windows.first { $0.label == "Weekly" }?.percentRemaining == nil)
+    }
+
     @Test func percentClampsAtZero() {
         let now = Date()
         let samples = [UsageSample(timestamp: now, tokens: .init(input: 2000, output: 0, cacheRead: 0, cacheWrite: 0))]

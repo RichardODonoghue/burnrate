@@ -62,22 +62,12 @@ enum ModelUsageAggregator {
         let start = calendar.startOfDay(for: now.addingTimeInterval(-Double(days - 1) * 86400))
         var byDay: [Date: [String: ModelUsageEntry]] = [:]
         for bucket in buckets {
-            for sample in bucket.samples
-            where sample.timestamp >= start && isDisplayable(model: sample.model) {
+            for sample in bucket.samples where sample.timestamp >= start {
+                guard isDisplayable(model: sample.model) else { continue }
                 let day = calendar.startOfDay(for: sample.timestamp)
-                let model = sample.model ?? "unknown"
-                let tag = sample.sourceTag
-                let key = tag.map { "\(bucket.provider)|\($0)|\(model)" } ?? "\(bucket.provider)|\(model)"
-                var entry = byDay[day]?[key]
-                    ?? ModelUsageEntry(provider: bucket.provider, model: model, tokens: .zero,
-                                       cost: 0, requests: 0, sourceTag: tag)
-                entry.tokens.input += sample.tokens.input
-                entry.tokens.output += sample.tokens.output
-                entry.tokens.cacheRead += sample.tokens.cacheRead
-                entry.tokens.cacheWrite += sample.tokens.cacheWrite
-                entry.tokens.reasoning += sample.tokens.reasoning
-                entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
-                entry.requests += 1
+                let key = entryKey(provider: bucket.provider, sample: sample)
+                var entry = byDay[day]?[key] ?? makeEntry(provider: bucket.provider, sample: sample)
+                add(sample, to: &entry)
                 byDay[day, default: [:]][key] = entry
             }
         }
@@ -91,22 +81,56 @@ enum ModelUsageAggregator {
         var byKey: [String: ModelUsageEntry] = [:]
         for bucket in buckets {
             for sample in bucket.samples where isDisplayable(model: sample.model) {
-                let model = sample.model ?? "unknown"
-                let tag = sample.sourceTag
-                let key = tag.map { "\(bucket.provider)|\($0)|\(model)" } ?? "\(bucket.provider)|\(model)"
-                var entry = byKey[key]
-                    ?? ModelUsageEntry(provider: bucket.provider, model: model, tokens: .zero,
-                                       cost: 0, requests: 0, sourceTag: tag)
-                entry.tokens.input += sample.tokens.input
-                entry.tokens.output += sample.tokens.output
-                entry.tokens.cacheRead += sample.tokens.cacheRead
-                entry.tokens.cacheWrite += sample.tokens.cacheWrite
-                entry.tokens.reasoning += sample.tokens.reasoning
-                entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
-                entry.requests += 1
+                let key = entryKey(provider: bucket.provider, sample: sample)
+                var entry = byKey[key] ?? makeEntry(provider: bucket.provider, sample: sample)
+                add(sample, to: &entry)
                 byKey[key] = entry
             }
         }
         return byKey.values.sorted { $0.totalTokens > $1.totalTokens }
+    }
+
+    /// Flat totals rebuilt from day buckets (instant display, range filters).
+    static func totals(fromDaily daily: [DailyModelUsage]) -> [ModelUsageEntry] {
+        var byKey: [String: ModelUsageEntry] = [:]
+        for day in daily {
+            for entry in day.entries {
+                guard var merged = byKey[entry.id] else {
+                    byKey[entry.id] = entry
+                    continue
+                }
+                merged.tokens.input += entry.tokens.input
+                merged.tokens.output += entry.tokens.output
+                merged.tokens.cacheRead += entry.tokens.cacheRead
+                merged.tokens.cacheWrite += entry.tokens.cacheWrite
+                merged.tokens.reasoning += entry.tokens.reasoning
+                merged.cost += entry.cost
+                merged.requests += entry.requests
+                byKey[entry.id] = merged
+            }
+        }
+        return byKey.values.sorted { $0.totalTokens > $1.totalTokens }
+    }
+
+    // MARK: - Shared accumulation
+
+    private static func entryKey(provider: String, sample: UsageSample) -> String {
+        let model = sample.model ?? "unknown"
+        return sample.sourceTag.map { "\(provider)|\($0)|\(model)" } ?? "\(provider)|\(model)"
+    }
+
+    private static func makeEntry(provider: String, sample: UsageSample) -> ModelUsageEntry {
+        ModelUsageEntry(provider: provider, model: sample.model ?? "unknown",
+                        tokens: .zero, cost: 0, requests: 0, sourceTag: sample.sourceTag)
+    }
+
+    private static func add(_ sample: UsageSample, to entry: inout ModelUsageEntry) {
+        entry.tokens.input += sample.tokens.input
+        entry.tokens.output += sample.tokens.output
+        entry.tokens.cacheRead += sample.tokens.cacheRead
+        entry.tokens.cacheWrite += sample.tokens.cacheWrite
+        entry.tokens.reasoning += sample.tokens.reasoning
+        entry.cost += sample.cost ?? PricingService.shared.cost(of: sample)
+        entry.requests += 1
     }
 }
