@@ -101,6 +101,19 @@ struct TrendSeriesTests {
         #expect(rows[0].remaining == 68)
     }
 
+    @Test func nearestPointBinarySearchesSortedSamples() {
+        let base = now
+        let samples = [
+            (date: base, remaining: 100.0),
+            (date: base.addingTimeInterval(600), remaining: 90),
+            (date: base.addingTimeInterval(1200), remaining: 80),
+        ]
+        #expect(ModelsView.nearestPoint(in: samples, to: base.addingTimeInterval(580))?.remaining == 90)
+        #expect(ModelsView.nearestPoint(in: samples, to: base.addingTimeInterval(-100))?.remaining == 100)
+        #expect(ModelsView.nearestPoint(in: samples, to: base.addingTimeInterval(10_000))?.remaining == 80)
+        #expect(ModelsView.nearestPoint(in: [], to: base) == nil)
+    }
+
     @Test func todayRangeDropsOlderPoints() {
         let samples = [
             sample("Claude", "Rolling", hoursAgo: 0.2, remaining: 70),

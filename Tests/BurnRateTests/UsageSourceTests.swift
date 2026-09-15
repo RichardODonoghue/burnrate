@@ -58,7 +58,26 @@ struct UsageSourceTests {
         let url = try writeTemp(lines)
         defer { try? FileManager.default.removeItem(at: url) }
         let sample = try CodexUsageSource.parseSessionFile(at: url)
-        #expect(sample?.tokens == TokenUsage(input: 300, output: 90, cacheRead: 20, cacheWrite: 0))
+        #expect(sample?.tokens == TokenUsage(input: 300, output: 90, cacheRead: 20, cacheWrite: 0, reasoning: 15))
+        // Reasoning is counted, matching Codex's own total.
+        #expect(sample?.tokens.total == 425)
+    }
+
+    @Test func codexLocalProviderProducesRemainingPercent() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-e2e-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = #"{"timestamp":"\#(timestamp)","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500000,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}}}"#
+        try (line + "\n").write(to: dir.appendingPathComponent("session.jsonl"),
+                                atomically: true, encoding: .utf8)
+
+        let provider = LocalUsageProvider(source: CodexUsageSource(baseURL: dir))
+        let usage = await provider.fetchUsage(capacities: ["Codex|Rolling": 1_000_000])
+        #expect(usage?.providerName == "Codex")
+        #expect(usage?.windows.first { $0.label == "Rolling" }?.percentRemaining == 50)
     }
 
     @Test func parsesOpenCodeMessageJSON() throws {

@@ -225,12 +225,9 @@ final class StatusItemManager: NSObject {
             .replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
     }
 
-    /// Menus are MainActor-only.
-    /// Compact relative reset text: "in 45m", "in 5h", "in 3d" — a fixed
-    /// medium date ("Sep 12, 2026 at 6:00 PM") was the widest menu line and
-    /// stretched the whole dropdown.
-    @MainActor
-    static func formatTime(_ date: Date) -> String {
+    /// Compact relative reset text: "in 45m", "in 5h", "in 3d" — keeps the
+    /// dropdown narrow (a full date was its widest line).
+    nonisolated static func formatTime(_ date: Date) -> String {
         let seconds = date.timeIntervalSinceNow
         if seconds <= 0 { return "now" }
         if seconds < 3600 { return "in \(Int((seconds / 60).rounded(.up)))m" }

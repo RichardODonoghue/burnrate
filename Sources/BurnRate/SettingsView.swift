@@ -110,10 +110,44 @@ private struct MilestonesView: View {
             resetCard
             burnRateCard
             costCard
+            capacityCard
         }
         .task { await refreshAuth() }
         .onChange(of: newProvider) { _, _ in newWindow = "Rolling" }
         .onChange(of: burnProvider) { _, _ in burnWindow = "Rolling" }
+    }
+
+    // MARK: Pickers
+    //
+    // Pop-up buttons stretch edge-to-edge in these cards; segmented groups
+    // match the "Notify every" control. Fall back to a menu when a provider
+    // list is long enough that segments would truncate.
+
+    @ViewBuilder
+    private func providerPicker(_ selection: Binding<String>) -> some View {
+        let picker = Picker("Provider", selection: selection) {
+            ForEach(providerNames, id: \.self) { name in
+                Text(name)
+            }
+        }
+        if providerNames.count <= 4 {
+            picker.pickerStyle(.segmented)
+        } else {
+            picker
+        }
+    }
+
+    @ViewBuilder
+    private func windowPicker(_ selection: Binding<String>, provider: String) -> some View {
+        let options = windowLabels(for: provider)
+        let picker = Picker("Window", selection: selection) {
+            ForEach(options, id: \.self) { Text($0) }
+        }
+        if options.count <= 4 {
+            picker.pickerStyle(.segmented)
+        } else {
+            picker
+        }
     }
 
     // MARK: System permission
@@ -215,15 +249,8 @@ private struct MilestonesView: View {
                 }
                 Divider()
             }
-            Picker("Provider", selection: $newProvider) {
-                ForEach(providerNames, id: \.self) { name in
-                    Label(name, systemImage: "circle.fill")
-                        .foregroundColor(SettingsView.color(for: name))
-                }
-            }
-            Picker("Window", selection: $newWindow) {
-                ForEach(windowLabels(for: newProvider), id: \.self) { Text($0) }
-            }
+            providerPicker($newProvider)
+            windowPicker($newWindow, provider: newProvider)
             Picker("Notify every", selection: $newStep) {
                 ForEach(stepPresets, id: \.self) { step in
                     Text("Every \(Int(step))%").tag(step)
@@ -297,15 +324,8 @@ private struct MilestonesView: View {
                 }
                 Divider()
             }
-            Picker("Provider", selection: $burnProvider) {
-                ForEach(providerNames, id: \.self) { name in
-                    Label(name, systemImage: "circle.fill")
-                        .foregroundColor(SettingsView.color(for: name))
-                }
-            }
-            Picker("Window", selection: $burnWindow) {
-                ForEach(windowLabels(for: burnProvider), id: \.self) { Text($0) }
-            }
+            providerPicker($burnProvider)
+            windowPicker($burnWindow, provider: burnProvider)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Drop")
@@ -364,9 +384,7 @@ private struct MilestonesView: View {
                 }
                 Divider()
             }
-            Picker("Provider", selection: $costProvider) {
-                ForEach(providerNames, id: \.self) { Text($0) }
-            }
+            providerPicker($costProvider)
             HStack {
                 Text("Daily limit ($)")
                 Spacer()
@@ -388,6 +406,78 @@ private struct MilestonesView: View {
                 .disabled((Double(costLimit) ?? 0) <= 0)
             }
         }
+    }
+
+    // MARK: Plan capacities
+
+    private struct CapacityRow: Identifiable {
+        let provider: String
+        let window: String
+        var id: String { "\(provider)|\(window)" }
+    }
+
+    /// (provider, window) pairs that use local-log % — i.e. anything with a
+    /// configured or seeded capacity. Currently Codex; data-driven so extra
+    /// log-based providers show up automatically.
+    private var capacityRows: [CapacityRow] {
+        providerNames.flatMap { provider in
+            windowLabels(for: provider).compactMap { window in
+                let key = "\(provider)|\(window)"
+                let known = store.planCapacities[key] != nil
+                    || SettingsStore.defaultCapacities[key] != nil
+                return known ? CapacityRow(provider: provider, window: window) : nil
+            }
+        }
+    }
+
+    private func capacityBinding(_ key: String) -> Binding<String> {
+        Binding(
+            get: { store.planCapacities[key].map(String.init) ?? "" },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                if digits.isEmpty {
+                    store.planCapacities.removeValue(forKey: key)
+                } else if let value = Int(digits) {
+                    store.planCapacities[key] = value
+                }
+            }
+        )
+    }
+
+    private var capacityCard: some View {
+        Card("Plan capacities",
+             footnote: "Weighted tokens per window (cache reads count 10%, writes 125%). Local-log providers like Codex show a % only when a capacity is set; calibrate until it matches the vendor's usage page.") {
+            if capacityRows.isEmpty {
+                emptyHint("Configured automatically once a log-based provider is detected.", icon: "gauge.with.needle")
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(capacityRows) { row in
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(SettingsView.color(for: row.provider))
+                                .frame(width: 8, height: 8)
+                            Text(row.provider).fontWeight(.medium)
+                            Text(row.window).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            TextField("tokens", text: capacityBinding(row.id))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 130)
+                                .monospacedDigit()
+                                .multilineTextAlignment(.trailing)
+                            Text(formattedCapacity(store.planCapacities[row.id]))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .frame(width: 60, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func formattedCapacity(_ value: Int?) -> String {
+        value.map { StatusItemManager.formatTokens($0) } ?? "—"
     }
 
 }

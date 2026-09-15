@@ -21,7 +21,8 @@ final class MilestoneNotifier {
     private let settingsStore: SettingsStore
     /// Last observed remaining % per window id, used to detect threshold crossings.
     private var lastRemaining: [String: Double] = [:]
-    /// Remaining-% history per window id (oldest last), for burn-rate alerts.
+    /// Remaining-% history per window id, chronological (oldest first), for
+    /// burn-rate alerts.
     private var history: [String: [(date: Date, remaining: Double)]] = [:]
     /// Cooldown per window id after a burn-rate alert fires.
     private var burnCooldown: [String: Date] = [:]
@@ -242,7 +243,7 @@ final class MilestoneNotifier {
         saveState()
     }
 
-    /// Per-model token burn detection from local logs.
+    /// Appends one reading and prunes entries beyond the retention window.
     private func recordHistory(windowID: String, date: Date, remaining: Double) {
         var entries = history[windowID] ?? []
         entries.append((date, remaining))

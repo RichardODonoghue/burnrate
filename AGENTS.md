@@ -83,10 +83,13 @@ directly to `main`.
 - Sources/providers are actors (`protocol UsageSource: Actor`,
   `protocol UsageProvider: Actor`); parsing runs off the main thread. First
   Claude parse is ~20s (~560MB), later polls ~ms.
-- Local parsing needs user-configured capacities (`SettingsStore.planCapacities`,
-  weighted tokens: cache read ×0.1, write ×1.25) to show %; without one it shows
-  tokens only. Claude data counts cache reads, so raw token capacity guessing
-  never matches the vendor % — prefer the quota API.
+- Local parsing needs capacities (`SettingsStore.planCapacities`, weighted
+  tokens: cache read ×0.1, write ×1.25) to show %; without one it shows tokens
+  only. Seeded for Codex and editable in Settings → Notifications → "Plan
+  capacities". Keys are `provider|windowLabel` with labels Rolling/Weekly/
+  Monthly (older builds used "5hr"; `SettingsStore.migratedCapacities` remaps
+  them). Claude data counts cache reads, so raw token capacity guessing never
+  matches the vendor % — prefer the quota API.
 - Usage polling continues while the app is backgrounded; milestone thresholds
   and burn-rate alerts are evaluated on each poll.
 - Burn-rate alerts (`BurnAlert`): notify when a window's remaining % drops

@@ -95,10 +95,6 @@ enum MilestoneEvaluator {
         return thresholds(step: step).first { previous > $0 && currentRemaining <= $0 }
     }
 
-    /// True when usage dropped past another increment of the grid.
-    static func crossed(previousRemaining: Double?, currentRemaining: Double, step: Double) -> Bool {
-        crossedThreshold(previousRemaining: previousRemaining, currentRemaining: currentRemaining, step: step) != nil
-    }
 }
 
 /// Pure burn-rate detection over a timestamped remaining-% history.
@@ -106,7 +102,8 @@ enum BurnRateEvaluator {
     /// Returns (drop, baseline, current) when remaining fell by at least the
     /// alert's percentDrop over its trailing minutes window, else nil.
     ///
-    /// `history` must be the window's remaining-% readings (oldest last).
+    /// `history` must hold the window's remaining-% readings in chronological
+    /// order (oldest first); the last entry is treated as the current one.
     /// A baseline is only used if it is at least `minutes` old, so a freshly
     /// started app can't fire on a partial window.
     static func detect(
@@ -169,17 +166,13 @@ final class SettingsStore: ObservableObject {
     @Published var costAlerts: [CostAlert] {
         didSet { persist() }
     }
-    /// Placeholder capacities in weighted tokens (cache read ×0.1, write ×1.25),
-    /// seeded from observed usage. Calibrate against your provider's usage page.
+    /// Seeded token capacities (weighted: cache read ×0.1, write ×1.25) for
+    /// local-only providers. Codex is the only provider measured from logs;
+    /// Claude and OpenCode Go report their own authoritative %.
     static let defaultCapacities: [String: Int] = [
-        "Claude|5hr": 30_000_000,
-        "Claude|Weekly": 500_000_000,
-        "Claude|Monthly": 3_000_000_000,
-        "Codex|5hr": 12_000_000,
+        "Codex|Rolling": 12_000_000,
         "Codex|Weekly": 120_000_000,
-        "OpenCode Go|5hr": 1_000_000,
-        "OpenCode Go|Weekly": 5_000_000,
-        "OpenCode Go|Monthly": 20_000_000,
+        "Codex|Monthly": 400_000_000,
     ]
 
     private let defaults: UserDefaults
@@ -208,6 +201,19 @@ final class SettingsStore: ObservableObject {
         if planCapacities.isEmpty {
             planCapacities = Self.defaultCapacities
         }
+        planCapacities = Self.migratedCapacities(planCapacities)
+    }
+
+    /// Older builds keyed the 5-hour window "5hr"; the window is labelled
+    /// "Rolling" now, so remap persisted capacities or they stop applying.
+    nonisolated static func migratedCapacities(_ capacities: [String: Int]) -> [String: Int] {
+        var result = capacities
+        for (key, value) in capacities where key.hasSuffix("|5hr") {
+            let target = key.replacingOccurrences(of: "|5hr", with: "|Rolling")
+            result.removeValue(forKey: key)
+            if result[target] == nil { result[target] = value }
+        }
+        return result
     }
 
     static var defaultMilestones: [Milestone] {

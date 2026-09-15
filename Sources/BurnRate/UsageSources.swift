@@ -22,14 +22,22 @@ func readTextFile(_ url: URL) -> String {
 
 /// ISO8601 timestamps used by Claude Code and Codex session logs.
 enum LogDate {
+    // Formatters are expensive to build and `parse` runs per log line;
+    // reused statically. ISO8601DateFormatter is thread-safe.
+    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    nonisolated(unsafe) private static let plain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     static func parse(_ string: String) -> Date? {
-        let withFractional = ISO8601DateFormatter()
-        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFractional.date(from: string) {
-            return date
-        }
-        let plain = ISO8601DateFormatter()
-        return plain.date(from: string)
+        fractional.date(from: string) ?? plain.date(from: string)
     }
 }
 
@@ -259,7 +267,8 @@ actor CodexUsageSource: UsageSource {
                 input: totals["input_tokens"] as? Int ?? 0,
                 output: totals["output_tokens"] as? Int ?? 0,
                 cacheRead: totals["cached_input_tokens"] as? Int ?? 0,
-                cacheWrite: 0
+                cacheWrite: 0,
+                reasoning: totals["reasoning_output_tokens"] as? Int ?? 0
             )
             last = UsageSample(
                 timestamp: timestamp,

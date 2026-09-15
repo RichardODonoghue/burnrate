@@ -17,9 +17,7 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
     nonisolated static let minInterval: TimeInterval = 60
     nonisolated static let backoff: TimeInterval = 300
 
-    private var lastWindows: [UsageWindow]?
-    private var lastFetch: Date = .distantPast
-    private var errorBackoffUntil: Date = .distantPast
+    private var cache = QuotaCache(minInterval: minInterval, backoff: backoff)
 
     private let authURL: URL
 
@@ -31,27 +29,22 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
 
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
         let now = Date()
-        // Reset-due refresh: a window rolled over after our last fetch, so
-        // the snapshot predates the reset — skip the throttle and refetch.
-        let resetDue = ProviderThrottle.resetDue(windows: lastWindows, lastFetch: lastFetch, now: now)
-        if !resetDue,
-           now < errorBackoffUntil || now.timeIntervalSince(lastFetch) < Self.minInterval {
-            return lastWindows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
+        guard cache.shouldFetch(now: now) else {
+            return cache.windows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
         }
-        lastFetch = now
+        cache.noteFetch(now: now)
         do {
             let windows = try await performFetch()
-            lastWindows = windows
+            cache.noteSuccess(windows)
             return ProviderUsage(providerName: name, plan: "Go", windows: windows)
         } catch {
-            errorBackoffUntil = now.addingTimeInterval(Self.backoff)
-            return lastWindows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
+            cache.noteFailure(now: now)
+            return cache.windows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
         }
     }
 
     func invalidateCache() {
-        lastFetch = .distantPast
-        errorBackoffUntil = .distantPast
+        cache.invalidate()
     }
 
     private func performFetch() async throws -> [UsageWindow] {
