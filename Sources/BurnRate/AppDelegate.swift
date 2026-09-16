@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localSources: [(name: String, source: any UsageSource)] = []
     private var modelUsageViewModel: ModelUsageViewModel?
     private let updater = Updater()
+    private let notifications: any NotificationPresenting = UserNotificationPresenter()
+    private let systemEvents: any SystemEventObserving = WorkspaceSystemEvents()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single instance: a second copy would double every notification.
@@ -65,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.onStateChange = { [weak self] in self?.statusManager?.refreshMenu() }
         updater.start()
 
-        notifier = MilestoneNotifier(settingsStore: settingsStore)
+        notifier = MilestoneNotifier(settingsStore: settingsStore, presenter: notifications)
 
         // Claude account switch (different signed-in account) → rebase alert
         // state so the old account's percentages aren't compared with the
@@ -80,12 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPollTimer()
         // Sleep freezes snapshots and throttle state; a window may have reset
         // while the Mac was asleep, so refresh immediately on wake.
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refreshAfterWake()
-            }
+        systemEvents.onWake { [weak self] in
+            self?.refreshAfterWake()
         }
     }
 
@@ -227,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 providerNames: usageStore.current.map(\.providerName),
                 viewModel: modelUsageViewModel ?? ModelUsageViewModel(sources: []),
                 updater: updater,
+                notifications: notifications,
                 initialPane: pane
             )
         )

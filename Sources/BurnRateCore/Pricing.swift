@@ -39,8 +39,7 @@ public final class PricingService: @unchecked Sendable {
 
     public init(cacheURL: URL? = nil) {
         self.cacheURL = cacheURL
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("BurnRate/pricing.json")
+            ?? FileManagerPaths().appDirectory.appendingPathComponent("pricing.json")
         loadCache()
     }
 
