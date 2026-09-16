@@ -1,3 +1,4 @@
+import BurnRateCore
 import Foundation
 @preconcurrency import UserNotifications
 

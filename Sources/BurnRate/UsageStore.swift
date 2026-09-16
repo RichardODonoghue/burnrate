@@ -1,3 +1,4 @@
+import BurnRateCore
 import Foundation
 
 /// Caches the latest usage snapshot for all providers and notifies observers

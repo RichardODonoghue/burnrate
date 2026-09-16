@@ -1,3 +1,4 @@
+import BurnRateCore
 import Foundation
 
 /// A provider usage source that returns final window data. Implementations

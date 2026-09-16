@@ -1,3 +1,4 @@
+import BurnRateCore
 import Foundation
 
 /// OpenCode Go usage from OpenCode's own quota endpoint — the same data the
