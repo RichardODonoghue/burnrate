@@ -145,9 +145,13 @@ public enum TrendChartData {
 
     /// Midnight ticks read as the weekday, noon ticks as 12pm.
     public static func trendTickLabel(_ date: Date, calendar: Calendar = .current) -> String {
-        calendar.component(.hour, from: date) == 12
-            ? "12pm"
-            : date.formatted(.dateTime.weekday(.abbreviated))
+        if calendar.component(.hour, from: date) == 12 { return "12pm" }
+        // `shortWeekdaySymbols` avoids `Date.FormatStyle`, which is not
+        // available in swift-corelibs-foundation on Linux.
+        let weekday = calendar.component(.weekday, from: date)
+        let symbols = calendar.shortWeekdaySymbols
+        guard symbols.indices.contains(weekday - 1) else { return "" }
+        return symbols[weekday - 1]
     }
 
     /// Nearest point per series to the hovered date, for a tooltip.

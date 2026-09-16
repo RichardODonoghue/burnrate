@@ -1,0 +1,26 @@
+name: Core (Linux)
+
+# Proves BurnRateCore stays platform-independent: it must build with the Linux
+# Swift toolchain and no Apple frameworks. The macOS app target is not built here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: core-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
+      - name: Build platform-independent core
+        run: swift build --target BurnRateCore
