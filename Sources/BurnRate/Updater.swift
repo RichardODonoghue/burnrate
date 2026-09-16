@@ -1,4 +1,5 @@
 import AppKit
+import BurnRateCore
 import CryptoKit
 import Foundation
 import UserNotifications
@@ -356,5 +357,16 @@ final class Updater: ObservableObject {
         }
         process.waitUntilExit()
         return process.terminationStatus
+    }
+}
+
+extension Updater: AppUpdating {
+    var state: UpdateState {
+        UpdateState(availableVersion: available?.version, isBusy: status.isBusy)
+    }
+
+    func installAvailable() async {
+        guard let update = available else { return }
+        await install(update)
     }
 }

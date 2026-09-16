@@ -1,7 +1,6 @@
 import AppKit
 import BurnRateCore
 import SwiftUI
-@preconcurrency import UserNotifications
 
 /// Unified app window: dashboard (usage by model), notifications, widgets, about.
 enum AppPane: Hashable {
@@ -17,6 +16,7 @@ struct SettingsView: View {
     let providerNames: [String]
     let viewModel: ModelUsageViewModel
     @ObservedObject var updater: Updater
+    let notifications: any NotificationPresenting
 
     @State private var selection: AppPane
 
@@ -25,12 +25,14 @@ struct SettingsView: View {
         providerNames: [String],
         viewModel: ModelUsageViewModel,
         updater: Updater,
+        notifications: any NotificationPresenting,
         initialPane: AppPane = .notifications
     ) {
         self.store = store
         self.providerNames = providerNames
         self.viewModel = viewModel
         self.updater = updater
+        self.notifications = notifications
         _selection = State(initialValue: initialPane)
     }
 
@@ -54,7 +56,7 @@ struct SettingsView: View {
             case .usage:
                 ModelsView(viewModel: viewModel)
             case .notifications:
-                MilestonesView(store: store, providerNames: providerNames)
+                MilestonesView(store: store, providerNames: providerNames, notifications: notifications)
             case .widgets:
                 WidgetsView(store: store, providerNames: providerNames)
             case .about:
@@ -82,6 +84,7 @@ struct SettingsView: View {
 private struct MilestonesView: View {
     @ObservedObject var store: SettingsStore
     let providerNames: [String]
+    let notifications: any NotificationPresenting
     /// Window options per provider. Fable is a Claude-only model-scoped
     /// weekly quota — OpenCode and Codex only report Rolling/Weekly/Monthly.
     private func windowLabels(for provider: String) -> [String] {
@@ -102,7 +105,7 @@ private struct MilestonesView: View {
 
     @State private var costProvider = "OpenCode"
     @State private var costLimit = ""
-    @State private var authStatus: UNAuthorizationStatus?
+    @State private var authStatus: NotificationAuthorization?
 
     var body: some View {
         CardPane {
@@ -163,14 +166,13 @@ private struct MilestonesView: View {
                 Text(authLabel)
                 Spacer()
                 switch authStatus {
-                case .authorized, .provisional, .ephemeral:
+                case .authorized:
                     Label("On", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 case .notDetermined:
                     Button("Request permission") {
                         Task {
-                            _ = try? await UNUserNotificationCenter.current()
-                                .requestAuthorization(options: [.alert, .sound])
+                            await notifications.requestAuthorization()
                             await refreshAuth()
                         }
                     }
@@ -187,7 +189,7 @@ private struct MilestonesView: View {
 
     private var authLabel: String {
         switch authStatus {
-        case .authorized, .provisional, .ephemeral: "Notifications allowed"
+        case .authorized: "Notifications allowed"
         case .denied: "Notifications blocked"
         case .notDetermined: "Permission not requested yet"
         default: "Checking permission…"
@@ -195,8 +197,7 @@ private struct MilestonesView: View {
     }
 
     private func refreshAuth() async {
-        authStatus = await UNUserNotificationCenter.current()
-            .notificationSettings().authorizationStatus
+        authStatus = await notifications.authorizationStatus()
     }
 
     // MARK: Shared pieces
