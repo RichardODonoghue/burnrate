@@ -1,25 +1,12 @@
 import BurnRateCore
 import Foundation
-@preconcurrency import UserNotifications
-
-/// Shows banners with sound even when the dashboard window is frontmost.
-/// Without a delegate, UNUserNotificationCenter delivers quietly to
-/// Notification Center while our app is active.
-private final class ForegroundNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
-    }
-}
 
 /// Evaluates milestones and burn-rate alerts after each poll, posting
 /// desktop notifications.
 @MainActor
 final class MilestoneNotifier {
-    private let foregroundDelegate = ForegroundNotificationDelegate()
     private let settingsStore: SettingsStore
+    private let presenter: any NotificationPresenting
     /// Last observed remaining % per window id, used to detect threshold crossings.
     private var lastRemaining: [String: Double] = [:]
     /// Remaining-% history per window id, chronological (oldest first), for
@@ -83,16 +70,14 @@ final class MilestoneNotifier {
         }
     }
 
-    init(settingsStore: SettingsStore, defaults: UserDefaults = .standard) {
+    init(
+        settingsStore: SettingsStore,
+        defaults: UserDefaults = .standard,
+        presenter: any NotificationPresenting = UserNotificationPresenter()
+    ) {
         self.settingsStore = settingsStore
         self.defaults = defaults
-        // Retained strongly (UNUserNotificationCenter holds its delegate
-        // weakly); set before any notification can be posted. Skipped when
-        // there is no app bundle — current() aborts under the test runner and
-        // for `swift run`, where notifications are logged instead.
-        if Bundle.main.bundleIdentifier != nil {
-            UNUserNotificationCenter.current().delegate = foregroundDelegate
-        }
+        self.presenter = presenter
         if let data = defaults.data(forKey: Self.stateKey),
            let state = try? JSONDecoder().decode(NotifierState.self, from: data) {
             lastRemaining = state.lastRemaining
@@ -101,7 +86,7 @@ final class MilestoneNotifier {
             lastResetsAt = state.resetsAt
             pendingAccountSwitch = state.pendingAccountSwitch
         }
-        Task { await requestAuthorization() }
+        Task { await presenter.requestAuthorization() }
     }
 
     private func saveState() {
@@ -114,22 +99,6 @@ final class MilestoneNotifier {
         )
         if let data = try? JSONEncoder().encode(state) {
             defaults.set(data, forKey: Self.stateKey)
-        }
-    }
-
-    private func requestAuthorization() async {
-        // UNUserNotificationCenter needs a real app bundle; fall back to logging
-        // when run via `swift run` without one.
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        let center = UNUserNotificationCenter.current()
-        // Only .notDetermined prompts; otherwise this is a no-op status read.
-        let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .notDetermined else { return }
-        do {
-            let granted = try await center.requestAuthorization(options: [.alert, .sound])
-            NSLog("%@", "[milestone] notification authorization granted=\(granted)")
-        } catch {
-            NSLog("%@", "[milestone] notification authorization failed: \(error)")
         }
     }
 
@@ -287,16 +256,6 @@ final class MilestoneNotifier {
         sentTitles.append(title)
         if sentTitles.count > 20 { sentTitles.removeFirst() }
 
-        guard Bundle.main.bundleIdentifier != nil else {
-            // Body contains "%" — never pass it as an NSLog format string.
-            NSLog("%@", "[milestone] \(title): \(body)")
-            return
-        }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        presenter.present(title: title, body: body)
     }
 }

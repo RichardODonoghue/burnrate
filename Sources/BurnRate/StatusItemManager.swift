@@ -1,4 +1,5 @@
 import AppKit
+import BurnRateCore
 
 /// Owns all menu-bar status items: the always-present main item plus any
 /// optional per-provider widgets spawned from settings.
@@ -6,7 +7,7 @@ import AppKit
 final class StatusItemManager: NSObject {
     private let usageStore: UsageStore
     private let settingsStore: SettingsStore
-    private let updater: Updater
+    private let updater: any AppUpdating
     private var onOpenDashboard: (() -> Void)?
     private var onOpenSettings: (() -> Void)?
 
@@ -14,7 +15,7 @@ final class StatusItemManager: NSObject {
     /// Extra widgets, keyed by provider name.
     private var widgetItems: [String: NSStatusItem] = [:]
 
-    init(usageStore: UsageStore, settingsStore: SettingsStore, updater: Updater) {
+    init(usageStore: UsageStore, settingsStore: SettingsStore, updater: any AppUpdating) {
         self.usageStore = usageStore
         self.settingsStore = settingsStore
         self.updater = updater
@@ -156,15 +157,15 @@ final class StatusItemManager: NSObject {
 
         // Surface an available update right in the dropdown; otherwise offer
         // a manual check next to Settings.
-        if let update = updater.available {
+        if let version = updater.state.availableVersion {
             let item = NSMenuItem(
-                title: "Update to \(update.version)…",
+                title: "Update to \(version)…",
                 action: #selector(installUpdate),
                 keyEquivalent: ""
             )
             item.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
             item.target = self
-            item.isEnabled = !updater.status.isBusy
+            item.isEnabled = !updater.state.isBusy
             menu.addItem(item)
         } else {
             let check = NSMenuItem(
@@ -174,7 +175,7 @@ final class StatusItemManager: NSObject {
             )
             check.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)
             check.target = self
-            check.isEnabled = !updater.status.isBusy
+            check.isEnabled = !updater.state.isBusy
             menu.addItem(check)
         }
 
@@ -201,8 +202,7 @@ final class StatusItemManager: NSObject {
     }
 
     @objc private func installUpdate() {
-        guard let update = updater.available else { return }
-        Task { await updater.install(update) }
+        Task { await updater.installAvailable() }
     }
 
     /// Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t.
