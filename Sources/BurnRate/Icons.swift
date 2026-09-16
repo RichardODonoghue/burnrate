@@ -1,4 +1,5 @@
 import AppKit
+import BurnRateCore
 
 /// Renders the G2 "Dial Core" mark: a flame with a gauge dial knocked into
 /// it, needle reading remaining usage. 72-unit design space (y-down), from
@@ -40,35 +41,19 @@ enum AppIconRenderer {
     // MARK: - State mapping
 
     /// Needle angle from vertical: 100% remaining → 0°, 70% → 18° (G2 rest
-    /// pose), 0% → 60°.
+    /// pose), 0% → 60°. Shared with the other platform renderers.
     static func needleAngle(forRemaining remaining: Double?) -> Double {
-        let value = min(max(remaining ?? 70, 0), 100)
-        return (100 - value) * 0.6
+        StatusIcon.needleAngle(forRemaining: remaining)
     }
 
-    /// G2 severity ramp: green ≥55, amber ~45, red ≤20 (percent remaining).
+    /// G2 severity ramp (green ≥55, amber ~45, red ≤20), shared via core and
+    /// mapped to `NSColor` for AppKit drawing.
     static func tint(forRemaining remaining: Double?) -> (top: NSColor, bottom: NSColor) {
-        let value = min(max(remaining ?? 70, 0), 100)
-        func rgb(_ hex: (UInt8, UInt8, UInt8)) -> NSColor {
-            NSColor(calibratedRed: CGFloat(hex.0) / 255, green: CGFloat(hex.1) / 255, blue: CGFloat(hex.2) / 255, alpha: 1)
+        let spec = StatusIcon.tint(forRemaining: remaining)
+        func color(_ rgb: BurnRateCore.RGBColor) -> NSColor {
+            NSColor(calibratedRed: CGFloat(rgb.red), green: CGFloat(rgb.green), blue: CGFloat(rgb.blue), alpha: 1)
         }
-        let stops: [(threshold: Double, a: (UInt8, UInt8, UInt8), b: (UInt8, UInt8, UInt8))] = [
-            (55, (0x8F, 0xE0, 0x7A), (0x33, 0xAE, 0x70)),
-            (45, (0xFF, 0xC2, 0x4B), (0xFF, 0x7A, 0x3D)),
-            (20, (0xFF, 0x8A, 0x5C), (0xE6, 0x40, 0x19)),
-            (0, (0xFF, 0x8A, 0x5C), (0xE6, 0x40, 0x19)),
-        ]
-        guard value < stops[0].threshold else { return (rgb(stops[0].a), rgb(stops[0].b)) }
-        for (higher, lower) in zip(stops, stops.dropFirst()) where value >= lower.threshold {
-            let fraction = CGFloat((higher.threshold - value) / (higher.threshold - lower.threshold))
-            let mix = { (c1: (UInt8, UInt8, UInt8), c2: (UInt8, UInt8, UInt8)) -> NSColor in
-                NSColor(calibratedRed: CGFloat(c1.0) + (CGFloat(c2.0) - CGFloat(c1.0)) * fraction,
-                        green: CGFloat(c1.1) + (CGFloat(c2.1) - CGFloat(c1.1)) * fraction,
-                        blue: CGFloat(c1.2) + (CGFloat(c2.2) - CGFloat(c1.2)) * fraction, alpha: 1)
-            }
-            return (mix(higher.a, lower.a), mix(higher.b, lower.b))
-        }
-        return (rgb(stops.last!.a), rgb(stops.last!.b))
+        return (color(spec.top), color(spec.bottom))
     }
 
     // MARK: - Renderers
