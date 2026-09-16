@@ -298,7 +298,7 @@ struct ModelsView: View {
     /// Tokens/cost for one entry, as shown on axes and in tooltips.
     private func metricText(_ entry: ModelUsageEntry) -> String {
         metric == .tokens
-            ? StatusItemManager.formatTokens(entry.totalTokens)
+            ? TokenFormat.format(entry.totalTokens)
             : String(format: "$%.2f", entry.cost)
     }
 
@@ -326,7 +326,7 @@ struct ModelsView: View {
                         Text("Total")
                         Spacer(minLength: 12)
                         Text(metric == .tokens
-                             ? StatusItemManager.formatTokens(rows.reduce(0) { $0 + $1.totalTokens })
+                             ? TokenFormat.format(rows.reduce(0) { $0 + $1.totalTokens })
                              : String(format: "$%.2f", rows.reduce(0) { $0 + $1.cost }))
                             .monospacedDigit()
                             .fontWeight(.semibold)
@@ -369,7 +369,7 @@ struct ModelsView: View {
                     HStack(spacing: 6) {
                         Text("Reasoning")
                         Spacer(minLength: 12)
-                        Text(StatusItemManager.formatTokens(entry.tokens.reasoning))
+                        Text(TokenFormat.format(entry.tokens.reasoning))
                             .monospacedDigit()
                     }
                     .font(.caption)
@@ -385,9 +385,9 @@ struct ModelsView: View {
         if metric == .cost {
             return abs(value) < 1000
                 ? String(format: "$%g", value)
-                : "$" + StatusItemManager.formatTokens(Int(value))
+                : "$" + TokenFormat.format(Int(value))
         }
-        return StatusItemManager.formatTokens(Int(value))
+        return TokenFormat.format(Int(value))
     }
 
     /// Auto-scaled Y domain for the trend chart: spans the visible data plus
@@ -488,7 +488,7 @@ struct ModelsView: View {
             let total = entries.reduce(0) { $0 + $1.totalTokens }
             let requests = entries.reduce(0) { $0 + $1.requests }
             VStack(alignment: .leading, spacing: 4) {
-                Text(total == 0 ? "—" : StatusItemManager.formatTokens(total))
+                Text(total == 0 ? "—" : TokenFormat.format(total))
                     .font(.title3)
                     .fontWeight(.semibold)
                     .monospacedDigit()
@@ -796,7 +796,7 @@ struct ModelsView: View {
 
     private func annotation(_ entry: ModelUsageEntry) -> String {
         metric == .tokens
-            ? StatusItemManager.formatTokens(entry.totalTokens) + " tok"
+            ? TokenFormat.format(entry.totalTokens) + " tok"
             : String(format: "$%.2f", entry.cost)
     }
 
@@ -833,11 +833,11 @@ struct ModelsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        cell(StatusItemManager.formatTokens(entry.tokens.input))
-                        cell(StatusItemManager.formatTokens(entry.tokens.output))
-                        cell(StatusItemManager.formatTokens(entry.tokens.cacheRead + entry.tokens.cacheWrite))
+                        cell(TokenFormat.format(entry.tokens.input))
+                        cell(TokenFormat.format(entry.tokens.output))
+                        cell(TokenFormat.format(entry.tokens.cacheRead + entry.tokens.cacheWrite))
                         cell("\(entry.requests)")
-                        cell(StatusItemManager.formatTokens(entry.totalTokens), bold: true)
+                        cell(TokenFormat.format(entry.totalTokens), bold: true)
                         cell(entry.cost > 0 ? String(format: "$%.2f", entry.cost) : "—", bold: true)
                     }
                     .font(.callout)

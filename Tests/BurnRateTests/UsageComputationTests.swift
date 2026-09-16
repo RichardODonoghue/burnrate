@@ -80,12 +80,12 @@ struct UsageComputationTests {
     }
 
     @Test func tokensFormatting() {
-        #expect(StatusItemManager.formatTokens(850) == "850")
-        #expect(StatusItemManager.formatTokens(42_300) == "42.3k")
-        #expect(StatusItemManager.formatTokens(5_600_000) == "5.6m")
-        #expect(StatusItemManager.formatTokens(3_600_000_000) == "3.6b")
-        #expect(StatusItemManager.formatTokens(1_200_000_000_000) == "1.2t")
-        #expect(StatusItemManager.formatTokens(1_000_000) == "1m")
-        #expect(StatusItemManager.formatTokens(1_500_000) == "1.5m")
+        #expect(TokenFormat.format(850) == "850")
+        #expect(TokenFormat.format(42_300) == "42.3k")
+        #expect(TokenFormat.format(5_600_000) == "5.6m")
+        #expect(TokenFormat.format(3_600_000_000) == "3.6b")
+        #expect(TokenFormat.format(1_200_000_000_000) == "1.2t")
+        #expect(TokenFormat.format(1_000_000) == "1m")
+        #expect(TokenFormat.format(1_500_000) == "1.5m")
     }
 }

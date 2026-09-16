@@ -57,15 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LocalUsageProvider(source: sharedSources[2].source),
         ]
 
-        let manager = StatusItemManager(usageStore: usageStore, settingsStore: settingsStore, updater: updater)
-        manager.start(
-            onOpenDashboard: { [weak self] in self?.openAppWindow(pane: .usage) },
-            onOpenSettings: { [weak self] in self?.openAppWindow(pane: .notifications) }
-        )
+        let manager = StatusItemManager()
+        manager.onAction = { [weak self] action in self?.handleStatusAction(action) }
         statusManager = manager
         // Rebuild the menu when an update is found / its state changes.
-        updater.onStateChange = { [weak self] in self?.statusManager?.refreshMenu() }
+        updater.onStateChange = { [weak self] in self?.refreshStatusMenu() }
         updater.start()
+        refreshStatusMenu()
 
         notifier = MilestoneNotifier(settingsStore: settingsStore, presenter: notifications)
 
@@ -132,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func poll() {
-        Task { [providers, usageStore, notifier, statusManager, settingsStore, localSources, modelUsageViewModel] in
+        Task { [self, providers, usageStore, notifier, settingsStore, localSources, modelUsageViewModel] in
             let capacities = settingsStore.planCapacities
 
             // Phase 1: vendor quota APIs in parallel — authoritative %, fast.
@@ -153,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     !apiSnapshots.contains { $0.providerName == usage.providerName }
                 }
                 usageStore.update(apiSnapshots + carried)
-                statusManager?.refreshMenu()
+                refreshStatusMenu()
             }
 
             // Phase 2: local logs in parallel — model/cost views, local
@@ -201,7 +199,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let daily = ModelUsageAggregator.daily(buckets: buckets, days: 30)
             modelUsageViewModel?.ingest(daily: daily, totals: ModelUsageAggregator.totals(buckets: buckets))
 
-            statusManager?.refreshMenu()
+            refreshStatusMenu()
+        }
+    }
+
+    /// Rebuild the tray models from current state and hand them to the presenter.
+    private func refreshStatusMenu() {
+        let usage = usageStore.current
+        statusManager?.renderMain(
+            menu: StatusMenuBuilder.mainMenu(
+                usage: usage,
+                updateVersion: updater.state.availableVersion,
+                isBusy: updater.state.isBusy
+            ),
+            remaining: StatusMenuBuilder.worstRollingRemaining(usage: usage)
+        )
+        statusManager?.renderWidgets(
+            settingsStore.widgetProviders.map {
+                StatusMenuBuilder.widget(provider: $0, usage: usageStore.usage(for: $0))
+            }
+        )
+    }
+
+    private func handleStatusAction(_ action: StatusMenuAction) {
+        switch action {
+        case .openDashboard:
+            openAppWindow(pane: .usage)
+        case .openSettings:
+            openAppWindow(pane: .notifications)
+        case .checkForUpdates:
+            Task { await updater.check() }
+        case .installUpdate:
+            Task { await updater.installAvailable() }
+        case .removeWidget(let provider):
+            settingsStore.widgetProviders.removeAll { $0 == provider }
+            refreshStatusMenu()
+        case .quit:
+            NSApp.terminate(nil)
         }
     }
 

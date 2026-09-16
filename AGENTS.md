@@ -59,9 +59,11 @@ directly to `main`.
 - **Platform seams** live in `BurnRateCore/Platform.swift` (`AppPaths`,
   `CredentialReading`, `SQLiteQuerying`) and `BurnRateCore/Presentation.swift`
   (`NotificationPresenting`, `SystemEventObserving`, `AppUpdating`); macOS
-  implementations are in `PlatformMacOS.swift`/`PresentationMacOS.swift`. Add new
-  OS integrations as a protocol in core plus one implementation per platform,
-  rather than calling AppKit/`Process` paths inline.
+  implementations are in `PlatformMacOS.swift`/`PresentationMacOS.swift`. The tray
+  is modelled in `BurnRateCore/StatusMenu.swift` (`StatusMenuBuilder` +
+  `StatusItemPresenting`); `StatusItemManager` is the macOS renderer and owns no
+  app state. Add new OS integrations as a protocol in core plus one implementation
+  per platform, rather than calling AppKit/`Process` paths inline.
 - Two data layers per provider, in priority order:
   1. **Vendor quota APIs (authoritative %, resets, no calibration)** — reuse the
      credentials the CLIs already stored at login; no auth flow of our own.
