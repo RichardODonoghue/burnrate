@@ -1,3 +1,4 @@
+import BurnRateCore
 import Foundation
 
 /// A local data source for one plan provider. No network, no auth:

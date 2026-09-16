@@ -1,17 +1,17 @@
 import Foundation
 
 /// Token counts for one usage event.
-struct TokenUsage: Codable, Equatable {
-    var input: Int
-    var output: Int
-    var cacheRead: Int
-    var cacheWrite: Int
+public struct TokenUsage: Codable, Equatable, Sendable {
+    public var input: Int
+    public var output: Int
+    public var cacheRead: Int
+    public var cacheWrite: Int
     /// Reasoning/thinking tokens. Providers that report these separately
     /// (OpenCode's DeepSeek et al.) exclude them from `output` — confirmed
     /// against rows where reasoning > output.
-    var reasoning: Int = 0
+    public var reasoning: Int = 0
 
-    init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int, reasoning: Int = 0) {
+    public init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int, reasoning: Int = 0) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead
@@ -21,7 +21,7 @@ struct TokenUsage: Codable, Equatable {
 
     // `reasoning` was added after samples were first persisted (Claude's
     // incremental cache), so decode older payloads without it.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         input = try container.decode(Int.self, forKey: .input)
         output = try container.decode(Int.self, forKey: .output)
@@ -30,70 +30,100 @@ struct TokenUsage: Codable, Equatable {
         reasoning = try container.decodeIfPresent(Int.self, forKey: .reasoning) ?? 0
     }
 
-    static var zero: TokenUsage { TokenUsage(input: 0, output: 0, cacheRead: 0, cacheWrite: 0) }
+    public static var zero: TokenUsage { TokenUsage(input: 0, output: 0, cacheRead: 0, cacheWrite: 0) }
 
-    var total: Int { input + output + cacheRead + cacheWrite + reasoning }
+    public var total: Int { input + output + cacheRead + cacheWrite + reasoning }
 
     /// Cache-discounted tokens (Anthropic-style billing weights): cache reads
     /// count 0.1x, cache writes 1.25x. Use this for plan-limit %.
-    var weighted: Double {
+    public var weighted: Double {
         Double(input) + Double(output) + Double(reasoning)
             + Double(cacheRead) * 0.1 + Double(cacheWrite) * 1.25
     }
 }
 
 /// One usage event: tokens consumed at a point in time.
-struct UsageSample: Codable, Equatable {
-    let timestamp: Date
-    let tokens: TokenUsage
+public struct UsageSample: Codable, Equatable, Sendable {
+    public let timestamp: Date
+    public let tokens: TokenUsage
     /// Vendor request identifier, when present (Claude). Used to dedupe
     /// repeated log lines for the same request.
-    var requestId: String?
+    public var requestId: String?
     /// Model identifier when the source records it (e.g. "claude-opus-5").
-    var model: String?
+    public var model: String?
     /// Vendor-reported cost in USD when available (OpenCode only).
-    var cost: Double?
+    public var cost: Double?
     /// Sub-source within a multi-provider source. OpenCode records the
     /// upstream provider here: "opencode-go" (Go), "opencode" (Zen),
     /// "ollama"/"lmstudio"/"omlx" (local runtimes).
-    var sourceTag: String?
+    public var sourceTag: String?
+
+    public init(
+        timestamp: Date,
+        tokens: TokenUsage,
+        requestId: String? = nil,
+        model: String? = nil,
+        cost: Double? = nil,
+        sourceTag: String? = nil
+    ) {
+        self.timestamp = timestamp
+        self.tokens = tokens
+        self.requestId = requestId
+        self.model = model
+        self.cost = cost
+        self.sourceTag = sourceTag
+    }
 }
 
 /// Aggregated usage for one plan window (Rolling / Weekly / Monthly).
-struct UsageWindow: Equatable, Identifiable {
-    let id: String
-    let label: String
+public struct UsageWindow: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let label: String
     /// Raw tokens (all cache traffic included) — informational display,
     /// verified by tests.
-    let tokensUsed: Int
+    public let tokensUsed: Int
     /// nil when the user has not configured a plan capacity for this window.
-    let percentRemaining: Double?
+    public let percentRemaining: Double?
     /// When the window resets (provider APIs supply this; local parsing can't).
-    let resetsAt: Date?
+    public let resetsAt: Date?
+
+    public init(id: String, label: String, tokensUsed: Int, percentRemaining: Double?, resetsAt: Date?) {
+        self.id = id
+        self.label = label
+        self.tokensUsed = tokensUsed
+        self.percentRemaining = percentRemaining
+        self.resetsAt = resetsAt
+    }
 }
 
 /// Latest usage for one provider.
-struct ProviderUsage: Equatable {
-    let providerName: String
+public struct ProviderUsage: Equatable, Sendable {
+    public let providerName: String
     /// Vendor plan tier when known (e.g. "Team 5x", "Max 20x", "Go").
-    let plan: String?
-    let windows: [UsageWindow]
+    public let plan: String?
+    public let windows: [UsageWindow]
 
-    func window(withLabel label: String) -> UsageWindow? {
+    public init(providerName: String, plan: String?, windows: [UsageWindow]) {
+        self.providerName = providerName
+        self.plan = plan
+        self.windows = windows
+    }
+
+    public func window(withLabel label: String) -> UsageWindow? {
         windows.first { $0.label == label }
     }
 }
 
 /// Maps usage samples onto rolling plan windows and computes % remaining
 /// against user-configured capacities.
-enum UsageComputation {
+public enum UsageComputation {
     static let windowSpecs: [(label: String, seconds: TimeInterval)] = [
         ("Rolling", 5 * 3600),
         ("Weekly", 7 * 86400),
         ("Monthly", 30 * 86400),
     ]
 
-    static func windows(
+    public static func windows(
         samples: [UsageSample],
         provider: String,
         capacities: [String: Int],

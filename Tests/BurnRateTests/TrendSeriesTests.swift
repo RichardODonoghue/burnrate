@@ -1,3 +1,4 @@
+import BurnRateCore
 import Foundation
 import Testing
 @testable import BurnRate

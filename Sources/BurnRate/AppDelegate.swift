@@ -1,4 +1,5 @@
 import AppKit
+import BurnRateCore
 import SwiftUI
 
 @MainActor

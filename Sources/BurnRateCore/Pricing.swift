@@ -1,18 +1,28 @@
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Foundation
 
 /// Per-token USD costs for one model.
-struct ModelPricing: Codable, Equatable {
-    var input: Double
-    var output: Double
-    var cacheRead: Double?
-    var cacheWrite: Double?
+public struct ModelPricing: Codable, Equatable, Sendable {
+    public var input: Double
+    public var output: Double
+    public var cacheRead: Double?
+    public var cacheWrite: Double?
+
+    public init(input: Double, output: Double, cacheRead: Double?, cacheWrite: Double?) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+    }
 }
 
 /// Model pricing from LiteLLM's public table (same source tokscale uses),
 /// cached on disk and refreshed every 24h. Used to estimate cost for
 /// providers that don't report it (Claude logs have costUSD null).
-final class PricingService: @unchecked Sendable {
-    static let shared = PricingService()
+public final class PricingService: @unchecked Sendable {
+    public static let shared = PricingService()
 
     nonisolated static let pricingURL = URL(string: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json")!
     nonisolated static let refreshInterval: TimeInterval = 24 * 3600
@@ -27,18 +37,18 @@ final class PricingService: @unchecked Sendable {
     private let lock = NSLock()
     private let cacheURL: URL
 
-    init(cacheURL: URL? = nil) {
+    public init(cacheURL: URL? = nil) {
         self.cacheURL = cacheURL
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("BurnRate/pricing.json")
         loadCache()
     }
 
-    func bootstrap() {
+    public func bootstrap() {
         Task { await refreshIfNeeded() }
     }
 
-    func refreshIfNeeded(now: Date = Date()) async {
+    public func refreshIfNeeded(now: Date = Date()) async {
         let task: Task<Void, Never>? = lock.withLock {
             var due = false
             if let lastRefresh, now.timeIntervalSince(lastRefresh) < Self.refreshInterval {
@@ -89,7 +99,7 @@ final class PricingService: @unchecked Sendable {
     // MARK: - Lookup
 
     /// Estimated cost for a usage sample with no vendor-reported cost.
-    func estimate(model: String, tokens: TokenUsage) -> Double? {
+    public func estimate(model: String, tokens: TokenUsage) -> Double? {
         guard let pricing = lookup(model) else { return nil }
         var cost = Double(tokens.input) * pricing.input + Double(tokens.output) * pricing.output
         if let cacheRead = pricing.cacheRead { cost += Double(tokens.cacheRead) * cacheRead }
@@ -98,14 +108,14 @@ final class PricingService: @unchecked Sendable {
     }
 
     /// Cost of a sample: vendor-reported if present, else estimated.
-    func cost(of sample: UsageSample) -> Double {
+    public func cost(of sample: UsageSample) -> Double {
         sample.cost ?? sample.model.flatMap { estimate(model: $0, tokens: sample.tokens) } ?? 0
     }
 
     /// Lookup order: exact bare key, longest bare-key prefix of the model
     /// (date/version suffixes), then keys whose bare name the model startsWith.
     /// Results are memoised — the scan is otherwise O(table) per sample.
-    nonisolated func lookup(_ model: String) -> ModelPricing? {
+    public nonisolated func lookup(_ model: String) -> ModelPricing? {
         let key = model.lowercased()
         if let hit: ModelPricing = lock.withLock({ resolved[key] }) { return hit }
         if lock.withLock({ unresolved.contains(key) }) { return nil }
@@ -116,7 +126,7 @@ final class PricingService: @unchecked Sendable {
         return result
     }
 
-    nonisolated static func lookup(_ model: String, in table: [String: ModelPricing]) -> ModelPricing? {
+    public nonisolated static func lookup(_ model: String, in table: [String: ModelPricing]) -> ModelPricing? {
         let name = model.lowercased()
         if let exact = table[name] { return exact }
         // Longest bare key that prefixes the model id.
@@ -133,7 +143,7 @@ final class PricingService: @unchecked Sendable {
 
     // MARK: - Parsing (internal for tests)
 
-    static func parse(_ data: Data) throws -> [String: ModelPricing] {
+    public static func parse(_ data: Data) throws -> [String: ModelPricing] {
         let raw = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         var out: [String: ModelPricing] = [:]
         for (key, value) in raw {

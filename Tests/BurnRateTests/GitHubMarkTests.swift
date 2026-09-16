@@ -1,3 +1,4 @@
+import BurnRateCore
 import SwiftUI
 import Testing
 @testable import BurnRate
