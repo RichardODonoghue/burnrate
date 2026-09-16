@@ -56,6 +56,10 @@ directly to `main`.
   shared logic in `BurnRateCore` with `public` API; do not import Apple-only
   frameworks there. `BurnRateCore` is the first step toward a Linux/Windows port
   (plan kept outside the repo).
+- **Platform seams** live in `BurnRateCore/Platform.swift` (`AppPaths`,
+  `CredentialReading`, `SQLiteQuerying`); macOS implementations are in
+  `PlatformMacOS.swift`. Add new OS integrations as a protocol in core plus one
+  implementation per platform, rather than calling AppKit/`Process` paths inline.
 - Two data layers per provider, in priority order:
   1. **Vendor quota APIs (authoritative %, resets, no calibration)** — reuse the
      credentials the CLIs already stored at login; no auth flow of our own.

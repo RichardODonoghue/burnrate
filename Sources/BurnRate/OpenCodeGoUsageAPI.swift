@@ -22,10 +22,9 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
 
     private let authURL: URL
 
-    init(authURL: URL? = nil) {
+    init(authURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
         self.authURL = authURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".local/share/opencode/auth.json")
+            ?? paths.homeDirectory.appendingPathComponent(".local/share/opencode/auth.json")
     }
 
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
