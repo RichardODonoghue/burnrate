@@ -1,31 +1,46 @@
-import BurnRateCore
 import Foundation
 
 // MARK: - Aggregation
 
 /// Usage totals for one (provider, model[, sub-source]) triple.
-struct ModelUsageEntry: Identifiable, Codable, Equatable {
-    var provider: String
-    var model: String
-    var tokens: TokenUsage
-    var cost: Double
-    var requests: Int
+public struct ModelUsageEntry: Identifiable, Codable, Equatable, Sendable {
+    public var provider: String
+    public var model: String
+    public var tokens: TokenUsage
+    public var cost: Double
+    public var requests: Int
     /// Sub-source tag (OpenCode's providerID: "opencode-go", "opencode", …).
-    var sourceTag: String?
+    public var sourceTag: String?
 
-    var id: String {
+    public init(
+        provider: String,
+        model: String,
+        tokens: TokenUsage,
+        cost: Double,
+        requests: Int,
+        sourceTag: String?
+    ) {
+        self.provider = provider
+        self.model = model
+        self.tokens = tokens
+        self.cost = cost
+        self.requests = requests
+        self.sourceTag = sourceTag
+    }
+
+    public var id: String {
         sourceTag.map { "\(provider)|\($0)|\(model)" } ?? "\(provider)|\(model)"
     }
-    var totalTokens: Int { tokens.total }
+    public var totalTokens: Int { tokens.total }
 
     /// Friendly sub-source name: "Go", "Zen", "Ollama", "LM Studio", "OMLX".
-    var tagLabel: String? { sourceTag.map(Self.tagLabel(for:)) }
+    public var tagLabel: String? { sourceTag.map(Self.tagLabel(for:)) }
 
     /// Model name, qualified by the sub-source when there is one — Go's
     /// models and Zen's are distinct services and must read differently.
-    var displayName: String { tagLabel.map { "\(model) · \($0)" } ?? model }
+    public var displayName: String { tagLabel.map { "\(model) · \($0)" } ?? model }
 
-    static func tagLabel(for tag: String) -> String {
+    public static func tagLabel(for tag: String) -> String {
         switch tag {
         case "opencode-go": "Go"
         case "opencode": "Zen"
@@ -38,23 +53,28 @@ struct ModelUsageEntry: Identifiable, Codable, Equatable {
 }
 
 /// One day of per-model usage (day is local start-of-day).
-struct DailyModelUsage: Codable, Equatable {
-    var day: Date
-    var entries: [ModelUsageEntry]
+public struct DailyModelUsage: Codable, Equatable, Sendable {
+    public var day: Date
+    public var entries: [ModelUsageEntry]
+
+    public init(day: Date, entries: [ModelUsageEntry]) {
+        self.day = day
+        self.entries = entries
+    }
 }
 
-enum ModelUsageAggregator {
+public enum ModelUsageAggregator {
     /// Claude Code emits zero-usage placeholder turns with model
     /// "<synthetic>"; they are not a model and must never be counted or
     /// listed, including when they arrive from a persisted snapshot.
-    nonisolated static func isDisplayable(model: String?) -> Bool {
+    public static func isDisplayable(model: String?) -> Bool {
         guard let model else { return true }
         return model != "<synthetic>"
     }
 
     /// Buckets samples into per-day per-model totals over the trailing
     /// `days`, merging across providers.
-    static func daily(
+    public static func daily(
         buckets: [(provider: String, samples: [UsageSample])],
         days: Int,
         now: Date = Date()
@@ -78,7 +98,7 @@ enum ModelUsageAggregator {
     }
 
     /// Flat totals over all provided samples, sorted by tokens.
-    static func totals(buckets: [(provider: String, samples: [UsageSample])]) -> [ModelUsageEntry] {
+    public static func totals(buckets: [(provider: String, samples: [UsageSample])]) -> [ModelUsageEntry] {
         var byKey: [String: ModelUsageEntry] = [:]
         for bucket in buckets {
             for sample in bucket.samples where isDisplayable(model: sample.model) {
@@ -92,7 +112,7 @@ enum ModelUsageAggregator {
     }
 
     /// Flat totals rebuilt from day buckets (instant display, range filters).
-    static func totals(fromDaily daily: [DailyModelUsage]) -> [ModelUsageEntry] {
+    public static func totals(fromDaily daily: [DailyModelUsage]) -> [ModelUsageEntry] {
         var byKey: [String: ModelUsageEntry] = [:]
         for day in daily {
             for entry in day.entries {

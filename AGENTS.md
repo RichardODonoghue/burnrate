@@ -51,10 +51,11 @@ directly to `main`.
 ## Architecture notes
 
 - **Targets:** `BurnRateCore` (platform-independent: `UsageModel`, `ModelUsage`,
-  `Pricing`, evaluators) and `BurnRate` (macOS app: AppKit/SwiftUI/Combine/
-  UserNotifications). Keep new shared logic in `BurnRateCore` with `public` API;
-  do not import Apple-only frameworks there. `BurnRateCore` is the first step
-  toward a Linux/Windows port (plan kept outside the repo).
+  `Pricing`, `Alerts`/evaluators, `ProviderThrottle`/`QuotaCache`) and `BurnRate`
+  (macOS app: AppKit/SwiftUI/Combine/UserNotifications). Keep new shared logic
+  in `BurnRateCore` with `public` API; do not import Apple-only frameworks
+  there. `BurnRateCore` is the first step toward a Linux/Windows port (plan
+  kept outside the repo).
 - Two data layers per provider, in priority order:
   1. **Vendor quota APIs (authoritative %, resets, no calibration)** — reuse the
      credentials the CLIs already stored at login; no auth flow of our own.
