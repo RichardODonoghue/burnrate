@@ -479,7 +479,7 @@ private struct MilestonesView: View {
     }
 
     private func formattedCapacity(_ value: Int?) -> String {
-        value.map { StatusItemManager.formatTokens($0) } ?? "—"
+        value.map { TokenFormat.format($0) } ?? "—"
     }
 
 }
