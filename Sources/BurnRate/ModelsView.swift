@@ -4,14 +4,6 @@ import Charts
 
 // MARK: - View model
 
-/// One point of vendor-reported remaining-% history for a plan window.
-struct RemainingSample: Codable, Equatable {
-    let provider: String
-    let label: String
-    let date: Date
-    let remaining: Double
-}
-
 @MainActor
 final class ModelUsageViewModel: ObservableObject {
     @Published var daily: [DailyModelUsage] = []
@@ -28,7 +20,7 @@ final class ModelUsageViewModel: ObservableObject {
     // Derived-data caches. Rebuilding these walks the full remaining history
     // (thousands of samples) and the daily buckets, and hover changes re-render
     // the dashboard constantly — so cache until the underlying data changes.
-    private var trendCache: (key: String, series: [ModelsView.TrendSeries])?
+    private var trendCache: (key: String, series: [TrendSeries])?
     private var labelCache: (key: String, labels: [String])?
     private var rangeDailyCache: (key: String, days: [DailyModelUsage])?
 
@@ -94,10 +86,10 @@ final class ModelUsageViewModel: ObservableObject {
 
     /// Provider-filtered trend series for a window, over the range's trailing
     /// span. Cached until new data arrives.
-    func trendSeries(label: String, providerFilter: String?, range: ModelsView.Range) -> [ModelsView.TrendSeries] {
+    func trendSeries(label: String, providerFilter: String?, range: ChartRange) -> [TrendSeries] {
         let key = "\(label)|\(providerFilter ?? "*")|\(range.span)"
         if let trendCache, trendCache.key == key { return trendCache.series }
-        let series = ModelsView.buildTrendSeries(
+        let series = TrendChartData.buildTrendSeries(
             samples: remainingHistory,
             label: label,
             providerFilter: providerFilter,
@@ -108,13 +100,13 @@ final class ModelUsageViewModel: ObservableObject {
     }
 
     /// Window labels present in the range, for the window picker. Cached.
-    func trendLabels(providerFilter: String?, range: ModelsView.Range) -> [String] {
+    func trendLabels(providerFilter: String?, range: ChartRange) -> [String] {
         let key = "\(providerFilter ?? "*")|\(range.span)"
         if let labelCache, labelCache.key == key { return labelCache.labels }
         let cutoff = Date().addingTimeInterval(-range.span)
         let present = Set(remainingHistory
             .filter { (providerFilter == nil || $0.provider == providerFilter) && $0.date >= cutoff }
-            .map { ModelsView.canonicalTrendLabel($0.label) })
+            .map { TrendChartData.canonicalTrendLabel($0.label) })
         let preferred = ["Rolling", "Weekly", "Monthly"]
         let labels = present.isEmpty
             ? preferred
@@ -125,7 +117,7 @@ final class ModelUsageViewModel: ObservableObject {
 
     /// Daily buckets overlapping the range's trailing span, with each day's
     /// entries filtered to the provider. Cached until new data arrives.
-    func rangeDaily(range: ModelsView.Range, providerFilter: String?) -> [DailyModelUsage] {
+    func rangeDaily(range: ChartRange, providerFilter: String?) -> [DailyModelUsage] {
         let key = "\(providerFilter ?? "*")|\(range.span)"
         if let rangeDailyCache, rangeDailyCache.key == key { return rangeDailyCache.days }
         let start = Calendar.current.startOfDay(for: Date().addingTimeInterval(-range.span))
@@ -160,23 +152,11 @@ final class ModelUsageViewModel: ObservableObject {
 struct ModelsView: View {
     @ObservedObject var viewModel: ModelUsageViewModel
 
-    enum Range: String, CaseIterable, Identifiable {
-        case today = "24h", week = "7d", month = "30d"
-        var id: String { rawValue }
-        /// Trailing window behind "now" — ranges are rolling, not calendar.
-        var span: TimeInterval {
-            switch self {
-            case .today: 24 * 3600
-            case .week: 7 * 86400
-            case .month: 30 * 86400
-            }
-        }
-    }
     enum Metric: String, CaseIterable, Identifiable {
         case tokens = "Tokens", cost = "Cost"
         var id: String { rawValue }
     }
-    @State private var range: Range = .week
+    @State private var range: ChartRange = .week
     @State private var metric: Metric = .tokens
     @State private var providerFilter: String?
     @State private var trendWindow: String = "Rolling"
@@ -185,25 +165,8 @@ struct ModelsView: View {
     @State private var selectedDay: Date?
     @State private var selectedModel: String?
 
-    /// Model-scoped quotas (Fable today) come from weekly_scoped kinds, so
-    /// they chart on the Weekly graph. The only exotic labels our sources can
-    /// record are scoped weeklies — anything outside the three known windows
-    /// belongs to Weekly.
-    nonisolated static func canonicalTrendLabel(_ label: String) -> String {
-        switch label {
-        case "Rolling", "Weekly", "Monthly": label
-        default: "Weekly"
-        }
-    }
-
-    /// Trailing start of the visible span for the range filter (matches
-    /// `filteredRangeDaily`).
-    nonisolated static func trendCutoff(for range: Range, now: Date) -> Date {
-        now.addingTimeInterval(-range.span)
-    }
-
     private var rangeCutoff: Date {
-        Self.trendCutoff(for: range, now: Date())
+        TrendChartData.trendCutoff(for: range, now: Date())
     }
 
     /// Selected label if it has data, else the first available one (e.g.
@@ -283,116 +246,14 @@ struct ModelsView: View {
         viewModel.rangeDaily(range: range, providerFilter: providerFilter)
     }
 
-    /// X-axis tick style follows the *visible* span, so a chart scaled down to
-    /// a few hours of data gets hourly ticks even in a 7d range. Tested.
-    nonisolated static func trendXHourly(span: TimeInterval) -> Bool {
-        span < 3 * 86400
-    }
-
-    /// Hourly gridline stride for a span: 1h when zoomed in, 6h for a couple
-    /// of days, 12h beyond. Tested.
-    nonisolated static func trendHourStride(span: TimeInterval) -> Int {
-        switch span {
-        case ..<(6 * 3600): return 1
-        case ..<(36 * 3600): return 6
-        default: return 12
-        }
-    }
-
-    /// The X domain for the trend chart. Scales down to the data actually
-    /// available: with only an hour of history in a 7-day range, the plot
-    /// spans that hour instead of leaving 6.9 empty days. Empty series fall
-    /// back to the full selected range. Tested.
-    nonisolated static func trendXDomain(
-        series: [TrendSeries],
-        cutoff: Date,
-        now: Date
-    ) -> ClosedRange<Date> {
-        let dates = series.flatMap { $0.samples.map(\.date) }
-        guard let earliest = dates.min(), let latest = dates.max() else {
-            return cutoff...now
-        }
-        // A little lead-in so the first point isn't glued to the edge.
-        let span = max(latest.timeIntervalSince(earliest), 60)
-        let lower = max(cutoff, earliest.addingTimeInterval(-span * 0.02))
-        let upper = max(now, latest)
-        let minimumSpan: TimeInterval = 5 * 60
-        guard upper.timeIntervalSince(lower) >= minimumSpan else {
-            return lower...(lower.addingTimeInterval(minimumSpan))
-        }
-        return lower...upper
-    }
-
-    /// Midnight + noon ticks across the visible span (7d/30d ranges).
-    /// Explicit dates (not a stride) so ticks land exactly on 00:00/12:00.
-    /// Tested.
-    nonisolated static func trendTickDates(
-        cutoff: Date,
-        now: Date,
-        calendar: Calendar = .current
-    ) -> [Date] {
-        var ticks: [Date] = []
-        var day = calendar.startOfDay(for: cutoff)
-        while day <= now {
-            if day >= cutoff { ticks.append(day) }
-            if let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day),
-               noon >= cutoff && noon <= now {
-                ticks.append(noon)
-            }
-            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-            day = next
-        }
-        return ticks.sorted()
-    }
-
-    /// Midnight ticks read as the weekday, noon ticks as 12pm. Tested.
-    nonisolated static func trendTickLabel(_ date: Date, calendar: Calendar = .current) -> String {
-        calendar.component(.hour, from: date) == 12
-            ? "12pm"
-            : date.formatted(.dateTime.weekday(.abbreviated))
-    }
-
-    /// Nearest point per series to the hovered date, for the tooltip. Tested.
-    nonisolated static func nearestRows(
-        series: [TrendSeries],
-        at date: Date
-    ) -> [(name: String, provider: String, scoped: Bool, remaining: Double)] {
-        series.compactMap { s in
-            guard let point = nearestPoint(in: s.samples, to: date) else { return nil }
-            return (s.name, s.provider, s.scoped, point.remaining)
-        }
-    }
-
-    /// Nearest sample to `date` in a date-sorted series. Binary search: the
-    /// tooltip tracks the pointer, and a linear scan per hover event over
-    /// thousands of points is wasteful. Tested.
-    nonisolated static func nearestPoint(
-        in samples: [(date: Date, remaining: Double)],
-        to date: Date
-    ) -> (date: Date, remaining: Double)? {
-        guard !samples.isEmpty else { return nil }
-        var low = 0
-        var high = samples.count - 1
-        while low < high {
-            let mid = (low + high) / 2
-            if samples[mid].date < date { low = mid + 1 } else { high = mid }
-        }
-        // `low` is the first index at or after `date`; compare with its neighbour.
-        let candidate = samples[low]
-        guard low > 0 else { return candidate }
-        let previous = samples[low - 1]
-        return abs(previous.date.timeIntervalSince(date)) <= abs(candidate.date.timeIntervalSince(date))
-            ? previous
-            : candidate
-    }
 
     private var trendDayTicks: [Date] {
         let domain = trendXDomain
-        return Self.trendTickDates(cutoff: domain.lowerBound, now: domain.upperBound)
+        return TrendChartData.trendTickDates(cutoff: domain.lowerBound, now: domain.upperBound)
     }
 
     private var trendXDomain: ClosedRange<Date> {
-        Self.trendXDomain(series: trendSeries, cutoff: rangeCutoff, now: Date())
+        TrendChartData.trendXDomain(series: trendSeries, cutoff: rangeCutoff, now: Date())
     }
 
     private func trendTooltip(for date: Date) -> some View {
@@ -401,7 +262,7 @@ struct ModelsView: View {
                 Text(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                ForEach(Self.nearestRows(series: trendSeries, at: date), id: \.name) { row in
+                ForEach(TrendChartData.nearestRows(series: trendSeries, at: date), id: \.name) { row in
                     HStack(spacing: 6) {
                         Circle()
                             .fill(SettingsView.color(for: row.provider).opacity(row.scoped ? 0.55 : 1))
@@ -439,16 +300,6 @@ struct ModelsView: View {
         metric == .tokens
             ? StatusItemManager.formatTokens(entry.totalTokens)
             : String(format: "$%.2f", entry.cost)
-    }
-
-    /// Day bucket containing `date`. Bars span whole days, so hovering empty
-    /// space between them must not pop a tooltip.
-    nonisolated static func dayBucket(
-        for date: Date,
-        in days: [DailyModelUsage],
-        calendar: Calendar = .current
-    ) -> DailyModelUsage? {
-        days.first { calendar.isDate($0.day, inSameDayAs: date) }
     }
 
     private func dailyTooltip(for day: DailyModelUsage) -> some View {
@@ -541,36 +392,13 @@ struct ModelsView: View {
 
     /// Auto-scaled Y domain for the trend chart: spans the visible data plus
     /// padding so lines aren't flattened when the range is narrow, clamped to
-    /// 0…100 elsewhere. Empty series → full domain. Tested.
-    nonisolated static func remainingDomain(_ series: [TrendSeries]) -> ClosedRange<Double> {
-        let values = series.flatMap { $0.samples.map(\.remaining) }
-        guard let low = values.min(), let high = values.max() else { return 0...100 }
-        let pad = max((high - low) * 0.15, 5)
-        let lower = max(0, (low - pad).rounded(.down))
-        let upper = min(100, (high + pad).rounded(.up))
-        guard lower < upper else { return lower == 0 ? 0...10 : (lower - 10)...lower }
-        return lower...upper
-    }
-
-    /// Gridline values at multiples of 10 inside the domain (5 when that
-    /// would leave fewer than three lines). Tested.
-    nonisolated static func yTicks(in domain: ClosedRange<Double>) -> [Double] {
-        for step in [10.0, 5.0] {
-            let ticks = stride(from: (domain.lowerBound / step).rounded(.up) * step,
-                               through: domain.upperBound, by: step)
-                .map { ($0 / step).rounded() * step }
-                .filter { $0 >= domain.lowerBound && $0 <= domain.upperBound }
-            if ticks.count >= 3 { return ticks }
-        }
-        return [domain.lowerBound, domain.upperBound]
-    }
-
+    /// 0…100 elsewhere. Empty series → full domain.
     private var remainingDomain: ClosedRange<Double> {
-        Self.remainingDomain(trendSeries)
+        TrendChartData.remainingDomain(trendSeries)
     }
 
     private var trendYTicks: [Double] {
-        Self.yTicks(in: remainingDomain)
+        TrendChartData.yTicks(in: remainingDomain)
     }
 
     // MARK: Toolbar
@@ -593,7 +421,7 @@ struct ModelsView: View {
             .pickerStyle(.segmented)
             .frame(width: 160)
             Picker("Range", selection: $range) {
-                ForEach(Range.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(ChartRange.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .frame(width: 200)
@@ -618,32 +446,13 @@ struct ModelsView: View {
         }
     }
 
-    /// Latest vendor-reported Rolling remaining % per provider, honoring the
-    /// provider filter. Pure (tested).
-    nonisolated static func latestRolling(
-        samples: [RemainingSample],
-        providerFilter: String?
-    ) -> [(provider: String, remaining: Double)] {
-        var latest: [String: (date: Date, remaining: Double)] = [:]
-        for sample in samples
-        where sample.label == "Rolling" && (providerFilter == nil || sample.provider == providerFilter) {
-            if let current = latest[sample.provider] {
-                if sample.date > current.date { latest[sample.provider] = (sample.date, sample.remaining) }
-            } else {
-                latest[sample.provider] = (sample.date, sample.remaining)
-            }
-        }
-        return latest.map { (provider: $0.key, remaining: $0.value.remaining) }
-            .sorted { $0.remaining < $1.remaining }
-    }
-
     private var latestRolling: [(provider: String, remaining: Double)] {
-        Self.latestRolling(samples: viewModel.remainingHistory, providerFilter: providerFilter)
+        TrendChartData.latestRolling(samples: viewModel.remainingHistory, providerFilter: providerFilter)
     }
 
     /// Today's entries for the cards, honoring the provider filter.
     private var todayEntries: [ModelUsageEntry] {
-        guard let day = Self.dayBucket(for: Date(), in: viewModel.daily) else { return [] }
+        guard let day = TrendChartData.dayBucket(for: Date(), in: viewModel.daily) else { return [] }
         return entries(for: day)
     }
 
@@ -786,9 +595,9 @@ struct ModelsView: View {
                     // (weekday) plus noon (12pm) each day.
                     let domain = trendXDomain
                     let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
-                    if Self.trendXHourly(span: span) {
+                    if TrendChartData.trendXHourly(span: span) {
                         AxisMarks(values: .stride(by: .hour,
-                                                  count: Self.trendHourStride(span: span))) { _ in
+                                                  count: TrendChartData.trendHourStride(span: span))) { _ in
                             AxisGridLine()
                             AxisValueLabel(format: .dateTime.hour().minute())
                         }
@@ -797,7 +606,7 @@ struct ModelsView: View {
                             AxisGridLine()
                             AxisValueLabel {
                                 if let date = value.as(Date.self) {
-                                    Text(Self.trendTickLabel(date))
+                                    Text(TrendChartData.trendTickLabel(date))
                                 }
                             }
                         }
@@ -825,39 +634,6 @@ struct ModelsView: View {
                 .frame(height: 180)
             }
             }
-        }
-    }
-
-    /// Per-provider series for the selected window over the visible range.
-    /// A provider can contribute several lines (Claude Weekly + Claude
-    /// Fable): the main window keeps the provider color, scoped weeklies
-    /// draw dashed and faded.
-    typealias TrendSeries = (
-        key: String, name: String, provider: String, scoped: Bool,
-        samples: [(date: Date, remaining: Double)]
-    )
-
-    /// Pure series construction, tested.
-    nonisolated static func buildTrendSeries(
-        samples: [RemainingSample],
-        label: String,
-        providerFilter: String?,
-        cutoff: Date
-    ) -> [TrendSeries] {
-        let filtered = samples.filter {
-            canonicalTrendLabel($0.label) == label
-                && (providerFilter == nil || $0.provider == providerFilter)
-                && $0.date >= cutoff
-        }
-        let dict = Dictionary(grouping: filtered, by: { "\($0.provider)|\($0.label)" })
-        return dict.keys.sorted().map { key in
-            let points = dict[key]!.sorted { $0.date < $1.date }
-            let provider = points[0].provider
-            let pointLabel = points[0].label
-            let scoped = pointLabel != label
-            let name = scoped ? "\(provider) \(pointLabel)" : provider
-            return (key, name, provider, scoped,
-                    points.map { (date: $0.date, remaining: $0.remaining) })
         }
     }
 
@@ -894,7 +670,7 @@ struct ModelsView: View {
             .chartOverlay { proxy in
                 GeometryReader { geometry in
                     if let selectedDay,
-                       let day = Self.dayBucket(for: selectedDay, in: filteredRangeDaily),
+                       let day = TrendChartData.dayBucket(for: selectedDay, in: filteredRangeDaily),
                        let x = proxy.position(forX: day.day),
                        let plot = proxy.plotFrame {
                         let plotFrame = geometry[plot]
