@@ -3,6 +3,13 @@ import Foundation
 import Testing
 @testable import BurnRate
 
+/// Fake SQLite seam: returns one OpenCode row without spawning a process.
+private struct StubSQLiteRunner: SQLiteQuerying {
+    func query(databaseAt path: URL, sql: String) throws -> String {
+        "opencode-go\t" + #"{"role":"assistant","tokens":{"input":10,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"providerID":"opencode-go","modelID":"m","time":{"created":1788830155613}}"#
+    }
+}
+
 struct UsageSourceTests {
     @Test func parsesClaudeAssistantLine() throws {
         let line = #"{"timestamp":"2026-09-08T10:00:00.000Z","type":"assistant","message":{"model":"claude-sonnet-4","usage":{"input_tokens":6,"cache_creation_input_tokens":41797,"cache_read_input_tokens":0,"output_tokens":458}}}"#
@@ -92,8 +99,7 @@ struct UsageSourceTests {
         #expect(sample?.sourceTag == "opencode-go")
     }
 
-    @Test func parsesOpenCodeSQLiteSnapshot() throws {
-        // Build a real DB with the system sqlite3 and parse it back.
+    @Test func parsesOpenCodeSQLiteSnapshot() throws {        // Build a real DB with the system sqlite3 and parse it back.
         let db = FileManager.default.temporaryDirectory
             .appendingPathComponent("test-opencode-\(UUID().uuidString).db")
         defer { try? FileManager.default.removeItem(at: db) }
@@ -110,6 +116,24 @@ struct UsageSourceTests {
         // providerIDFilter still excludes other providers' rows.
         let all = try OpenCodeUsageSource.querySamples(from: db, providerIDFilter: nil, cutoffMs: cutoffMs)
         #expect(all.count == 1)
+    }
+
+    @Test func querySamplesUsesInjectedSQLiteRunner() throws {
+        // Proves the SQLite seam: no subprocess, so this runs on any platform.
+        let samples = try OpenCodeUsageSource.querySamples(
+            from: URL(fileURLWithPath: "/nonexistent.db"),
+            providerIDFilter: "opencode-go",
+            cutoffMs: 0,
+            sqlite: StubSQLiteRunner()
+        )
+        #expect(samples.count == 1)
+        #expect(samples[0].sourceTag == "opencode-go")
+    }
+
+    @Test func fileManagerPathsAppendsAppName() {
+        let paths = FileManagerPaths()
+        #expect(paths.appDirectory.lastPathComponent == "BurnRate")
+        #expect(!paths.homeDirectory.path.isEmpty)
     }
 
     private func writeTemp(_ content: String) throws -> URL {

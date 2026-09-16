@@ -68,6 +68,8 @@ actor ClaudeUsageAPIProvider: UsageProvider {
 
     private let credentialsURL: URL
     private let claudeJSONURL: URL
+    /// Keychain (or platform equivalent) reader for the fallback credential.
+    private let credentials: any CredentialReading
 
     /// Notified (on the main actor) when the signed-in Claude account
     /// changes, so alert state can be rebased onto the new account.
@@ -79,13 +81,17 @@ actor ClaudeUsageAPIProvider: UsageProvider {
     /// one-off false reset/milestone alerts.
     private static let fingerprintKey = "claudeCredentialFingerprint"
 
-    init(credentialsURL: URL? = nil, claudeJSONURL: URL? = nil) {
+    init(
+        credentialsURL: URL? = nil,
+        claudeJSONURL: URL? = nil,
+        paths: any AppPaths = FileManagerPaths(),
+        credentials: any CredentialReading = KeychainCredentialReader()
+    ) {
+        self.credentials = credentials
         self.credentialsURL = credentialsURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude/.credentials.json")
+            ?? paths.homeDirectory.appendingPathComponent(".claude/.credentials.json")
         self.claudeJSONURL = claudeJSONURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude.json")
+            ?? paths.homeDirectory.appendingPathComponent(".claude.json")
         self.credentialFingerprint = UserDefaults.standard.string(forKey: Self.fingerprintKey)
     }
 
@@ -197,21 +203,9 @@ actor ClaudeUsageAPIProvider: UsageProvider {
     }
 
     private func keychainCredentialOAuth() -> [String: Any]? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return nil // no Keychain entry
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let data = credentials.genericPassword(service: "Claude Code-credentials"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
         return json["claudeAiOauth"] as? [String: Any]
     }
 

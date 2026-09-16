@@ -62,13 +62,11 @@ actor ClaudeUsageSource: UsageSource {
     private var cacheLoaded = false
     private let cacheURL: URL
 
-    init(baseURL: URL? = nil, cacheURL: URL? = nil) {
+    init(baseURL: URL? = nil, cacheURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
         self.baseURL = baseURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude/projects")
+            ?? paths.homeDirectory.appendingPathComponent(".claude/projects")
         self.cacheURL = cacheURL
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("BurnRate/claude-cache.json")
+            ?? paths.appDirectory.appendingPathComponent("claude-cache.json")
     }
 
     func collectSamples() throws -> [UsageSample] {
@@ -210,10 +208,9 @@ actor CodexUsageSource: UsageSource {
     /// path -> last cumulative sample (nil = parsed, no token events found).
     private var cache: [String: UsageSample?] = [:]
 
-    init(baseURL: URL? = nil) {
+    init(baseURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
         self.baseURL = baseURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex/sessions")
+            ?? paths.homeDirectory.appendingPathComponent(".codex/sessions")
     }
 
     func collectSamples() throws -> [UsageSample] {
@@ -291,45 +288,40 @@ actor OpenCodeUsageSource: UsageSource {
     nonisolated let name = "OpenCode Go"
     let providerIDFilter: String?
     let dbURL: URL
+    private let sqlite: any SQLiteQuerying
 
-    init(providerIDFilter: String? = nil, dbURL: URL? = nil) {
+    init(
+        providerIDFilter: String? = nil,
+        dbURL: URL? = nil,
+        paths: any AppPaths = FileManagerPaths(),
+        sqlite: any SQLiteQuerying = ProcessSQLiteRunner()
+    ) {
         self.providerIDFilter = providerIDFilter
+        self.sqlite = sqlite
         self.dbURL = dbURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".local/share/opencode/opencode.db")
+            ?? paths.homeDirectory.appendingPathComponent(".local/share/opencode/opencode.db")
     }
 
     func collectSamples() throws -> [UsageSample] {
         guard FileManager.default.fileExists(atPath: dbURL.path) else { return [] }
         let cutoffMs = Int(Date().addingTimeInterval(-sampleRetention).timeIntervalSince1970 * 1000)
-        return try Self.querySamples(from: dbURL, providerIDFilter: providerIDFilter, cutoffMs: cutoffMs)
+        return try Self.querySamples(
+            from: dbURL, providerIDFilter: providerIDFilter, cutoffMs: cutoffMs, sqlite: sqlite)
     }
 
     /// Internal (not private) so tests can run it against a fixture DB.
     /// `providerIDFilter == nil` keeps all providers (model/cost views).
-    static func querySamples(from dbPath: URL, providerIDFilter: String?, cutoffMs: Int) throws -> [UsageSample] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        process.arguments = [
-            "-readonly",
-            dbPath.path,
-            "-separator",
-            "\t",
-            """
+    static func querySamples(
+        from dbPath: URL,
+        providerIDFilter: String?,
+        cutoffMs: Int,
+        sqlite: any SQLiteQuerying = ProcessSQLiteRunner()
+    ) throws -> [UsageSample] {
+        let output = try sqlite.query(databaseAt: dbPath, sql: """
             SELECT json_extract(data,'$.providerID'), data FROM message \
             WHERE time_created > \(cutoffMs) AND json_extract(data,'$.role')='assistant';
-            """,
-        ]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        // Read the pipe to EOF BEFORE waiting: draining concurrently avoids
-        // deadlock when output exceeds the pipe buffer.
-        let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+            """)
 
-        let output = String(data: outputData, encoding: .utf8) ?? ""
         var samples: [UsageSample] = []
         for line in output.split(separator: "\n") {
             guard let tabIndex = line.firstIndex(of: "\t") else { continue }
