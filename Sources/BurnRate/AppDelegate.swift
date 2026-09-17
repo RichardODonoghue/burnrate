@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         localSources = sharedSources
         modelUsageViewModel = ModelUsageViewModel(sources: sharedSources)
-        let claudeProvider = ClaudeUsageAPIProvider()
+        let claudeProvider = ClaudeUsageAPIProvider(credentials: KeychainCredentialReader())
         providers = [
             claudeProvider,
             OpenCodeGoUsageAPIProvider(),

@@ -300,7 +300,8 @@ private func setTrayItems(_ tray: Int32, model: StatusMenuModel) {
 
 private func updateMainTray(usage: [ProviderUsage]) {
     guard state.mainTray >= 0 else { return }
-    setTrayItems(state.mainTray, model: StatusMenuBuilder.mainMenu(usage: usage, updateVersion: nil, isBusy: false))
+    setTrayItems(state.mainTray, model: StatusMenuBuilder.mainMenu(
+        usage: usage, updateVersion: nil, isBusy: false, includesCharts: true))
 }
 
 /// Creates/removes per-provider widget trays to match settings.

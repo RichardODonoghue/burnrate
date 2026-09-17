@@ -52,6 +52,7 @@ public enum StatusMenuBuilder {
         usage: [ProviderUsage],
         updateVersion: String?,
         isBusy: Bool,
+        includesCharts: Bool = false,
         now: Date = Date()
     ) -> StatusMenuModel {
         var entries: [StatusMenuEntry] = []
@@ -70,7 +71,9 @@ public enum StatusMenuBuilder {
         }
 
         entries.append(.action(title: "Usage Dashboard…", action: .openDashboard, isEnabled: true))
-        entries.append(.action(title: "Charts…", action: .openCharts, isEnabled: true))
+        if includesCharts {
+            entries.append(.action(title: "Charts…", action: .openCharts, isEnabled: true))
+        }
         if let updateVersion {
             entries.append(.action(title: "Update to \(updateVersion)…",
                                    action: .installUpdate(version: updateVersion),
