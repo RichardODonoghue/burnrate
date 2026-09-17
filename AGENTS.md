@@ -28,13 +28,16 @@ directly to `main`.
 - Run the app: `swift run` — menu-bar status item appears; `Cmd+C` to stop.
 - **Linux app:** `swift build --product BurnRate` on Linux (GTK4 via `libgtk-4-dev`).
   `scripts/linux-smoke.sh` builds and smoke-runs it in an Ubuntu container under
-  Xvfb (window + tray registration/menu/click; requires Docker). The tray is a
-  hand-rolled StatusNotifierItem + DBusMenu over GIO in `CBurnRateTray` (not
-  libayatana-appindicator — that is GTK3 and cannot share a process with GTK4).
-  Linux alerts go through `notify-send`; settings use `AlertDefaults` (no editor).
-  Package with `scripts/make_linux_app.sh` (tarball + `.desktop` + install script).
-  CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The macOS app
-  target and the Linux target are declared per-OS in `Package.swift`;
+  Xvfb (window + tray registration/menu/click + widget tray; requires Docker). The
+  tray is a hand-rolled StatusNotifierItem + DBusMenu over GIO in `CBurnRateTray`
+  (not libayatana-appindicator — that is GTK3 and cannot share a process with
+  GTK4); multiple tray items are supported (main + per-provider widgets).
+  Linux alerts go through `notify-send` (thread-safe `LinuxNotifier`), settings
+  persist as JSON (`LinuxSettings`) and are edited from a GTK settings window
+  (widget toggles + reset notifications). The updater opens the releases page.
+  Package with `scripts/make_linux_app.sh` (tarball + `.deb` + `.desktop` + install
+  script). CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The
+  macOS app target and the Linux target are declared per-OS in `Package.swift`;
   `BurnRateCore` builds on both.
 - Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.
 - No codegen, migrations, or lint config yet; add commands here as tooling lands.

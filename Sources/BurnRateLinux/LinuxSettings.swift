@@ -1,0 +1,62 @@
+import BurnRateCore
+import Foundation
+
+/// Linux settings, persisted as JSON (no Combine/SwiftUI on Linux). Read by the
+/// notifier and the tray/widgets; edited from the GTK settings window.
+final class LinuxSettings: @unchecked Sendable {
+    struct Values: Codable, Sendable {
+        var widgetProviders: [String] = []
+        var notifyOnReset = true
+        var milestones: [Milestone] = AlertDefaults.milestones
+        var burnAlerts: [BurnAlert] = AlertDefaults.burnAlerts
+        var costAlerts: [CostAlert] = []
+    }
+
+    private let lock = NSLock()
+    private var values: Values
+    private let url: URL
+
+    init(paths: any AppPaths = FileManagerPaths()) {
+        url = paths.appDirectory.appendingPathComponent("linux-settings.json")
+        if let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode(Values.self, from: data) {
+            values = decoded
+        } else {
+            values = Values()
+            persist(values) // materialise defaults so the file is editable
+        }
+    }
+
+    var snapshot: Values {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
+    }
+
+    func setWidget(_ provider: String, enabled: Bool) {
+        mutate { values in
+            values.widgetProviders.removeAll { $0 == provider }
+            if enabled { values.widgetProviders.append(provider) }
+        }
+    }
+
+    func setNotifyOnReset(_ enabled: Bool) {
+        mutate { $0.notifyOnReset = enabled }
+    }
+
+    private func mutate(_ body: (inout Values) -> Void) {
+        lock.lock()
+        body(&values)
+        let saved = values
+        lock.unlock()
+        persist(saved)
+    }
+
+    private func persist(_ values: Values) {
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(values) {
+            try? data.write(to: url)
+        }
+    }
+}

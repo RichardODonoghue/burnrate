@@ -16,4 +16,18 @@ void br_ui_post(const char *body);
 /// Requests the GTK application to quit.
 void br_ui_quit(void);
 
+/// One checkbox row for the settings window.
+typedef struct {
+    const char *label;
+    int id;
+    int checked;
+} br_checkbox;
+
+/// Invoked on the GTK main thread when a checkbox is toggled.
+typedef void (*br_checkbox_cb)(int id, int checked, void *ctx);
+
+/// Shows (or rebuilds) the settings window with the given checkboxes.
+void br_settings_show(const char *title, const br_checkbox *items, int count,
+                      br_checkbox_cb callback, void *ctx);
+
 #endif
