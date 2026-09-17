@@ -119,9 +119,13 @@ directly to `main`.
   lines/files, so each requestId counts once with its final cumulative usage;
   without this, totals over-count ~2x); Codex
   `~/.codex/sessions/**/*.jsonl` (last cumulative `token_count` event per file);
-  OpenCode legacy `~/.local/share/opencode/opencode.db` (SQLite+WAL, query
-  read-only via `/usr/bin/sqlite3` with `time_created` filter — never copy the
-  DB; drain the output pipe before `waitUntilExit()` or it deadlocks).
+  OpenCode `~/.local/share/opencode/opencode.db` (SQLite+WAL, query read-only
+  via `/usr/bin/sqlite3` with `time_created` filter — never copy the DB; drain
+  the output pipe before `waitUntilExit()` or it deadlocks). OpenCode migrated
+  storage: newer turns live in `session_message` (`model:{id,providerID}`,
+  `cost`, `tokens`, `type='assistant'`) while older ones are in `message`
+  (flat `providerID`/`modelID`); the parser detects which tables exist, reads
+  both, and dedupes by row id (the migration copied ids into both tables).
 - Sources/providers are actors (`protocol UsageSource: Actor`,
   `protocol UsageProvider: Actor`); parsing runs off the main thread. First
   Claude parse is ~20s (~560MB), later polls ~ms.
