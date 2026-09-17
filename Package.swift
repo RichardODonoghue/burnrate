@@ -43,14 +43,25 @@ targets.append(.systemLibrary(
     pkgConfig: "gtk4",
     providers: [.apt(["libgtk-4-dev"])]
 ))
+targets.append(.systemLibrary(
+    name: "CGIO",
+    path: "Sources/CGIO",
+    pkgConfig: "gio-2.0",
+    providers: [.apt(["libglib2.0-dev"])]
+))
 targets.append(.target(
     name: "CBurnRateGTK",
     dependencies: ["CGTK"],
     path: "Sources/CBurnRateGTK"
 ))
+targets.append(.target(
+    name: "CBurnRateTray",
+    dependencies: ["CGIO"],
+    path: "Sources/CBurnRateTray"
+))
 targets.append(.executableTarget(
     name: "BurnRateLinux",
-    dependencies: ["BurnRateCore", "CBurnRateGTK"],
+    dependencies: ["BurnRateCore", "CBurnRateGTK", "CBurnRateTray"],
     path: "Sources/BurnRateLinux"
 ))
 #endif
