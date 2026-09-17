@@ -34,6 +34,7 @@ struct StatusMenuTests {
             .windowRow(label: "Rolling", detail: "82% · resets in 4h"),
             .separator,
             .action(title: "Usage Dashboard…", action: .openDashboard, isEnabled: true),
+            .action(title: "Charts…", action: .openCharts, isEnabled: true),
             .action(title: "Check for Updates…", action: .checkForUpdates, isEnabled: true),
             .action(title: "Settings…", action: .openSettings, isEnabled: true),
             .action(title: "Quit", action: .quit, isEnabled: true),

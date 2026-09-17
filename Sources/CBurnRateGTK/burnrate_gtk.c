@@ -186,3 +186,172 @@ void br_settings_show(const char *title,
 
     gtk_window_present(GTK_WINDOW(g_settings_window));
 }
+
+/* ---- charts ------------------------------------------------------------- */
+
+#include <cairo.h>
+
+static GtkWidget *g_chart_window = NULL;
+static GtkWidget *g_trend_area = NULL;
+static GtkWidget *g_bars_area = NULL;
+
+static br_trend_point *g_trend_points = NULL;
+static int g_trend_count = 0;
+static double *g_trend_rgb = NULL;
+static int g_trend_series = 0;
+
+static double *g_bar_values = NULL;
+static double *g_bar_rgb = NULL;
+static int g_bar_count = 0;
+static char *g_bar_labels = NULL;
+
+static void set_source_rgb(cairo_t *cr, const double *rgb, double alpha) {
+    cairo_set_source_rgba(cr, rgb[0], rgb[1], rgb[2], alpha);
+}
+
+static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
+    (void)data;
+    GdkRGBA fg;
+    gtk_widget_get_color(GTK_WIDGET(area), &fg);
+
+    const double left = 38, right = 8, top = 8, bottom = 14;
+    double w = width - left - right;
+    double h = height - top - bottom;
+    if (w <= 1 || h <= 1) return;
+
+    cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 9);
+    cairo_set_line_width(cr, 1);
+    for (int p = 0; p <= 100; p += 25) {
+        double y = top + h * (1 - p / 100.0);
+        cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, 0.18);
+        cairo_move_to(cr, left, y);
+        cairo_line_to(cr, left + w, y);
+        cairo_stroke(cr);
+        char label[8];
+        snprintf(label, sizeof(label), "%d%%", p);
+        cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, 0.75);
+        cairo_move_to(cr, 3, y + 3);
+        cairo_show_text(cr, label);
+    }
+
+    if (!g_trend_points || g_trend_count == 0) return;
+    cairo_set_line_width(cr, 2);
+    for (int s = 0; s < g_trend_series; s++) {
+        const double *rgb = &g_trend_rgb[s * 3];
+        cairo_set_source_rgba(cr, rgb[0], rgb[1], rgb[2], 1.0);
+        gboolean started = FALSE;
+        for (int i = 0; i < g_trend_count; i++) {
+            if (g_trend_points[i].series != s) continue;
+            double x = left + w * g_trend_points[i].x;
+            double y = top + h * (1 - g_trend_points[i].y / 100.0);
+            if (!started) { cairo_move_to(cr, x, y); started = TRUE; }
+            else { cairo_line_to(cr, x, y); }
+        }
+        cairo_stroke(cr);
+    }
+}
+
+static void draw_bars(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
+    (void)data;
+    GdkRGBA fg;
+    gtk_widget_get_color(GTK_WIDGET(area), &fg);
+    cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 10);
+
+    if (g_bar_count <= 0) return;
+    double row = (double)height / g_bar_count;
+    double bar_area = width * 0.6;
+    double x0 = width - bar_area - 6;
+    for (int i = 0; i < g_bar_count; i++) {
+        double y = row * i + row * 0.2;
+        double bh = row * 0.6;
+        const double *rgb = &g_bar_rgb[i * 3];
+        cairo_set_source_rgba(cr, rgb[0], rgb[1], rgb[2], 0.9);
+        double bw = bar_area * (g_bar_values[i] < 0 ? 0 : (g_bar_values[i] > 1 ? 1 : g_bar_values[i]));
+        cairo_rectangle(cr, x0, y, bw, bh);
+        cairo_fill(cr);
+        if (g_bar_labels) {
+            const char *label = g_bar_labels;
+            for (int k = 0; k < i && label; k++) {
+                label = strchr(label, '\n');
+                if (label) label++;
+            }
+            if (label) {
+                char buf[128];
+                size_t n = strcspn(label, "\n");
+                if (n >= sizeof(buf)) n = sizeof(buf) - 1;
+                memcpy(buf, label, n);
+                buf[n] = '\0';
+                cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, 0.9);
+                cairo_move_to(cr, 6, y + bh * 0.7);
+                cairo_show_text(cr, buf);
+            }
+        }
+    }
+}
+
+void br_chart_show(const char *title) {
+    if (!g_chart_window) {
+        g_chart_window = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(g_chart_window), title ? title : "BurnRate Charts");
+        gtk_window_set_default_size(GTK_WINDOW(g_chart_window), 640, 460);
+        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_widget_set_margin_top(box, 12);
+        gtk_widget_set_margin_bottom(box, 12);
+        gtk_widget_set_margin_start(box, 12);
+        gtk_widget_set_margin_end(box, 12);
+
+        g_trend_area = gtk_drawing_area_new();
+        gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(g_trend_area), 240);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(g_trend_area), draw_trend, NULL, NULL);
+        gtk_box_append(GTK_BOX(box), g_trend_area);
+
+        g_bars_area = gtk_drawing_area_new();
+        gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(g_bars_area), 200);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(g_bars_area), draw_bars, NULL, NULL);
+        gtk_box_append(GTK_BOX(box), g_bars_area);
+
+        gtk_window_set_child(GTK_WINDOW(g_chart_window), box);
+    }
+    gtk_window_present(GTK_WINDOW(g_chart_window));
+}
+
+void br_chart_set_trend(const br_trend_point *points, int point_count,
+                        const double *series_rgb, int series_count) {
+    g_free(g_trend_points);
+    g_free(g_trend_rgb);
+    g_trend_points = NULL;
+    g_trend_rgb = NULL;
+    g_trend_count = 0;
+    g_trend_series = series_count;
+    if (point_count > 0) {
+        g_trend_points = g_new0(br_trend_point, point_count);
+        memcpy(g_trend_points, points, sizeof(br_trend_point) * point_count);
+        g_trend_count = point_count;
+    }
+    if (series_count > 0) {
+        g_trend_rgb = g_new0(double, series_count * 3);
+        memcpy(g_trend_rgb, series_rgb, sizeof(double) * series_count * 3);
+    }
+    if (g_trend_area) gtk_widget_queue_draw(g_trend_area);
+}
+
+void br_chart_set_bars(const double *values, const double *bar_rgb, int bar_count,
+                       const char *labels) {
+    g_free(g_bar_values);
+    g_free(g_bar_rgb);
+    g_free(g_bar_labels);
+    g_bar_values = NULL;
+    g_bar_rgb = NULL;
+    g_bar_labels = NULL;
+    g_bar_count = bar_count;
+    if (bar_count > 0) {
+        g_bar_values = g_new0(double, bar_count);
+        memcpy(g_bar_values, values, sizeof(double) * bar_count);
+        g_bar_rgb = g_new0(double, bar_count * 3);
+        memcpy(g_bar_rgb, bar_rgb, sizeof(double) * bar_count * 3);
+    }
+    if (labels) g_bar_labels = g_strdup(labels);
+    if (g_bars_area) gtk_widget_queue_draw(g_bars_area);
+}

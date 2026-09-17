@@ -48,8 +48,14 @@ SVC=$(printf "%s" "$ITEMS" | grep -oE "org\.kde\.StatusNotifierItem-[0-9]+-0" | 
 echo "tray: registered $SVC"
 gdbus call --session --dest "$SVC" --object-path /MenuBar --method com.canonical.dbusmenu.GetLayout -- 0 -1 "[]" \
     | grep -q "Quit" && echo "tray: menu OK" || { echo "tray: empty menu"; exit 1; }
+# Open the charts window (id 4) and let Cairo draw it.
 gdbus call --session --dest "$SVC" --object-path /MenuBar \
-    --method com.canonical.dbusmenu.Event -- 6 clicked "<uint32 0>" 0 >/dev/null || true
+    --method com.canonical.dbusmenu.Event -- 4 clicked "<uint32 0>" 0 >/dev/null || true
+sleep 3
+if kill -0 "$APP" 2>/dev/null; then echo "charts: window OK"; else echo "charts: crash"; cat /tmp/app.log; exit 1; fi
+# Quit (id 7).
+gdbus call --session --dest "$SVC" --object-path /MenuBar \
+    --method com.canonical.dbusmenu.Event -- 7 clicked "<uint32 0>" 0 >/dev/null || true
 sleep 3
 if kill -0 "$APP" 2>/dev/null; then echo "tray: click not dispatched"; exit 1; else echo "tray: click dispatched"; fi
 INNER

@@ -3,6 +3,7 @@ import Foundation
 /// An action a tray menu row can trigger. The host decides how to perform it.
 public enum StatusMenuAction: Sendable, Equatable {
     case openDashboard
+    case openCharts
     case openSettings
     case checkForUpdates
     case installUpdate(version: String)
@@ -69,6 +70,7 @@ public enum StatusMenuBuilder {
         }
 
         entries.append(.action(title: "Usage Dashboard…", action: .openDashboard, isEnabled: true))
+        entries.append(.action(title: "Charts…", action: .openCharts, isEnabled: true))
         if let updateVersion {
             entries.append(.action(title: "Update to \(updateVersion)…",
                                    action: .installUpdate(version: updateVersion),

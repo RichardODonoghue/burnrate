@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleStatusAction(_ action: StatusMenuAction) {
         switch action {
-        case .openDashboard:
+        case .openDashboard, .openCharts:
             openAppWindow(pane: .usage)
         case .openSettings:
             openAppWindow(pane: .notifications)
