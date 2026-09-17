@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.0](https://github.com/RichardODonoghue/burnrate/compare/v0.6.0...v0.7.0) (2026-09-17)
+
+
+### Features
+
+* daily stacked-usage chart and model totals on Linux ([#54](https://github.com/RichardODonoghue/burnrate/issues/54)) ([98506e3](https://github.com/RichardODonoghue/burnrate/commit/98506e33aa2cce60ce77691d69c20fdc851d9296))
+* edit burn-rate and cost rules on Linux ([#53](https://github.com/RichardODonoghue/burnrate/issues/53)) ([9d5900c](https://github.com/RichardODonoghue/burnrate/commit/9d5900c64ebe847086488201f8e879a26594a477))
+* first Linux front-end (GTK4 window) ([#45](https://github.com/RichardODonoghue/burnrate/issues/45)) ([b671d84](https://github.com/RichardODonoghue/burnrate/commit/b671d84eba0c9e2b9d78771d6561fd9d228c5607))
+* Linux charts window (Cairo trend + ranking) ([#52](https://github.com/RichardODonoghue/burnrate/issues/52)) ([613161d](https://github.com/RichardODonoghue/burnrate/commit/613161d93eeabf2de1edb9f2437de697daa61d99))
+* Linux milestone-step editing and daily-cost alerts ([#51](https://github.com/RichardODonoghue/burnrate/issues/51)) ([fa16e52](https://github.com/RichardODonoghue/burnrate/commit/fa16e520c74254fd5306b3032e16f714374b8845))
+* Linux notifications and packaging ([#49](https://github.com/RichardODonoghue/burnrate/issues/49)) ([46a265c](https://github.com/RichardODonoghue/burnrate/commit/46a265c3235805e66ed3b71abff34c1b70da0bd5))
+* Linux tray (StatusNotifierItem + DBusMenu over GIO) ([#48](https://github.com/RichardODonoghue/burnrate/issues/48)) ([8a01425](https://github.com/RichardODonoghue/burnrate/commit/8a014254813c7b177652735f1dad0c1fb794be29))
+* Linux widgets, settings, updater and .deb packaging ([#50](https://github.com/RichardODonoghue/burnrate/issues/50)) ([14eb150](https://github.com/RichardODonoghue/burnrate/commit/14eb150be0937933b989dada19f7100c959bd09b))
+* Windows settings dialog ([#57](https://github.com/RichardODonoghue/burnrate/issues/57)) ([ef16e93](https://github.com/RichardODonoghue/burnrate/commit/ef16e93192c497941de6910c65299983e992ec10))
+* Windows settings JSON and per-provider widget trays ([#56](https://github.com/RichardODonoghue/burnrate/issues/56)) ([3f93c64](https://github.com/RichardODonoghue/burnrate/commit/3f93c6442158a9244958f493d463e0f0b91af606))
+
+
+### Bug Fixes
+
+* link Windows app as GUI subsystem (no console window) ([#59](https://github.com/RichardODonoghue/burnrate/issues/59)) ([f293da3](https://github.com/RichardODonoghue/burnrate/commit/f293da336e4c1278edd52176a33f95794b821207))
+
 ## [0.6.0](https://github.com/RichardODonoghue/burnrate/compare/v0.5.0...v0.6.0) (2026-09-15)
 
 
