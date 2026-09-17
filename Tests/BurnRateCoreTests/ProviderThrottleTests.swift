@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct ProviderThrottleTests {
     private let now = Date()

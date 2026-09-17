@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct UsageComputationTests {
     private func date(_ secondsAgo: Double, from now: Date) -> Date {
