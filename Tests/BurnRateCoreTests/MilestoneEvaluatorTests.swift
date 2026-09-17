@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct MilestoneEvaluatorTests {
     @Test func gridForStep20() {

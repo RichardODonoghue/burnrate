@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct PricingServiceTests {
     private let table: [String: ModelPricing] = [

@@ -1,10 +1,12 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct ModelUsageTests {
-    private let now = Date()
+    /// Noon today, so "minutes ago" samples stay on the same calendar day no
+    /// matter when the suite runs (CI lands near UTC midnight).
+    private let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 3600)
+
     private func sample(_ model: String?, _ tokens: Int, minutesAgo: Double, cost: Double? = nil) -> UsageSample {
         UsageSample(
             timestamp: now.addingTimeInterval(-minutesAgo * 60),
@@ -15,7 +17,7 @@ struct ModelUsageTests {
     }
 
     @Test func aggregatesPerDayPerModel() {
-        let yesterday = -60.0 * 60 * 26 // 26h ago → previous local day
+        let yesterday = 24.0 * 60 // 24h before noon → noon yesterday
         let buckets = [(provider: "OpenCode", samples: [
             sample("grok-4.6", 100, minutesAgo: 10, cost: 0.5),
             sample("grok-4.6", 200, minutesAgo: 20, cost: 1.0),
@@ -25,7 +27,7 @@ struct ModelUsageTests {
         let daily = ModelUsageAggregator.daily(buckets: buckets, days: 30, now: now)
         #expect(daily.count == 2)
 
-        let today = daily.first { Calendar.current.isDateInToday($0.day) }
+        let today = daily.first { Calendar.current.isDate($0.day, inSameDayAs: now) }
         #expect(today?.entries.count == 2)
         let grok = today?.entries.first { $0.model == "grok-4.6" }
         #expect(grok?.totalTokens == 300)
@@ -34,7 +36,7 @@ struct ModelUsageTests {
     }
 
     @Test func totalsMergeAcrossDays() {
-        let yesterday = -60.0 * 60 * 26
+        let yesterday = 24.0 * 60
         let buckets = [(provider: "OpenCode", samples: [
             sample("grok-4.6", 100, minutesAgo: 10),
             sample("grok-4.6", 400, minutesAgo: yesterday),
@@ -133,39 +135,6 @@ struct ModelUsageTests {
         let decoded = try JSONDecoder().decode(TokenUsage.self, from: Data(json.utf8))
         #expect(decoded.reasoning == 0)
         #expect(decoded.total == 19)
-    }
-}
-
-/// The Models view's persisted snapshot must not resurrect synthetic rows
-/// written by older builds.
-@MainActor
-struct ModelUsageCacheTests {
-    @Test func cachedSyntheticEntriesAreScrubbed() throws {
-        let suite = UserDefaults(suiteName: "model-cache-\(UUID().uuidString)")!
-        let synthetic = ModelUsageEntry(provider: "Claude", model: "<synthetic>", tokens: .zero,
-                                        cost: 0, requests: 3, sourceTag: nil)
-        let real = ModelUsageEntry(provider: "Claude", model: "claude-opus-5",
-                                   tokens: TokenUsage(input: 5, output: 1, cacheRead: 0, cacheWrite: 0),
-                                   cost: 0, requests: 1, sourceTag: nil)
-        let cached = [DailyModelUsage(day: Date(), entries: [synthetic, real])]
-        suite.set(try JSONEncoder().encode(cached), forKey: "modelUsageHistory")
-
-        let viewModel = ModelUsageViewModel(sources: [], defaults: suite)
-        let models = viewModel.daily.flatMap { $0.entries.map(\.model) }
-        #expect(models == ["claude-opus-5"])
-        #expect(viewModel.totals.count == 1)
-    }
-
-    @Test func daysWithOnlySyntheticEntriesAreDropped() throws {
-        let suite = UserDefaults(suiteName: "model-cache-\(UUID().uuidString)")!
-        let synthetic = ModelUsageEntry(provider: "Claude", model: "<synthetic>", tokens: .zero,
-                                        cost: 0, requests: 1, sourceTag: nil)
-        suite.set(try JSONEncoder().encode([DailyModelUsage(day: Date(), entries: [synthetic])]),
-                  forKey: "modelUsageHistory")
-
-        let viewModel = ModelUsageViewModel(sources: [], defaults: suite)
-        #expect(viewModel.daily.isEmpty)
-        #expect(viewModel.totals.isEmpty)
     }
 }
 

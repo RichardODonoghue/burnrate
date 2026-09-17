@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct StatusMenuTests {
     private let now = Date(timeIntervalSince1970: 1_000_000)
