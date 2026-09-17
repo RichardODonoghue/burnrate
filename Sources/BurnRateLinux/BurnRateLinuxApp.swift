@@ -327,7 +327,18 @@ private func onSettingsToggle(_ id: Int32, _ checked: Int32, _ context: UnsafeMu
 
 /// GTK calls this on the main thread when a milestone step changes.
 private func onSettingsSpin(_ id: Int32, _ value: Double, _ context: UnsafeMutableRawPointer?) {
-    settings.setMilestoneStep(at: Int(id) - 1000, step: value.rounded())
+    switch id {
+    case 1000..<2000:
+        settings.setMilestoneStep(at: Int(id) - 1000, step: value.rounded())
+    case 2000..<3000:
+        settings.setBurnAlert(at: Int(id) - 2000, drop: value.rounded(), minutes: nil)
+    case 3000..<4000:
+        settings.setBurnAlert(at: Int(id) - 3000, drop: nil, minutes: value.rounded())
+    case 4000..<5000:
+        settings.setCostAlertLimit(at: Int(id) - 4000, limit: value)
+    default:
+        break
+    }
 }
 
 private func showSettings() {
@@ -342,10 +353,21 @@ private func showSettings() {
         checks.append(("Menu-bar widget for \(provider)", Int32(index + 1),
                        values.widgetProviders.contains(provider)))
     }
-    var spins: [(label: String, id: Int32, value: Double)] = []
+
+    var spins: [(label: String, id: Int32, value: Double, minimum: Double, maximum: Double)] = []
     for (index, milestone) in values.milestones.enumerated() {
         spins.append(("\(milestone.provider) \(milestone.windowLabel) — every %",
-                      Int32(1000 + index), milestone.step))
+                      Int32(1000 + index), milestone.step, 5, 50))
+    }
+    for (index, alert) in values.burnAlerts.enumerated() {
+        spins.append(("\(alert.provider) \(alert.windowLabel) burn drop %",
+                      Int32(2000 + index), alert.percentDrop, 5, 95))
+        spins.append(("\(alert.provider) \(alert.windowLabel) burn window (min)",
+                      Int32(3000 + index), Double(alert.minutes), 15, 120))
+    }
+    for (index, alert) in values.costAlerts.enumerated() {
+        spins.append(("\(alert.provider) daily limit $",
+                      Int32(4000 + index), alert.dailyLimitUSD, 1, 1000))
     }
 
     var pointers: [UnsafeMutablePointer<CChar>?] = []
@@ -361,7 +383,7 @@ private func showSettings() {
         let pointer = strdup(row.label)
         pointers.append(pointer)
         spinItems.append(br_spin(label: pointer.map { UnsafePointer($0) }, id: row.id,
-                                 value: row.value, minimum: 5, maximum: 50))
+                                 value: row.value, minimum: row.minimum, maximum: row.maximum))
     }
 
     checkItems.withUnsafeBufferPointer { checkBuffer in
