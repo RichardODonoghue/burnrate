@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/RichardODonoghue/burnrate/compare/v0.7.0...v0.7.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* restore Claude Keychain credentials; make Charts row opt-in ([#60](https://github.com/RichardODonoghue/burnrate/issues/60)) ([0b584d5](https://github.com/RichardODonoghue/burnrate/commit/0b584d56e4dc5178ddc534ed1c7643cc3f1736c7))
+
 ## [0.7.0](https://github.com/RichardODonoghue/burnrate/compare/v0.6.0...v0.7.0) (2026-09-17)
 
 
