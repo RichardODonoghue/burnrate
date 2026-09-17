@@ -51,6 +51,21 @@ final class LinuxSettings: @unchecked Sendable {
         }
     }
 
+    func setBurnAlert(at index: Int, drop: Double?, minutes: Double?) {
+        mutate { values in
+            guard index >= 0, index < values.burnAlerts.count else { return }
+            if let drop { values.burnAlerts[index].percentDrop = drop }
+            if let minutes { values.burnAlerts[index].minutes = Int(minutes.rounded()) }
+        }
+    }
+
+    func setCostAlertLimit(at index: Int, limit: Double) {
+        mutate { values in
+            guard index >= 0, index < values.costAlerts.count else { return }
+            values.costAlerts[index].dailyLimitUSD = limit
+        }
+    }
+
     private func mutate(_ body: (inout Values) -> Void) {
         lock.lock()
         body(&values)
