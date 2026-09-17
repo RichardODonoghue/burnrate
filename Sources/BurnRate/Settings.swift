@@ -57,17 +57,11 @@ final class SettingsStore: ObservableObject {
     }
 
     static var defaultMilestones: [Milestone] {
-        [
-            Milestone(provider: "Claude", windowLabel: "Rolling", step: 20),
-            Milestone(provider: "Claude", windowLabel: "Weekly", step: 20),
-            Milestone(provider: "Codex", windowLabel: "Rolling", step: 20),
-        ]
+        AlertDefaults.milestones
     }
 
     static var defaultBurnAlerts: [BurnAlert] {
-        [
-            BurnAlert(provider: "Claude", windowLabel: "Rolling", percentDrop: 15, minutes: 30),
-        ]
+        AlertDefaults.burnAlerts
     }
 
     /// Insert or replace the rule for a provider+window — duplicates impossible.
