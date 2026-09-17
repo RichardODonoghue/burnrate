@@ -26,6 +26,11 @@ directly to `main`.
   manual `-F`/`-rpath` flags, which the script supplies. Tests use `import Testing`
   (not XCTest — also unavailable without Xcode).
 - Run the app: `swift run` — menu-bar status item appears; `Cmd+C` to stop.
+- **Linux app:** `swift build --product BurnRate` on Linux (GTK4 via `libgtk-4-dev`).
+  `scripts/linux-smoke.sh` builds and smoke-launches it in an Ubuntu container
+  under Xvfb (requires Docker; CI only compiles it). The macOS app target and the
+  Linux target are declared per-OS in `Package.swift`; `BurnRateCore` builds on
+  both.
 - Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.
 - No codegen, migrations, or lint config yet; add commands here as tooling lands.
 
