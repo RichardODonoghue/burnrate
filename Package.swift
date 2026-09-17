@@ -35,6 +35,26 @@ targets.append(.testTarget(
 ))
 #endif
 
+#if os(Linux)
+products.append(.executable(name: "BurnRate", targets: ["BurnRateLinux"]))
+targets.append(.systemLibrary(
+    name: "CGTK",
+    path: "Sources/CGTK",
+    pkgConfig: "gtk4",
+    providers: [.apt(["libgtk-4-dev"])]
+))
+targets.append(.target(
+    name: "CBurnRateGTK",
+    dependencies: ["CGTK"],
+    path: "Sources/CBurnRateGTK"
+))
+targets.append(.executableTarget(
+    name: "BurnRateLinux",
+    dependencies: ["BurnRateCore", "CBurnRateGTK"],
+    path: "Sources/BurnRateLinux"
+))
+#endif
+
 let package = Package(
     name: "BurnRate",
     platforms: [
