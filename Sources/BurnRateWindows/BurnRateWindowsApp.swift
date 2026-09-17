@@ -489,7 +489,8 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
         state.setLastUsage(result.usage)
         if state.mainTray >= 0 {
             setTrayItems(state.mainTray,
-                         model: StatusMenuBuilder.mainMenu(usage: result.usage, updateVersion: nil, isBusy: false))
+                         model: StatusMenuBuilder.mainMenu(usage: result.usage, updateVersion: nil,
+                                                           isBusy: false, includesCharts: true))
         }
         syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)

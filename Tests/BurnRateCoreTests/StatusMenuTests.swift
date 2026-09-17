@@ -34,11 +34,22 @@ struct StatusMenuTests {
             .windowRow(label: "Rolling", detail: "82% · resets in 4h"),
             .separator,
             .action(title: "Usage Dashboard…", action: .openDashboard, isEnabled: true),
-            .action(title: "Charts…", action: .openCharts, isEnabled: true),
             .action(title: "Check for Updates…", action: .checkForUpdates, isEnabled: true),
             .action(title: "Settings…", action: .openSettings, isEnabled: true),
             .action(title: "Quit", action: .quit, isEnabled: true),
         ])
+    }
+
+    @Test func chartsRowIsOptIn() {
+        let withCharts = StatusMenuBuilder.mainMenu(usage: [], updateVersion: nil, isBusy: false,
+                                                    includesCharts: true, now: now)
+        #expect(withCharts.entries.contains { entry in
+            if case .action(_, .openCharts, _) = entry { true } else { false }
+        })
+        let without = StatusMenuBuilder.mainMenu(usage: [], updateVersion: nil, isBusy: false, now: now)
+        #expect(!without.entries.contains { entry in
+            if case .action(_, .openCharts, _) = entry { true } else { false }
+        })
     }
 
     @Test func availableUpdateReplacesCheckAndDisablesWhileBusy() {
