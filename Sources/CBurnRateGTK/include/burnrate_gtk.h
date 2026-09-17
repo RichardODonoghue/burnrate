@@ -45,4 +45,23 @@ void br_settings_show(const char *title,
                       br_checkbox_cb checkbox_callback, br_spin_cb spin_callback,
                       void *ctx);
 
+/// One point on the trend chart: `series` selects the colour, `x` is 0…1
+/// (time), `y` is 0…100 (percent remaining).
+typedef struct {
+    int series;
+    double x;
+    double y;
+} br_trend_point;
+
+/// Shows (or raises) the charts window.
+void br_chart_show(const char *title);
+
+/// Replaces the trend chart. `series_rgb` holds `series_count` × 3 components.
+void br_chart_set_trend(const br_trend_point *points, int point_count,
+                        const double *series_rgb, int series_count);
+
+/// Replaces the ranking bars. Values are 0…1; labels are newline-separated.
+void br_chart_set_bars(const double *values, const double *bar_rgb, int bar_count,
+                       const char *labels);
+
 #endif

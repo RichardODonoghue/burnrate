@@ -22,7 +22,9 @@ private actor LinuxPoller {
         ]
     }
 
-    func snapshot() async -> (text: String, usage: [ProviderUsage], costs: [(provider: String, cost: Double)]) {
+    func snapshot() async -> (text: String, usage: [ProviderUsage],
+                              buckets: [(provider: String, samples: [UsageSample])],
+                              costs: [(provider: String, cost: Double)]) {
         var usage: [ProviderUsage] = []
         for provider in providers {
             if let result = await provider.fetchUsage(capacities: PlanCapacities.byProviderWindow) {
@@ -31,9 +33,11 @@ private actor LinuxPoller {
         }
 
         let todayStart = Calendar.current.startOfDay(for: Date())
+        var buckets: [(provider: String, samples: [UsageSample])] = []
         var costs: [(provider: String, cost: Double)] = []
         for (name, source) in costSources {
             let samples = (try? await source.collectSamples()) ?? []
+            buckets.append((name, samples))
             let spend = samples
                 .filter { $0.timestamp >= todayStart }
                 .reduce(0.0) { $0 + PricingService.shared.cost(of: $1) }
@@ -56,7 +60,7 @@ private actor LinuxPoller {
         let text = lines.isEmpty
             ? "No providers configured.\n\nLog in to a supported CLI, then press Refresh."
             : lines.joined(separator: "\n")
-        return (text, usage, costs)
+        return (text, usage, buckets, costs)
     }
 }
 
@@ -108,6 +112,98 @@ private let settings = LinuxSettings()
 private let notifier = LinuxNotifier(settings: settings)
 private let state = AppState()
 
+/// In-memory remaining-% history for the trend chart (app lifetime).
+private final class HistoryStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samples: [RemainingSample] = []
+    private static let retention: TimeInterval = 7 * 86400
+
+    func append(usage: [ProviderUsage], date: Date) {
+        lock.withLock {
+            for entry in usage {
+                for window in entry.windows {
+                    guard let remaining = window.percentRemaining else { continue }
+                    samples.append(RemainingSample(provider: entry.providerName, label: window.label,
+                                                   date: date, remaining: remaining))
+                }
+            }
+            let cutoff = date.addingTimeInterval(-Self.retention)
+            samples = samples.filter { $0.date >= cutoff }
+        }
+    }
+
+    func snapshot() -> [RemainingSample] { lock.withLock { samples } }
+}
+
+private let history = HistoryStore()
+
+private let modelPalette: [(Double, Double, Double)] = [
+    (0.85, 0.47, 0.34), (0.25, 0.55, 0.95), (0.20, 0.68, 0.44), (0.72, 0.45, 0.85),
+    (0.95, 0.62, 0.24), (0.30, 0.72, 0.78), (0.83, 0.36, 0.55), (0.55, 0.60, 0.35),
+]
+
+private func providerRGB(_ provider: String) -> (Double, Double, Double) {
+    switch provider {
+    case "Claude": (0.85, 0.47, 0.34)
+    case "OpenCode Go", "OpenCode": (0.25, 0.55, 0.95)
+    case "Codex": (0.20, 0.68, 0.44)
+    default: (0.6, 0.6, 0.6)
+    }
+}
+
+/// Pushes the trend and ranking charts from core chart data.
+private func updateCharts(buckets: [(provider: String, samples: [UsageSample])]) {
+    let samples = history.snapshot()
+    let cutoff = TrendChartData.trendCutoff(for: .week, now: Date())
+    let series = TrendChartData.buildTrendSeries(
+        samples: samples, label: "Rolling", providerFilter: nil, cutoff: cutoff)
+
+    if !series.isEmpty {
+        let dates = series.flatMap { $0.samples.map(\.date) }
+        if let minDate = dates.min(), let maxDate = dates.max() {
+            let span = max(maxDate.timeIntervalSince(minDate), 1)
+            var points: [br_trend_point] = []
+            var rgb: [Double] = []
+            for (index, item) in series.enumerated() {
+                let color = providerRGB(item.provider)
+                rgb.append(contentsOf: [color.0, color.1, color.2])
+                for point in item.samples {
+                    let x = max(0, min(1, point.date.timeIntervalSince(minDate) / span))
+                    points.append(br_trend_point(series: Int32(index), x: x, y: point.remaining))
+                }
+            }
+            points.withUnsafeBufferPointer { pointBuffer in
+                rgb.withUnsafeBufferPointer { rgbBuffer in
+                    br_chart_set_trend(pointBuffer.baseAddress, Int32(pointBuffer.count),
+                                       rgbBuffer.baseAddress, Int32(series.count))
+                }
+            }
+        }
+    }
+
+    let totals = Array(ModelUsageAggregator.totals(buckets: buckets).prefix(8))
+    if !totals.isEmpty {
+        let maxTokens = Double(totals.map(\.totalTokens).max() ?? 1)
+        var values: [Double] = []
+        var colors: [Double] = []
+        var labels: [String] = []
+        for entry in totals {
+            let color = modelPalette[abs(entry.displayName.hashValue) % modelPalette.count]
+            values.append(maxTokens > 0 ? Double(entry.totalTokens) / maxTokens : 0)
+            colors.append(contentsOf: [color.0, color.1, color.2])
+            labels.append(entry.displayName)
+        }
+        values.withUnsafeBufferPointer { valueBuffer in
+            colors.withUnsafeBufferPointer { colorBuffer in
+                labels.joined(separator: "\n").withCString { labelPointer in
+                    br_chart_set_bars(valueBuffer.baseAddress, colorBuffer.baseAddress,
+                                      Int32(values.count), labelPointer)
+                }
+            }
+        }
+    }
+}
+
 /// Opens the GitHub releases page (Linux has no in-app updater yet).
 private func openReleases() {
     let process = Process()
@@ -122,6 +218,8 @@ private func handleAction(_ action: StatusMenuAction) {
     switch action {
     case .openDashboard:
         break // the window is already presented on Linux
+    case .openCharts:
+        br_chart_show("BurnRate Charts")
     case .openSettings:
         showSettings()
     case .checkForUpdates, .installUpdate:
@@ -282,11 +380,13 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
     Task.detached {
         let result = await poller.snapshot()
         result.text.withCString { br_ui_post($0) }
+        history.append(usage: result.usage, date: Date())
         state.setLastUsage(result.usage)
         updateMainTray(usage: result.usage)
         syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
         notifier.evaluateCosts(result.costs)
+        updateCharts(buckets: result.buckets)
     }
 }
 
