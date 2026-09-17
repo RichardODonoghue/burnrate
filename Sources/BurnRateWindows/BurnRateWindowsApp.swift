@@ -191,6 +191,7 @@ private final class AppState: @unchecked Sendable {
     private var _trayActions: [Int32: ActionStore] = [:]
     private var _widgetTrays: [String: Int32] = [:]
     private var _lastUsage: [ProviderUsage] = []
+    private var _settingsProviders: [String] = []
 
     var mainTray: Int32 { lock.withLock { _mainTray } }
     func setMainTray(_ value: Int32) { lock.withLock { _mainTray = value } }
@@ -203,6 +204,8 @@ private final class AppState: @unchecked Sendable {
     func removeWidgetTray(_ provider: String) -> Int32? { lock.withLock { _widgetTrays.removeValue(forKey: provider) } }
     func lastUsage() -> [ProviderUsage] { lock.withLock { _lastUsage } }
     func setLastUsage(_ usage: [ProviderUsage]) { lock.withLock { _lastUsage = usage } }
+    var settingsProviders: [String] { lock.withLock { _settingsProviders } }
+    func setSettingsProviders(_ providers: [String]) { lock.withLock { _settingsProviders = providers } }
 }
 
 private final class HistoryStore: @unchecked Sendable {
@@ -246,13 +249,100 @@ private func providerRGB(_ provider: String) -> (Double, Double, Double) {
 
 private func handleAction(_ action: StatusMenuAction) {
     switch action {
-    case .openCharts, .openDashboard, .openSettings, .removeWidget:
+    case .openCharts, .openDashboard, .removeWidget:
         break
+    case .openSettings:
+        showSettings()
     case .checkForUpdates, .installUpdate:
         br_open_url("https://github.com/RichardODonoghue/burnrate/releases")
     case .quit:
         br_win_quit()
     }
+}
+
+/// Settings-dialog callbacks (invoked on the UI thread).
+private func onSettingsToggle(_ id: Int32, _ checked: Int32, _ context: UnsafeMutableRawPointer?) {
+    let enabled = checked != 0
+    if id == 0 {
+        settings.setNotifyOnReset(enabled)
+        return
+    }
+    let providers = state.settingsProviders
+    let index = Int(id) - 1
+    guard index >= 0, index < providers.count else { return }
+    settings.setWidget(providers[index], enabled: enabled)
+    syncWidgetTrays()
+}
+
+private func onSettingsSpin(_ id: Int32, _ value: Double, _ context: UnsafeMutableRawPointer?) {
+    switch id {
+    case 1000..<2000:
+        settings.setMilestoneStep(at: Int(id) - 1000, step: value.rounded())
+    case 2000..<3000:
+        settings.setBurnAlert(at: Int(id) - 2000, drop: value.rounded(), minutes: nil)
+    case 3000..<4000:
+        settings.setBurnAlert(at: Int(id) - 3000, drop: nil, minutes: value.rounded())
+    case 4000..<5000:
+        settings.setCostAlertLimit(at: Int(id) - 4000, limit: value)
+    default:
+        break
+    }
+}
+
+private func showSettings() {
+    let providers = state.lastUsage().map(\.providerName).sorted()
+    state.setSettingsProviders(providers)
+    let values = settings.snapshot
+
+    var checks: [(label: String, id: Int32, checked: Bool)] = [
+        ("Notify when a window resets", 0, values.notifyOnReset),
+    ]
+    for (index, provider) in providers.enumerated() {
+        checks.append(("Menu-bar widget for \(provider)", Int32(index + 1),
+                       values.widgetProviders.contains(provider)))
+    }
+
+    var spins: [(label: String, id: Int32, value: Double, minimum: Double, maximum: Double)] = []
+    for (index, milestone) in values.milestones.enumerated() {
+        spins.append(("\(milestone.provider) \(milestone.windowLabel) — every %",
+                      Int32(1000 + index), milestone.step, 5, 50))
+    }
+    for (index, alert) in values.burnAlerts.enumerated() {
+        spins.append(("\(alert.provider) \(alert.windowLabel) burn drop %",
+                      Int32(2000 + index), alert.percentDrop, 5, 95))
+        spins.append(("\(alert.provider) \(alert.windowLabel) burn window (min)",
+                      Int32(3000 + index), Double(alert.minutes), 15, 120))
+    }
+    for (index, alert) in values.costAlerts.enumerated() {
+        spins.append(("\(alert.provider) daily limit $",
+                      Int32(4000 + index), alert.dailyLimitUSD, 1, 1000))
+    }
+
+    var pointers: [UnsafeMutablePointer<CChar>?] = []
+    var checkItems: [br_checkbox] = []
+    for row in checks {
+        let pointer = strdup(row.label)
+        pointers.append(pointer)
+        checkItems.append(br_checkbox(label: pointer.map { UnsafePointer($0) }, id: row.id,
+                                      checked: row.checked ? 1 : 0))
+    }
+    var spinItems: [br_spin] = []
+    for row in spins {
+        let pointer = strdup(row.label)
+        pointers.append(pointer)
+        spinItems.append(br_spin(label: pointer.map { UnsafePointer($0) }, id: row.id,
+                                 value: row.value, minimum: row.minimum, maximum: row.maximum))
+    }
+
+    checkItems.withUnsafeBufferPointer { checkBuffer in
+        spinItems.withUnsafeBufferPointer { spinBuffer in
+            br_settings_show("BurnRate Settings",
+                             checkBuffer.baseAddress, Int32(checkBuffer.count),
+                             spinBuffer.baseAddress, Int32(spinBuffer.count),
+                             onSettingsToggle, onSettingsSpin, nil)
+        }
+    }
+    for pointer in pointers { free(pointer) }
 }
 
 private func onTrayAction(_ tray: Int32, _ actionID: Int32, _ context: UnsafeMutableRawPointer?) {

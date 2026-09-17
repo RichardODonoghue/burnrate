@@ -50,4 +50,30 @@ void br_chart_set_bars(const double *values, const double *bar_rgb, int count,
                        const char *labels);
 void br_chart_set_daily(const br_bar_segment *segments, int count, int day_count);
 
+/* ---- settings dialog ---------------------------------------------------- */
+
+typedef struct {
+    const char *label;
+    int id;
+    int checked;
+} br_checkbox;
+
+typedef struct {
+    const char *label;
+    int id;
+    double value;
+    double minimum;
+    double maximum;
+} br_spin;
+
+typedef void (*br_checkbox_cb)(int id, int checked, void *ctx);
+typedef void (*br_spin_cb)(int id, double value, void *ctx);
+
+/// Shows (or rebuilds) a settings window with checkboxes and numeric fields.
+void br_settings_show(const char *title,
+                      const br_checkbox *checks, int check_count,
+                      const br_spin *spins, int spin_count,
+                      br_checkbox_cb checkbox_callback, br_spin_cb spin_callback,
+                      void *ctx);
+
 #endif
