@@ -10,7 +10,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "==> swift build -c release --product BurnRate"
-swift build -c release --product BurnRate
+# Link as a GUI subsystem app so launching BurnRate.exe doesn't open a console
+# window (SPM doesn't set the subsystem itself).
+swift build -c release --product BurnRate `
+    -Xlinker /SUBSYSTEM:WINDOWS `
+    -Xlinker /ENTRY:mainCRTStartup
 
 $binary = ".build\release\BurnRate.exe"
 if (-not (Test-Path $binary)) { throw "error: $binary not found" }
