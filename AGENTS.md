@@ -27,10 +27,15 @@ directly to `main`.
   (not XCTest — also unavailable without Xcode).
 - Run the app: `swift run` — menu-bar status item appears; `Cmd+C` to stop.
 - **Linux app:** `swift build --product BurnRate` on Linux (GTK4 via `libgtk-4-dev`).
-  `scripts/linux-smoke.sh` builds and smoke-launches it in an Ubuntu container
-  under Xvfb (requires Docker; CI only compiles it). The macOS app target and the
-  Linux target are declared per-OS in `Package.swift`; `BurnRateCore` builds on
-  both.
+  `scripts/linux-smoke.sh` builds and smoke-runs it in an Ubuntu container under
+  Xvfb (window + tray registration/menu/click; requires Docker). The tray is a
+  hand-rolled StatusNotifierItem + DBusMenu over GIO in `CBurnRateTray` (not
+  libayatana-appindicator — that is GTK3 and cannot share a process with GTK4).
+  Linux alerts go through `notify-send`; settings use `AlertDefaults` (no editor).
+  Package with `scripts/make_linux_app.sh` (tarball + `.desktop` + install script).
+  CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The macOS app
+  target and the Linux target are declared per-OS in `Package.swift`;
+  `BurnRateCore` builds on both.
 - Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.
 - No codegen, migrations, or lint config yet; add commands here as tooling lands.
 

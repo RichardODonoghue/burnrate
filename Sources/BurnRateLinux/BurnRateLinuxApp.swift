@@ -45,6 +45,7 @@ private actor LinuxPoller {
 }
 
 private let poller = LinuxPoller()
+private let notifier = LinuxNotifier()
 
 /// Tray click → action, guarded because D-Bus callbacks arrive on another thread.
 private final class ActionStore: @unchecked Sendable {
@@ -128,6 +129,7 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
         let result = await poller.snapshot()
         result.text.withCString { br_ui_post($0) }
         updateTray(usage: result.usage)
+        notifier.evaluate(result.usage)
     }
 }
 
