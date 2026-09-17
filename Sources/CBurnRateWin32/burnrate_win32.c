@@ -485,3 +485,107 @@ void br_win_post(const char *body) {
 void br_win_quit(void) {
     if (g_hwnd) PostMessage(g_hwnd, WM_CLOSE, 0, 0);
 }
+
+/* ---- settings dialog ---------------------------------------------------- */
+
+static HWND g_settings_hwnd = NULL;
+static br_checkbox_cb g_check_cb = NULL;
+static br_spin_cb g_spin_cb = NULL;
+static void *g_settings_ctx = NULL;
+
+static LRESULT CALLBACK settings_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    switch (message) {
+    case WM_COMMAND: {
+        int id = LOWORD(wparam);
+        int code = HIWORD(wparam);
+        if (code == BN_CLICKED) {
+            HWND control = (HWND)lparam;
+            if (g_check_cb) {
+                int checked = (SendMessageA(control, BM_GETCHECK, 0, 0) == BST_CHECKED) ? 1 : 0;
+                g_check_cb(id, checked, g_settings_ctx);
+            }
+        } else if (code == EN_CHANGE) {
+            if (id < 1000) return 0; /* ignore label/checkbox ids */
+            HWND control = (HWND)lparam;
+            char text[32];
+            GetWindowTextA(control, text, sizeof(text));
+            if (g_spin_cb) g_spin_cb(id, (double)atoi(text), g_settings_ctx);
+        }
+        return 0;
+    }
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        g_settings_hwnd = NULL;
+        return 0;
+    default:
+        return DefWindowProcA(hwnd, message, wparam, lparam);
+    }
+}
+
+void br_settings_show(const char *title,
+                      const br_checkbox *checks, int check_count,
+                      const br_spin *spins, int spin_count,
+                      br_checkbox_cb checkbox_callback, br_spin_cb spin_callback,
+                      void *ctx) {
+    g_check_cb = checkbox_callback;
+    g_spin_cb = spin_callback;
+    g_settings_ctx = ctx;
+
+    static BOOL registered = FALSE;
+    if (!registered) {
+        WNDCLASSA wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = settings_proc;
+        wc.hInstance = GetModuleHandleA(NULL);
+        wc.lpszClassName = "BurnRateSettings";
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        RegisterClassA(&wc);
+        registered = TRUE;
+    }
+
+    int height = 50 + check_count * 30 + spin_count * 32 + 20;
+    if (!g_settings_hwnd) {
+        g_settings_hwnd = CreateWindowA("BurnRateSettings", title ? title : "BurnRate Settings",
+                                        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                                        CW_USEDEFAULT, CW_USEDEFAULT, 380, height,
+                                        NULL, NULL, GetModuleHandleA(NULL), NULL);
+    } else {
+        /* Rebuild: destroy existing children. */
+        HWND child = GetWindow(g_settings_hwnd, GW_CHILD);
+        while (child) {
+            HWND next = GetWindow(child, GW_HWNDNEXT);
+            DestroyWindow(child);
+            child = next;
+        }
+        SetWindowPos(g_settings_hwnd, NULL, 0, 0, 380, height, SWP_NOMOVE | SWP_NOZORDER);
+    }
+    if (!g_settings_hwnd) return;
+
+    int y = 12;
+    for (int i = 0; i < check_count; i++) {
+        HWND box = CreateWindowA("BUTTON", checks[i].label ? checks[i].label : "",
+                                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                                 12, y, 340, 24, g_settings_hwnd,
+                                 (HMENU)(INT_PTR)checks[i].id, NULL, NULL);
+        SendMessageA(box, BM_SETCHECK, checks[i].checked ? BST_CHECKED : BST_UNCHECKED, 0);
+        y += 30;
+    }
+    for (int i = 0; i < spin_count; i++) {
+        CreateWindowA("STATIC", spins[i].label ? spins[i].label : "",
+                      WS_CHILD | WS_VISIBLE | SS_LEFT,
+                      12, y + 3, 250, 22, g_settings_hwnd, NULL, NULL, NULL);
+        char value[32];
+        wsprintfA(value, "%d", (int)(spins[i].value + 0.5));
+        HWND edit = CreateWindowA("EDIT", value,
+                                  WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_RIGHT,
+                                  270, y, 80, 24, g_settings_hwnd,
+                                  (HMENU)(INT_PTR)spins[i].id, NULL, NULL);
+        (void)edit;
+        y += 32;
+    }
+    ShowWindow(g_settings_hwnd, SW_SHOWNORMAL);
+    SetForegroundWindow(g_settings_hwnd);
+}
