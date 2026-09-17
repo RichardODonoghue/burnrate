@@ -214,6 +214,16 @@ struct ModelsView: View {
         .frame(minWidth: 700, minHeight: 480)
     }
 
+    /// Binding that ignores writes of the current value. Charts' selection
+    /// callbacks can fire repeatedly with the same value (e.g. while scrolling
+    /// with the pointer over a chart), and each write re-renders the page.
+    private func distinct<T: Equatable>(_ binding: Binding<T>) -> Binding<T> {
+        Binding(
+            get: { binding.wrappedValue },
+            set: { if $0 != binding.wrappedValue { binding.wrappedValue = $0 } }
+        )
+    }
+
     // MARK: Data selection
 
     private var providerNames: [String] {
@@ -565,7 +575,7 @@ struct ModelsView: View {
                             .foregroundStyle(.secondary.opacity(0.4))
                     }
                 }
-                .chartXSelection(value: $selectedDate)
+                .chartXSelection(value: distinct($selectedDate))
                 // Tooltip as an overlay, not an annotation: an annotation
                 // re-lays-out the chart (pushing the plot sideways) and
                 // clips past the plot's top edge.
@@ -666,7 +676,7 @@ struct ModelsView: View {
                     }
                 }
             }
-            .chartXSelection(value: $selectedDay)
+            .chartXSelection(value: distinct($selectedDay))
             .chartOverlay { proxy in
                 GeometryReader { geometry in
                     if let selectedDay,
@@ -769,11 +779,16 @@ struct ModelsView: View {
                         .fill(.clear)
                         .contentShape(Rectangle())
                         .onContinuousHover { phase in
+                            // Only write when the hovered model actually
+                            // changes: scrolling moves content under a
+                            // stationary cursor, so writing on every mouse
+                            // event re-renders the whole page each frame.
                             switch phase {
                             case .active(let location):
-                                selectedModel = proxy.value(atY: location.y, as: String.self)
+                                let model = proxy.value(atY: location.y, as: String.self)
+                                if model != selectedModel { selectedModel = model }
                             case .ended:
-                                selectedModel = nil
+                                if selectedModel != nil { selectedModel = nil }
                             }
                         }
                     if let selectedModel,
