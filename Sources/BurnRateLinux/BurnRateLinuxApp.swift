@@ -60,7 +60,14 @@ private actor LinuxPoller {
         let text = lines.isEmpty
             ? "No providers configured.\n\nLog in to a supported CLI, then press Refresh."
             : lines.joined(separator: "\n")
-        return (text, usage, buckets, costs)
+
+        var modelLines: [String] = []
+        let totals = ModelUsageAggregator.totals(buckets: buckets)
+        for entry in totals.prefix(10) {
+            modelLines.append("    \(entry.displayName): \(TokenFormat.format(entry.totalTokens)) tokens · \(entry.requests) req")
+        }
+        let modelText = modelLines.isEmpty ? "" : "\nModels (30d)\n" + modelLines.joined(separator: "\n")
+        return (text + modelText, usage, buckets, costs)
     }
 }
 
@@ -93,7 +100,7 @@ private final class AppState: @unchecked Sendable {
 
     func actionStore(_ tray: Int32) -> ActionStore? { lock.withLock { _trayActions[tray] } }
     func setActionStore(_ store: ActionStore, for tray: Int32) { lock.withLock { _trayActions[tray] = store } }
-    func removeActionStore(_ tray: Int32) { lock.withLock { _trayActions.removeValue(forKey: tray) } }
+    func removeActionStore(_ tray: Int32) { lock.withLock { _ = _trayActions.removeValue(forKey: tray) } }
 
     func widgetTrays() -> [String: Int32] { lock.withLock { _widgetTrays } }
     func widgetTray(_ provider: String) -> Int32? { lock.withLock { _widgetTrays[provider] } }
@@ -200,6 +207,22 @@ private func updateCharts(buckets: [(provider: String, samples: [UsageSample])])
                                       Int32(values.count), labelPointer)
                 }
             }
+        }
+    }
+
+    let daily = ModelUsageAggregator.daily(buckets: buckets, days: 14)
+    if !daily.isEmpty {
+        var segments: [br_bar_segment] = []
+        for (dayIndex, day) in daily.enumerated() {
+            for entry in day.entries {
+                let color = modelPalette[abs(entry.displayName.hashValue) % modelPalette.count]
+                segments.append(br_bar_segment(day: Int32(dayIndex),
+                                               value: Double(entry.totalTokens),
+                                               red: color.0, green: color.1, blue: color.2))
+            }
+        }
+        segments.withUnsafeBufferPointer { buffer in
+            br_chart_set_daily(buffer.baseAddress, Int32(segments.count), Int32(daily.count))
         }
     }
 }

@@ -38,9 +38,10 @@ directly to `main`.
   reset notifications, milestone step spinning). The updater opens the releases
   page.
   Package with `scripts/make_linux_app.sh` (tarball + `.deb` + `.desktop` + install
-  script). The **Charts…** menu item opens a Cairo-rendered window (remaining-%
-  trend lines + top-model ranking bars) fed from `TrendChartData`/`ModelUsage`.
-  CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The
+  script). The **Charts…** menu item opens a Cairo-rendered window
+  (remaining-% trend lines + top-model ranking bars + daily stacked usage) fed
+  from `TrendChartData`/`ModelUsage`, and the dashboard text lists per-model
+  totals. CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The
   macOS app target and the Linux target are declared per-OS in `Package.swift`;
   `BurnRateCore` builds on both.
 - Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.

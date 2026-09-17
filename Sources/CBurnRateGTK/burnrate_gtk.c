@@ -194,6 +194,7 @@ void br_settings_show(const char *title,
 static GtkWidget *g_chart_window = NULL;
 static GtkWidget *g_trend_area = NULL;
 static GtkWidget *g_bars_area = NULL;
+static GtkWidget *g_daily_area = NULL;
 
 static br_trend_point *g_trend_points = NULL;
 static int g_trend_count = 0;
@@ -204,6 +205,10 @@ static double *g_bar_values = NULL;
 static double *g_bar_rgb = NULL;
 static int g_bar_count = 0;
 static char *g_bar_labels = NULL;
+
+static br_bar_segment *g_daily = NULL;
+static int g_daily_count = 0;
+static int g_daily_days = 0;
 
 static void set_source_rgb(cairo_t *cr, const double *rgb, double alpha) {
     cairo_set_source_rgba(cr, rgb[0], rgb[1], rgb[2], alpha);
@@ -291,6 +296,49 @@ static void draw_bars(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
     }
 }
 
+static void draw_daily(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
+    (void)data;
+    GdkRGBA fg;
+    gtk_widget_get_color(GTK_WIDGET(area), &fg);
+    if (g_daily_count <= 0 || g_daily_days <= 0) return;
+
+    const double left = 38, right = 8, top = 8, bottom = 14;
+    double w = width - left - right;
+    double h = height - top - bottom;
+    if (w <= 1 || h <= 1) return;
+
+    // Max total per day for scaling.
+    double max_total = 1;
+    for (int day = 0; day < g_daily_days; day++) {
+        double total = 0;
+        for (int i = 0; i < g_daily_count; i++) {
+            if (g_daily[i].day == day) total += g_daily[i].value;
+        }
+        if (total > max_total) max_total = total;
+    }
+
+    double column = w / g_daily_days;
+    double bar_w = column * 0.7;
+    for (int day = 0; day < g_daily_days; day++) {
+        double x = left + column * day + (column - bar_w) / 2;
+        double y = top + h;
+        for (int i = 0; i < g_daily_count; i++) {
+            if (g_daily[i].day != day) continue;
+            double bh = h * (g_daily[i].value / max_total);
+            y -= bh;
+            cairo_set_source_rgba(cr, g_daily[i].red, g_daily[i].green, g_daily[i].blue, 0.9);
+            cairo_rectangle(cr, x, y, bar_w, bh);
+            cairo_fill(cr);
+        }
+    }
+
+    cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, 0.5);
+    cairo_set_line_width(cr, 1);
+    cairo_move_to(cr, left, top + h);
+    cairo_line_to(cr, left + w, top + h);
+    cairo_stroke(cr);
+}
+
 void br_chart_show(const char *title) {
     if (!g_chart_window) {
         g_chart_window = gtk_window_new();
@@ -311,6 +359,11 @@ void br_chart_show(const char *title) {
         gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(g_bars_area), 200);
         gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(g_bars_area), draw_bars, NULL, NULL);
         gtk_box_append(GTK_BOX(box), g_bars_area);
+
+        g_daily_area = gtk_drawing_area_new();
+        gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(g_daily_area), 180);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(g_daily_area), draw_daily, NULL, NULL);
+        gtk_box_append(GTK_BOX(box), g_daily_area);
 
         gtk_window_set_child(GTK_WINDOW(g_chart_window), box);
     }
@@ -354,4 +407,17 @@ void br_chart_set_bars(const double *values, const double *bar_rgb, int bar_coun
     }
     if (labels) g_bar_labels = g_strdup(labels);
     if (g_bars_area) gtk_widget_queue_draw(g_bars_area);
+}
+
+void br_chart_set_daily(const br_bar_segment *segments, int segment_count, int day_count) {
+    g_free(g_daily);
+    g_daily = NULL;
+    g_daily_count = 0;
+    g_daily_days = day_count;
+    if (segment_count > 0) {
+        g_daily = g_new0(br_bar_segment, segment_count);
+        memcpy(g_daily, segments, sizeof(br_bar_segment) * segment_count);
+        g_daily_count = segment_count;
+    }
+    if (g_daily_area) gtk_widget_queue_draw(g_daily_area);
 }
