@@ -2,14 +2,13 @@
 
 Track your AI plan subscriptions from the macOS menu bar — **Anthropic Claude**, **OpenCode Go**, and **OpenAI Codex**.
 
-Live % remaining and reset times for every usage window (5-hour, weekly, monthly, model-scoped like Fable). Claude and OpenCode Go are read straight from each vendor's own quota API using the credentials their CLIs already stored on your machine; Codex is measured from its local session logs against a capacity you calibrate. Nothing to configure, no API keys to paste, no telemetry — everything stays local.
+Live % remaining and reset times for every usage window (5-hour, weekly, monthly, model-scoped like Fable). Claude and OpenCode Go are read straight from each vendor's own quota API using the credentials their CLIs already stored on your machine; Codex is measured from its local session logs against a built-in capacity. Nothing to configure, no API keys to paste, no telemetry — everything stays local.
 
 ## Features
 
 - **Menu bar dropdown** — per-provider usage: % remaining, reset times, plan tier (e.g. "Team 5x")
 - **Vendor-authoritative data** — the same numbers the vendors' own dashboards show
 - **Usage by model** — dashboard with daily stacked bars, model ranking, input/output/cache breakdowns and remaining-% trend lines (Swift Charts)
-- **Plan capacities** — calibrate the token capacity per window for log-based providers (Codex) so their % matches the vendor's usage page
 - **Milestone notifications** — desktop alerts each time a window drops past another increment you choose (every 10%, 20%…)
 - **Burn-rate alerts** — detect usage spikes (fast % drops within a trailing window)
 - **Cost alerts** — daily spend caps (OpenCode reports vendor cost; others use LiteLLM list-price estimates)
@@ -56,7 +55,7 @@ the bundle's `CFBundleShortVersionString`.
 BurnRate reads two kinds of data, no auth flows of its own:
 
 1. **Vendor quota APIs** — for usage % and reset times, reusing the OAuth tokens / API keys that `claude` and `opencode` already saved when you logged in (macOS Keychain or dotfiles). Claude's plan tier (e.g. "Team 5x") comes from the same credential.
-2. **Local session logs** — for token statistics, parsed from `~/.claude/projects/`, `~/.codex/sessions/`, and OpenCode's SQLite store. Codex has no quota API here, so its % is computed from these logs against the per-window capacity you set in Settings → Notifications → "Plan capacities" (weighted tokens: cache reads count 10%, writes 125%).
+2. **Local session logs** — for token statistics, parsed from `~/.claude/projects/`, `~/.codex/sessions/`, and OpenCode's SQLite store. Codex has no quota API here, so its % is computed from these logs against a built-in capacity (weighted tokens: cache reads count 10%, writes 125%).
 
 > **Note:** the quota endpoints are undocumented vendor APIs. They work today but may change or go away without notice.
 
