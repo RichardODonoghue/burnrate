@@ -23,11 +23,26 @@ typedef struct {
     int checked;
 } br_checkbox;
 
+/// One numeric row for the settings window (e.g. a milestone step).
+typedef struct {
+    const char *label;
+    int id;
+    double value;
+    double minimum;
+    double maximum;
+} br_spin;
+
 /// Invoked on the GTK main thread when a checkbox is toggled.
 typedef void (*br_checkbox_cb)(int id, int checked, void *ctx);
 
-/// Shows (or rebuilds) the settings window with the given checkboxes.
-void br_settings_show(const char *title, const br_checkbox *items, int count,
-                      br_checkbox_cb callback, void *ctx);
+/// Invoked on the GTK main thread when a numeric row changes.
+typedef void (*br_spin_cb)(int id, double value, void *ctx);
+
+/// Shows (or rebuilds) the settings window with the given rows.
+void br_settings_show(const char *title,
+                      const br_checkbox *checks, int check_count,
+                      const br_spin *spins, int spin_count,
+                      br_checkbox_cb checkbox_callback, br_spin_cb spin_callback,
+                      void *ctx);
 
 #endif

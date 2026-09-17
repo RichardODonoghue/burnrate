@@ -7,6 +7,7 @@ import Glibc
 /// Fetches usage from every configured provider.
 private actor LinuxPoller {
     private let providers: [any UsageProvider]
+    private let costSources: [(name: String, source: any UsageSource)]
 
     init() {
         self.providers = [
@@ -14,14 +15,29 @@ private actor LinuxPoller {
             OpenCodeGoUsageAPIProvider(),
             LocalUsageProvider(source: CodexUsageSource()),
         ]
+        self.costSources = [
+            ("Claude", ClaudeUsageSource()),
+            ("OpenCode", OpenCodeUsageSource()),
+            ("Codex", CodexUsageSource()),
+        ]
     }
 
-    func snapshot() async -> (text: String, usage: [ProviderUsage]) {
+    func snapshot() async -> (text: String, usage: [ProviderUsage], costs: [(provider: String, cost: Double)]) {
         var usage: [ProviderUsage] = []
         for provider in providers {
             if let result = await provider.fetchUsage(capacities: PlanCapacities.byProviderWindow) {
                 usage.append(result)
             }
+        }
+
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        var costs: [(provider: String, cost: Double)] = []
+        for (name, source) in costSources {
+            let samples = (try? await source.collectSamples()) ?? []
+            let spend = samples
+                .filter { $0.timestamp >= todayStart }
+                .reduce(0.0) { $0 + PricingService.shared.cost(of: $1) }
+            costs.append((name, spend))
         }
 
         var lines: [String] = []
@@ -40,7 +56,7 @@ private actor LinuxPoller {
         let text = lines.isEmpty
             ? "No providers configured.\n\nLog in to a supported CLI, then press Refresh."
             : lines.joined(separator: "\n")
-        return (text, usage)
+        return (text, usage, costs)
     }
 }
 
@@ -211,28 +227,52 @@ private func onSettingsToggle(_ id: Int32, _ checked: Int32, _ context: UnsafeMu
     syncWidgetTrays()
 }
 
+/// GTK calls this on the main thread when a milestone step changes.
+private func onSettingsSpin(_ id: Int32, _ value: Double, _ context: UnsafeMutableRawPointer?) {
+    settings.setMilestoneStep(at: Int(id) - 1000, step: value.rounded())
+}
+
 private func showSettings() {
     let providers = state.lastUsage().map(\.providerName).sorted()
     state.setSettingsProviders(providers)
     let values = settings.snapshot
 
-    var rows: [(label: String, id: Int32, checked: Bool)] = [
+    var checks: [(label: String, id: Int32, checked: Bool)] = [
         ("Notify when a window resets", 0, values.notifyOnReset),
     ]
     for (index, provider) in providers.enumerated() {
-        rows.append(("Menu-bar widget for \(provider)", Int32(index + 1),
-                     values.widgetProviders.contains(provider)))
+        checks.append(("Menu-bar widget for \(provider)", Int32(index + 1),
+                       values.widgetProviders.contains(provider)))
+    }
+    var spins: [(label: String, id: Int32, value: Double)] = []
+    for (index, milestone) in values.milestones.enumerated() {
+        spins.append(("\(milestone.provider) \(milestone.windowLabel) — every %",
+                      Int32(1000 + index), milestone.step))
     }
 
     var pointers: [UnsafeMutablePointer<CChar>?] = []
-    var items: [br_checkbox] = []
-    for row in rows {
+    var checkItems: [br_checkbox] = []
+    for row in checks {
         let pointer = strdup(row.label)
         pointers.append(pointer)
-        items.append(br_checkbox(label: pointer.map { UnsafePointer($0) }, id: row.id, checked: row.checked ? 1 : 0))
+        checkItems.append(br_checkbox(label: pointer.map { UnsafePointer($0) }, id: row.id,
+                                      checked: row.checked ? 1 : 0))
     }
-    items.withUnsafeBufferPointer { buffer in
-        br_settings_show("BurnRate Settings", buffer.baseAddress, Int32(buffer.count), onSettingsToggle, nil)
+    var spinItems: [br_spin] = []
+    for row in spins {
+        let pointer = strdup(row.label)
+        pointers.append(pointer)
+        spinItems.append(br_spin(label: pointer.map { UnsafePointer($0) }, id: row.id,
+                                 value: row.value, minimum: 5, maximum: 50))
+    }
+
+    checkItems.withUnsafeBufferPointer { checkBuffer in
+        spinItems.withUnsafeBufferPointer { spinBuffer in
+            br_settings_show("BurnRate Settings",
+                             checkBuffer.baseAddress, Int32(checkBuffer.count),
+                             spinBuffer.baseAddress, Int32(spinBuffer.count),
+                             onSettingsToggle, onSettingsSpin, nil)
+        }
     }
     for pointer in pointers { free(pointer) }
 }
@@ -246,6 +286,7 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
         updateMainTray(usage: result.usage)
         syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
+        notifier.evaluateCosts(result.costs)
     }
 }
 

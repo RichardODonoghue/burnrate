@@ -15,6 +15,7 @@ final class LinuxNotifier: @unchecked Sendable {
     private var lastResetsAt: [String: Date] = [:]
     private var burnCooldown: [String: Date] = [:]
     private var recent: [String: Date] = [:]
+    private var costFired: Set<String> = []
 
     private static let historyRetention: TimeInterval = 6 * 3600
     private static let burnCooldownInterval: TimeInterval = 1800
@@ -66,6 +67,23 @@ final class LinuxNotifier: @unchecked Sendable {
                 evaluateBurn(provider: provider.providerName, window: window, now: now,
                              alerts: values.burnAlerts)
             }
+        }
+    }
+
+    func evaluateCosts(_ costs: [(provider: String, cost: Double)], now: Date = Date()) {
+        let values = settings.snapshot
+        let dayKey = String(Calendar.current.startOfDay(for: now).timeIntervalSince1970)
+        lock.lock()
+        defer { lock.unlock() }
+        for alert in values.costAlerts {
+            let key = "\(alert.provider)|\(dayKey)"
+            guard !costFired.contains(key),
+                  let spend = costs.first(where: { $0.provider == alert.provider })?.cost,
+                  spend >= alert.dailyLimitUSD
+            else { continue }
+            costFired.insert(key)
+            send(title: "\(alert.provider) daily spend",
+                 body: String(format: "$%.2f spent today (limit $%.2f).", spend, alert.dailyLimitUSD))
         }
     }
 

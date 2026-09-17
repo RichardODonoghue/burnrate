@@ -119,6 +119,7 @@ void br_ui_quit(void) {
 static GtkWidget *g_settings_window = NULL;
 static GtkWidget *g_settings_box = NULL;
 static br_checkbox_cb g_settings_cb = NULL;
+static br_spin_cb g_spin_cb = NULL;
 static void *g_settings_ctx = NULL;
 
 static void on_checkbox_toggled(GtkCheckButton *button, gpointer data) {
@@ -128,15 +129,26 @@ static void on_checkbox_toggled(GtkCheckButton *button, gpointer data) {
     }
 }
 
-void br_settings_show(const char *title, const br_checkbox *items, int count,
-                      br_checkbox_cb callback, void *ctx) {
-    g_settings_cb = callback;
+static void on_spin_changed(GtkSpinButton *spin, gpointer data) {
+    int id = GPOINTER_TO_INT(data);
+    if (g_spin_cb) {
+        g_spin_cb(id, gtk_spin_button_get_value(spin), g_settings_ctx);
+    }
+}
+
+void br_settings_show(const char *title,
+                      const br_checkbox *checks, int check_count,
+                      const br_spin *spins, int spin_count,
+                      br_checkbox_cb checkbox_callback, br_spin_cb spin_callback,
+                      void *ctx) {
+    g_settings_cb = checkbox_callback;
+    g_spin_cb = spin_callback;
     g_settings_ctx = ctx;
 
     if (!g_settings_window) {
         g_settings_window = gtk_window_new();
         gtk_window_set_title(GTK_WINDOW(g_settings_window), title ? title : "Settings");
-        gtk_window_set_default_size(GTK_WINDOW(g_settings_window), 360, 320);
+        gtk_window_set_default_size(GTK_WINDOW(g_settings_window), 380, 420);
         g_settings_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
         gtk_widget_set_margin_top(g_settings_box, 14);
         gtk_widget_set_margin_bottom(g_settings_box, 14);
@@ -152,11 +164,25 @@ void br_settings_show(const char *title, const br_checkbox *items, int count,
         }
     }
 
-    for (int i = 0; i < count; i++) {
-        GtkWidget *check = gtk_check_button_new_with_label(items[i].label ? items[i].label : "");
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), items[i].checked ? TRUE : FALSE);
-        g_signal_connect(check, "toggled", G_CALLBACK(on_checkbox_toggled), GINT_TO_POINTER(items[i].id));
+    for (int i = 0; i < check_count; i++) {
+        GtkWidget *check = gtk_check_button_new_with_label(checks[i].label ? checks[i].label : "");
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), checks[i].checked ? TRUE : FALSE);
+        g_signal_connect(check, "toggled", G_CALLBACK(on_checkbox_toggled), GINT_TO_POINTER(checks[i].id));
         gtk_box_append(GTK_BOX(g_settings_box), check);
     }
+
+    for (int i = 0; i < spin_count; i++) {
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *label = gtk_label_new(spins[i].label ? spins[i].label : "");
+        gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+        gtk_widget_set_hexpand(label, TRUE);
+        gtk_box_append(GTK_BOX(row), label);
+        GtkWidget *spin = gtk_spin_button_new_with_range(spins[i].minimum, spins[i].maximum, 1);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), spins[i].value);
+        g_signal_connect(spin, "value-changed", G_CALLBACK(on_spin_changed), GINT_TO_POINTER(spins[i].id));
+        gtk_box_append(GTK_BOX(row), spin);
+        gtk_box_append(GTK_BOX(g_settings_box), row);
+    }
+
     gtk_window_present(GTK_WINDOW(g_settings_window));
 }
