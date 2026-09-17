@@ -156,7 +156,7 @@ struct ModelsView: View {
         case tokens = "Tokens", cost = "Cost"
         var id: String { rawValue }
     }
-    @State private var range: ChartRange = .week
+    @State private var range: ChartRange = .month
     @State private var metric: Metric = .tokens
     @State private var providerFilter: String?
     @State private var trendWindow: String = "Rolling"
@@ -704,8 +704,20 @@ struct ModelsView: View {
             if !legendModels.isEmpty {
                 modelLegend(legendModels)
             }
+            if !providersWithoutRangeData.isEmpty {
+                Text("No usage from \(providersWithoutRangeData.joined(separator: ", ")) in this range.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             }
         }
+    }
+
+    /// Providers with data overall but none in the selected range — the charts
+    /// shouldn't look as if a provider vanished.
+    private var providersWithoutRangeData: [String] {
+        let inRange = Set(filteredRangeDaily.flatMap { $0.entries.map(\.provider) })
+        return providerNames.filter { !inRange.contains($0) }
     }
 
     /// Wrapping legend for the daily chart: fixed-width columns, middle
