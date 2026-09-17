@@ -27,3 +27,6 @@ jobs:
         run: |
           swift build --target BurnRateCore
           swift test
+
+      - name: Build the Windows app
+        run: swift build --product BurnRate

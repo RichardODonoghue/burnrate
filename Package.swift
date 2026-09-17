@@ -66,6 +66,24 @@ targets.append(.executableTarget(
 ))
 #endif
 
+#if os(Windows)
+products.append(.executable(name: "BurnRate", targets: ["BurnRateWindows"]))
+targets.append(.target(
+    name: "CBurnRateWin32",
+    path: "Sources/CBurnRateWin32",
+    linkerSettings: [
+        .linkedLibrary("user32"),
+        .linkedLibrary("shell32"),
+        .linkedLibrary("gdi32"),
+    ]
+))
+targets.append(.executableTarget(
+    name: "BurnRateWindows",
+    dependencies: ["BurnRateCore", "CBurnRateWin32"],
+    path: "Sources/BurnRateWindows"
+))
+#endif
+
 let package = Package(
     name: "BurnRate",
     platforms: [
