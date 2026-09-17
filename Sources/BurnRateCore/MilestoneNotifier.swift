@@ -1,11 +1,10 @@
-import BurnRateCore
 import Foundation
 
 /// Evaluates milestones and burn-rate alerts after each poll, posting
 /// desktop notifications.
 @MainActor
-final class MilestoneNotifier {
-    private let settingsStore: SettingsStore
+public final class MilestoneNotifier {
+    private let settingsStore: any AlertSettings
     private let presenter: any NotificationPresenting
     /// Last observed remaining % per window id, used to detect threshold crossings.
     private var lastRemaining: [String: Double] = [:]
@@ -22,12 +21,12 @@ final class MilestoneNotifier {
     /// next evaluation, which only establishes new baselines.
     private var pendingAccountSwitch = false
     /// Recently sent notification titles (diagnostics + tests).
-    private(set) var sentTitles: [String] = []
+    public private(set) var sentTitles: [String] = []
     /// Recently sent notifications (title|body → time), to suppress duplicates.
     private var recentSends: [String: Date] = [:]
     private let defaults: UserDefaults
 
-    nonisolated static let pollInterval: TimeInterval = 300
+    public nonisolated static let pollInterval: TimeInterval = 300
     /// History older than this can't affect any alert (largest window + slack).
     nonisolated static let historyRetention: TimeInterval = 6 * 3600
     nonisolated static let burnCooldownInterval: TimeInterval = 1800
@@ -70,10 +69,10 @@ final class MilestoneNotifier {
         }
     }
 
-    init(
-        settingsStore: SettingsStore,
+    public init(
+        settingsStore: any AlertSettings,
         defaults: UserDefaults = .standard,
-        presenter: any NotificationPresenting = UserNotificationPresenter()
+        presenter: any NotificationPresenting = LoggingNotificationPresenter()
     ) {
         self.settingsStore = settingsStore
         self.defaults = defaults
@@ -102,7 +101,7 @@ final class MilestoneNotifier {
         }
     }
 
-    func evaluate(usage: [ProviderUsage]) {
+    public func evaluate(usage: [ProviderUsage]) {
         let now = Date()
 
         // Account switch: rebase instead of alerting. The new account's
@@ -186,7 +185,7 @@ final class MilestoneNotifier {
     /// account: burn history and cooldowns are discarded, the next evaluation
     /// only records baselines (no comparisons across accounts), and the user
     /// is told why the dashboard shows a discontinuity.
-    func accountChanged() {
+    public func accountChanged() {
         history.removeAll()
         burnCooldown.removeAll()
         pendingAccountSwitch = true
@@ -198,7 +197,7 @@ final class MilestoneNotifier {
 
     /// Daily local-log spend per provider vs configured cost alerts.
     /// Fires at most once per provider per day.
-    func evaluateCosts(_ costs: [(provider: String, cost: Double)], date: Date = Date()) {
+    public func evaluateCosts(_ costs: [(provider: String, cost: Double)], date: Date = Date()) {
         let dayKey = String(Calendar.current.startOfDay(for: date).timeIntervalSince1970)
         for alert in settingsStore.costAlerts {
             let firedKey = "\(alert.provider)|\(dayKey)"

@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 /// Fake SQLite seam: returns one OpenCode row without spawning a process.
 private struct StubSQLiteRunner: SQLiteQuerying {

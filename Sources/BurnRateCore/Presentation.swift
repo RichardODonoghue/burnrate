@@ -29,6 +29,32 @@ public protocol SystemEventObserving {
     func onWake(_ handler: @escaping @MainActor @Sendable () -> Void)
 }
 
+/// The read-only settings surface the alert notifier needs. The macOS
+/// `SettingsStore` (Combine) conforms, as would any other platform's store.
+@MainActor
+public protocol AlertSettings {
+    var milestones: [Milestone] { get }
+    var burnAlerts: [BurnAlert] { get }
+    var costAlerts: [CostAlert] { get }
+    var notifyOnReset: Bool { get }
+}
+
+/// `NotificationPresenting` that only logs. Default where there is no OS
+/// notification backend (tests, `swift run`, a platform still to come).
+@MainActor
+public struct LoggingNotificationPresenter: NotificationPresenting {
+    public init() {}
+
+    public func authorizationStatus() async -> NotificationAuthorization { .unknown }
+
+    @discardableResult
+    public func requestAuthorization() async -> Bool { false }
+
+    public func present(title: String, body: String) {
+        NSLog("%@", "[milestone] \(title): \(body)")
+    }
+}
+
 /// Platform-neutral updater state for menus and settings UI.
 public struct UpdateState: Sendable, Equatable {
     /// Version string of an available update, nil when up to date.

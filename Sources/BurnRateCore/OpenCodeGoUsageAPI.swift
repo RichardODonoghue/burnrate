@@ -1,4 +1,6 @@
-import BurnRateCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Foundation
 
 /// OpenCode Go usage from OpenCode's own quota endpoint — the same data the
@@ -11,10 +13,10 @@ import Foundation
 /// Response: {"usage": {"rolling": {"status": "ok", "percent": 2,
 ///           "resetsAt": "...Z"}, "weekly": {...}, "monthly": {...}}}
 /// `percent` is percent USED (0–100).
-actor OpenCodeGoUsageAPIProvider: UsageProvider {
-    nonisolated let name = "OpenCode"
+public actor OpenCodeGoUsageAPIProvider: UsageProvider {
+    public nonisolated let name = "OpenCode"
 
-    nonisolated static let endpoint = URL(string: "https://opencode.ai/zen/go/v1/usage")!
+    public nonisolated static let endpoint = URL(string: "https://opencode.ai/zen/go/v1/usage")!
     nonisolated static let minInterval: TimeInterval = 60
     nonisolated static let backoff: TimeInterval = 300
 
@@ -22,12 +24,12 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
 
     private let authURL: URL
 
-    init(authURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
+    public init(authURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
         self.authURL = authURL
             ?? paths.homeDirectory.appendingPathComponent(".local/share/opencode/auth.json")
     }
 
-    func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
+    public func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
         let now = Date()
         guard cache.shouldFetch(now: now) else {
             return cache.windows.map { ProviderUsage(providerName: name, plan: "Go", windows: $0) }
@@ -43,7 +45,7 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
         }
     }
 
-    func invalidateCache() {
+    public func invalidateCache() {
         cache.invalidate()
     }
 
@@ -61,7 +63,7 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
     }
 
     /// API key from OpenCode's auth.json (written by `/connect`).
-    nonisolated static func readAPIKey(at url: URL) -> String? {
+    public nonisolated static func readAPIKey(at url: URL) -> String? {
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let goEntry = obj["opencode-go"] as? [String: Any]
@@ -71,7 +73,7 @@ actor OpenCodeGoUsageAPIProvider: UsageProvider {
 
     // MARK: - Parsing (internal for tests)
 
-    static func parseWindows(_ data: Data) throws -> [UsageWindow] {
+    public static func parseWindows(_ data: Data) throws -> [UsageWindow] {
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let usage = obj["usage"] as? [String: Any]
         else { throw URLError(.cannotParseResponse) }

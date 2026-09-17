@@ -1,15 +1,27 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
+
+/// Fixed settings for the notifier — mirrors the app's shipped defaults so the
+/// test is portable (no Combine `SettingsStore`).
+@MainActor
+private final class StubAlertSettings: AlertSettings {
+    var milestones: [Milestone] = [
+        Milestone(provider: "Claude", windowLabel: "Rolling", step: 20),
+        Milestone(provider: "Claude", windowLabel: "Weekly", step: 20),
+    ]
+    var burnAlerts: [BurnAlert] = []
+    var costAlerts: [CostAlert] = []
+    var notifyOnReset = true
+}
 
 @MainActor
 struct MilestoneNotifierTests {
     /// Notifier backed by an isolated defaults suite so tests don't touch the
     /// real notification state.
-    private func makeNotifier() -> (MilestoneNotifier, SettingsStore, UserDefaults) {
+    private func makeNotifier() -> (MilestoneNotifier, StubAlertSettings, UserDefaults) {
         let suite = UserDefaults(suiteName: "notifier-tests-\(UUID().uuidString)")!
-        let settings = SettingsStore(defaults: suite)
+        let settings = StubAlertSettings()
         return (MilestoneNotifier(settingsStore: settings, defaults: suite), settings, suite)
     }
 
