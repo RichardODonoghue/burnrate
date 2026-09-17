@@ -2,10 +2,17 @@ import BurnRateCore
 import Foundation
 import Testing
 
-/// Fake SQLite seam: returns one OpenCode row without spawning a process.
+/// Fake SQLite seam: answers the table probe and returns one new-schema
+/// `session_message` row without spawning a process.
 private struct StubSQLiteRunner: SQLiteQuerying {
     func query(databaseAt path: URL, sql: String) throws -> String {
-        "opencode-go\t" + #"{"role":"assistant","tokens":{"input":10,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"providerID":"opencode-go","modelID":"m","time":{"created":1788830155613}}"#
+        if sql.contains("sqlite_master") {
+            return "session_message"
+        }
+        if sql.contains("session_message") {
+            return "m1\topencode-go\t" + #"{"time":{"created":1788830155613},"model":{"id":"m","providerID":"opencode-go"},"tokens":{"input":10,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}"#
+        }
+        return ""
     }
 }
 
@@ -118,6 +125,35 @@ struct UsageSourceTests {
         // providerIDFilter still excludes other providers' rows.
         let all = try OpenCodeUsageSource.querySamples(from: db, providerIDFilter: nil, cutoffMs: cutoffMs)
         #expect(all.count == 1)
+    }
+    #endif
+
+    @Test func parsesNewOpenCodeSessionMessage() {
+        let json = #"{"time":{"created":1789687514739},"model":{"id":"deepseek-v4.1-flash","providerID":"opencode-go"},"cost":0.003,"tokens":{"input":914,"output":341,"reasoning":248,"cache":{"read":828672,"write":0}}}"#
+        let sample = OpenCodeUsageSource.parseSessionMessageJSON(json)
+        #expect(sample?.model == "deepseek-v4.1-flash")
+        #expect(sample?.sourceTag == "opencode-go")
+        #expect(sample?.tokens == TokenUsage(input: 914, output: 341, cacheRead: 828672,
+                                             cacheWrite: 0, reasoning: 248))
+        #expect(sample?.cost == 0.003)
+        #expect(sample?.timestamp.timeIntervalSince1970 == 1789687514.739)
+    }
+
+    #if !os(Windows)
+    /// Newer OpenCode builds store turns in `session_message` (nested model).
+    @Test func parsesNewOpenCodeSQLiteSchema() throws {
+        let db = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-opencode-v2-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: db) }
+        let msg = #"{"time":{"created":1789687514739},"model":{"id":"deepseek-v4.1-flash","providerID":"opencode-go"},"cost":0.003,"tokens":{"input":914,"output":341,"reasoning":248,"cache":{"read":828672,"write":0}}}"#
+        try runSQLite(db, sql: "CREATE TABLE session_message (id text PRIMARY KEY, session_id text, type text, seq integer, time_created integer, time_updated integer, data text);")
+        try runSQLite(db, sql: "INSERT INTO session_message VALUES ('m1','s1','assistant',1,1789687514739,1789687514739,'\(msg)');")
+        try runSQLite(db, sql: #"INSERT INTO session_message VALUES ('m2','s1','user',2,1789687514739,1789687514739,'{"role":"user"}');"#)
+
+        let samples = try OpenCodeUsageSource.querySamples(from: db, providerIDFilter: "opencode-go", cutoffMs: 0)
+        #expect(samples.count == 1)
+        #expect(samples[0].model == "deepseek-v4.1-flash")
+        #expect(samples[0].sourceTag == "opencode-go")
     }
     #endif
 
