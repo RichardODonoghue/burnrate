@@ -32,9 +32,11 @@ directly to `main`.
   tray is a hand-rolled StatusNotifierItem + DBusMenu over GIO in `CBurnRateTray`
   (not libayatana-appindicator — that is GTK3 and cannot share a process with
   GTK4); multiple tray items are supported (main + per-provider widgets).
-  Linux alerts go through `notify-send` (thread-safe `LinuxNotifier`), settings
-  persist as JSON (`LinuxSettings`) and are edited from a GTK settings window
-  (widget toggles + reset notifications). The updater opens the releases page.
+  Linux alerts go through `notify-send` (thread-safe `LinuxNotifier`; milestone,
+  reset, burn-rate and daily-cost rules), settings persist as JSON
+  (`LinuxSettings`) and are edited from a GTK settings window (widget toggles,
+  reset notifications, milestone step spinning). The updater opens the releases
+  page.
   Package with `scripts/make_linux_app.sh` (tarball + `.deb` + `.desktop` + install
   script). CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The
   macOS app target and the Linux target are declared per-OS in `Package.swift`;

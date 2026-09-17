@@ -44,6 +44,13 @@ final class LinuxSettings: @unchecked Sendable {
         mutate { $0.notifyOnReset = enabled }
     }
 
+    func setMilestoneStep(at index: Int, step: Double) {
+        mutate { values in
+            guard index >= 0, index < values.milestones.count else { return }
+            values.milestones[index].step = step
+        }
+    }
+
     private func mutate(_ body: (inout Values) -> Void) {
         lock.lock()
         body(&values)
