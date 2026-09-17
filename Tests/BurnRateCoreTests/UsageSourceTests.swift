@@ -98,7 +98,10 @@ struct UsageSourceTests {
         #expect(sample?.sourceTag == "opencode-go")
     }
 
-    @Test func parsesOpenCodeSQLiteSnapshot() throws {        // Build a real DB with the system sqlite3 and parse it back.
+    #if !os(Windows)
+    /// Requires the `sqlite3` CLI, which Windows CI doesn't provide.
+    @Test func parsesOpenCodeSQLiteSnapshot() throws {
+        // Build a real DB with the system sqlite3 and parse it back.
         let db = FileManager.default.temporaryDirectory
             .appendingPathComponent("test-opencode-\(UUID().uuidString).db")
         defer { try? FileManager.default.removeItem(at: db) }
@@ -116,6 +119,7 @@ struct UsageSourceTests {
         let all = try OpenCodeUsageSource.querySamples(from: db, providerIDFilter: nil, cutoffMs: cutoffMs)
         #expect(all.count == 1)
     }
+    #endif
 
     @Test func querySamplesUsesInjectedSQLiteRunner() throws {
         // Proves the SQLite seam: no subprocess, so this runs on any platform.
