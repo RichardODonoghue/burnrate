@@ -71,6 +71,7 @@ private actor WindowsPoller {
 /// Desktop alerts via tray balloons.
 private final class WindowsNotifier: @unchecked Sendable {
     private let lock = NSLock()
+    private let settings: WindowsSettings
     private var lastRemaining: [String: Double] = [:]
     private var lastResetsAt: [String: Date] = [:]
     private var burnCooldown: [String: Date] = [:]
@@ -78,11 +79,14 @@ private final class WindowsNotifier: @unchecked Sendable {
     private var recent: [String: Date] = [:]
     private var costFired: Set<String> = []
 
-    private let milestones = AlertDefaults.milestones
-    private let burnAlerts = AlertDefaults.burnAlerts
     private static let burnCooldownInterval: TimeInterval = 1800
 
+    init(settings: WindowsSettings) {
+        self.settings = settings
+    }
+
     func evaluate(_ usage: [ProviderUsage], now: Date = Date()) {
+        let values = settings.snapshot
         lock.lock()
         defer { lock.unlock() }
         for provider in usage {
@@ -96,12 +100,12 @@ private final class WindowsNotifier: @unchecked Sendable {
                    resetsAt > previousResets, current > (previous ?? 0) { isReset = true }
                 if let previous, current - previous >= 40 { isReset = true }
                 if let resetsAt = window.resetsAt { lastResetsAt[window.id] = resetsAt }
-                if previous != nil, isReset {
+                if previous != nil, isReset, values.notifyOnReset {
                     send("\(provider.providerName) \(window.label) reset",
                          String(format: "Window reset — %.0f%% remaining.", current))
                 }
 
-                let band: Double? = milestones
+                let band: Double? = values.milestones
                     .filter { $0.provider == provider.providerName && $0.windowLabel == window.label }
                     .compactMap {
                         MilestoneEvaluator.crossedThreshold(previousRemaining: previous,
@@ -115,17 +119,18 @@ private final class WindowsNotifier: @unchecked Sendable {
                 }
 
                 recordHistory(windowID: window.id, date: now, remaining: current)
-                evaluateBurn(provider: provider.providerName, window: window, now: now)
+                evaluateBurn(provider: provider.providerName, window: window, now: now,
+                             alerts: values.burnAlerts)
             }
         }
     }
 
     func evaluateCosts(_ costs: [(provider: String, cost: Double)]) {
+        let values = settings.snapshot
         lock.lock()
         defer { lock.unlock() }
         let dayKey = String(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970)
-        let alerts: [CostAlert] = []
-        for alert in alerts {
+        for alert in values.costAlerts {
             let key = "\(alert.provider)|\(dayKey)"
             guard !costFired.contains(key),
                   let spend = costs.first(where: { $0.provider == alert.provider })?.cost,
@@ -143,9 +148,9 @@ private final class WindowsNotifier: @unchecked Sendable {
         history[windowID] = entries.filter { $0.date >= cutoff }
     }
 
-    private func evaluateBurn(provider: String, window: UsageWindow, now: Date) {
+    private func evaluateBurn(provider: String, window: UsageWindow, now: Date, alerts: [BurnAlert]) {
         if let until = burnCooldown[window.id], now < until { return }
-        guard let alert = burnAlerts.first(where: {
+        guard let alert = alerts.first(where: {
             $0.provider == provider && $0.windowLabel == window.label
         }) else { return }
         guard let hit = BurnRateEvaluator.detect(
@@ -184,12 +189,18 @@ private final class AppState: @unchecked Sendable {
     private let lock = NSLock()
     private var _mainTray: Int32 = -1
     private var _trayActions: [Int32: ActionStore] = [:]
+    private var _widgetTrays: [String: Int32] = [:]
     private var _lastUsage: [ProviderUsage] = []
 
     var mainTray: Int32 { lock.withLock { _mainTray } }
     func setMainTray(_ value: Int32) { lock.withLock { _mainTray = value } }
     func actionStore(_ tray: Int32) -> ActionStore? { lock.withLock { _trayActions[tray] } }
     func setActionStore(_ store: ActionStore, for tray: Int32) { lock.withLock { _trayActions[tray] = store } }
+    func removeActionStore(_ tray: Int32) { lock.withLock { _ = _trayActions.removeValue(forKey: tray) } }
+    func widgetTrays() -> [String: Int32] { lock.withLock { _widgetTrays } }
+    func widgetTray(_ provider: String) -> Int32? { lock.withLock { _widgetTrays[provider] } }
+    func setWidgetTray(_ tray: Int32, for provider: String) { lock.withLock { _widgetTrays[provider] = tray } }
+    func removeWidgetTray(_ provider: String) -> Int32? { lock.withLock { _widgetTrays.removeValue(forKey: provider) } }
     func lastUsage() -> [ProviderUsage] { lock.withLock { _lastUsage } }
     func setLastUsage(_ usage: [ProviderUsage]) { lock.withLock { _lastUsage = usage } }
 }
@@ -214,7 +225,8 @@ private final class HistoryStore: @unchecked Sendable {
 }
 
 private let poller = WindowsPoller()
-private let notifier = WindowsNotifier()
+private let settings = WindowsSettings()
+private let notifier = WindowsNotifier(settings: settings)
 private let state = AppState()
 private let history = HistoryStore()
 
@@ -351,6 +363,34 @@ private func updateCharts(buckets: [(provider: String, samples: [UsageSample])])
     }
 }
 
+private func syncWidgetTrays(usage: [ProviderUsage]? = nil) {
+    let enabled = settings.snapshot.widgetProviders
+    let currentUsage = usage ?? state.lastUsage()
+
+    for (provider, tray) in state.widgetTrays() where !enabled.contains(provider) {
+        br_tray_remove(tray)
+        _ = state.removeWidgetTray(provider)
+        state.removeActionStore(tray)
+    }
+
+    for provider in enabled {
+        var tray = state.widgetTray(provider)
+        if tray == nil {
+            let created = br_tray_add(provider, onTrayAction, nil)
+            if created >= 0 {
+                tray = created
+                state.setWidgetTray(created, for: provider)
+                state.setActionStore(ActionStore(), for: created)
+            }
+        }
+        guard let tray else { continue }
+        let widget = StatusMenuBuilder.widget(
+            provider: provider, usage: currentUsage.first { $0.providerName == provider })
+        widget.title.withCString { br_tray_set_title(tray, $0) }
+        setTrayItems(tray, model: widget.menu)
+    }
+}
+
 private func onRefresh(_ context: UnsafeMutableRawPointer?) {
     Task.detached {
         let result = await poller.snapshot()
@@ -361,6 +401,7 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
             setTrayItems(state.mainTray,
                          model: StatusMenuBuilder.mainMenu(usage: result.usage, updateVersion: nil, isBusy: false))
         }
+        syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
         notifier.evaluateCosts(result.costs)
         updateCharts(buckets: result.buckets)
@@ -375,6 +416,7 @@ struct BurnRateWindowsMain {
         if tray >= 0 {
             state.setActionStore(ActionStore(), for: tray)
         }
+        syncWidgetTrays()
         br_win_run("BurnRate", "Loading usage…", onRefresh, nil)
         br_tray_stop_all()
     }
