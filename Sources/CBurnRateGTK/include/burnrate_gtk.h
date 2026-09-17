@@ -64,4 +64,14 @@ void br_chart_set_trend(const br_trend_point *points, int point_count,
 void br_chart_set_bars(const double *values, const double *bar_rgb, int bar_count,
                        const char *labels);
 
+/// One stacked daily-usage segment: `day` is the column index.
+typedef struct {
+    int day;
+    double value;
+    double red, green, blue;
+} br_bar_segment;
+
+/// Replaces the daily stacked-usage chart.
+void br_chart_set_daily(const br_bar_segment *segments, int segment_count, int day_count);
+
 #endif
