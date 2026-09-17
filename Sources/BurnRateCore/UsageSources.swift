@@ -310,30 +310,102 @@ public actor OpenCodeUsageSource: UsageSource {
 
     /// Internal (not private) so tests can run it against a fixture DB.
     /// `providerIDFilter == nil` keeps all providers (model/cost views).
+    ///
+    /// OpenCode migrated storage: newer builds append assistant turns to
+    /// `session_message` (provider/model nested under `model`, tokens at the
+    /// top level); older builds used `message` (flat `providerID`/`modelID`).
+    /// Query whichever tables exist so both are covered.
     public static func querySamples(
         from dbPath: URL,
         providerIDFilter: String?,
         cutoffMs: Int,
         sqlite: any SQLiteQuerying = ProcessSQLiteRunner()
     ) throws -> [UsageSample] {
-        let output = try sqlite.query(databaseAt: dbPath, sql: """
-            SELECT json_extract(data,'$.providerID'), data FROM message \
-            WHERE time_created > \(cutoffMs) AND json_extract(data,'$.role')='assistant';
-            """)
+        let tables = try tableNames(in: dbPath, sqlite: sqlite)
+        var samples: [UsageSample] = []
 
+        if tables.contains("session_message") {
+            let output = try sqlite.query(databaseAt: dbPath, sql: """
+                SELECT id, json_extract(data,'$.model.providerID'), data FROM session_message \
+                WHERE time_created > \(cutoffMs) AND type='assistant';
+                """)
+            samples += parseRows(output, providerIDFilter: providerIDFilter, using: parseSessionMessageJSON)
+        }
+
+        if tables.contains("message") {
+            let output = try sqlite.query(databaseAt: dbPath, sql: """
+                SELECT id, json_extract(data,'$.providerID'), data FROM message \
+                WHERE time_created > \(cutoffMs) AND json_extract(data,'$.role')='assistant';
+                """)
+            samples += parseRows(output, providerIDFilter: providerIDFilter, using: parseMessageJSON)
+        }
+
+        // The storage migration copied rows into `session_message`, so the same
+        // message id appears in both tables — dedupe by id.
+        var seen = Set<String>()
+        return samples.filter { sample in
+            guard let id = sample.requestId, !id.isEmpty else { return true }
+            return seen.insert(id).inserted
+        }
+    }
+
+    private static func tableNames(in dbPath: URL, sqlite: any SQLiteQuerying) throws -> Set<String> {
+        let output = try sqlite.query(
+            databaseAt: dbPath,
+            sql: "SELECT name FROM sqlite_master WHERE type='table';")
+        return Set(output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) })
+    }
+
+    private static func parseRows(
+        _ output: String,
+        providerIDFilter: String?,
+        using parse: (String) -> UsageSample?
+    ) -> [UsageSample] {
         var samples: [UsageSample] = []
         for line in output.split(separator: "\n") {
-            guard let tabIndex = line.firstIndex(of: "\t") else { continue }
-            let providerID = String(line[line.startIndex..<tabIndex])
+            // Columns: id \t providerID \t data
+            guard let firstTab = line.firstIndex(of: "\t") else { continue }
+            let id = String(line[line.startIndex..<firstTab])
+            let rest = line[line.index(after: firstTab)...]
+            guard let secondTab = rest.firstIndex(of: "\t") else { continue }
+            let providerID = String(rest[rest.startIndex..<secondTab])
             if let providerIDFilter, providerID != providerIDFilter { continue }
-            if let sample = parseMessageJSON(String(line[line.index(after: tabIndex)...])) {
-                samples.append(sample)
-            }
+            guard var sample = parse(String(rest[rest.index(after: secondTab)...])) else { continue }
+            sample.requestId = id
+            samples.append(sample)
         }
         return samples
     }
 
-    /// message.data JSON: {providerID, modelID, cost, tokens:{input,output,reasoning,cache:{read,write}}, time:{created: ms}}
+    /// New `session_message` shape:
+    /// {model:{id,providerID}, cost, tokens:{input,output,reasoning,cache:{read,write}},
+    ///  time:{created: ms}}
+    public static func parseSessionMessageJSON(_ json: String) -> UsageSample? {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = obj["tokens"] as? [String: Any],
+              let time = obj["time"] as? [String: Any],
+              let createdMs = time["created"] as? Double
+        else { return nil }
+        let model = obj["model"] as? [String: Any]
+        let cache = tokens["cache"] as? [String: Any]
+        return UsageSample(
+            timestamp: Date(timeIntervalSince1970: createdMs / 1000),
+            tokens: TokenUsage(
+                input: tokens["input"] as? Int ?? 0,
+                output: tokens["output"] as? Int ?? 0,
+                cacheRead: cache?["read"] as? Int ?? 0,
+                cacheWrite: cache?["write"] as? Int ?? 0,
+                reasoning: tokens["reasoning"] as? Int ?? 0
+            ),
+            model: model?["id"] as? String,
+            cost: obj["cost"] as? Double,
+            sourceTag: model?["providerID"] as? String
+        )
+    }
+
+    /// Legacy `message.data` shape:
+    /// {providerID, modelID, cost, tokens:{...}, time:{created: ms}}
     public static func parseMessageJSON(_ json: String) -> UsageSample? {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
