@@ -114,7 +114,6 @@ private struct MilestonesView: View {
             resetCard
             burnRateCard
             costCard
-            capacityCard
         }
         .task { await refreshAuth() }
         .onChange(of: newProvider) { _, _ in newWindow = "Rolling" }
@@ -410,77 +409,6 @@ private struct MilestonesView: View {
         }
     }
 
-    // MARK: Plan capacities
-
-    private struct CapacityRow: Identifiable {
-        let provider: String
-        let window: String
-        var id: String { "\(provider)|\(window)" }
-    }
-
-    /// (provider, window) pairs that use local-log % — i.e. anything with a
-    /// configured or seeded capacity. Currently Codex; data-driven so extra
-    /// log-based providers show up automatically.
-    private var capacityRows: [CapacityRow] {
-        providerNames.flatMap { provider in
-            windowLabels(for: provider).compactMap { window in
-                let key = "\(provider)|\(window)"
-                let known = store.planCapacities[key] != nil
-                    || SettingsStore.defaultCapacities[key] != nil
-                return known ? CapacityRow(provider: provider, window: window) : nil
-            }
-        }
-    }
-
-    private func capacityBinding(_ key: String) -> Binding<String> {
-        Binding(
-            get: { store.planCapacities[key].map(String.init) ?? "" },
-            set: { newValue in
-                let digits = newValue.filter(\.isNumber)
-                if digits.isEmpty {
-                    store.planCapacities.removeValue(forKey: key)
-                } else if let value = Int(digits) {
-                    store.planCapacities[key] = value
-                }
-            }
-        )
-    }
-
-    private var capacityCard: some View {
-        Card("Plan capacities",
-             footnote: "Weighted tokens per window (cache reads count 10%, writes 125%). Local-log providers like Codex show a % only when a capacity is set; calibrate until it matches the vendor's usage page.") {
-            if capacityRows.isEmpty {
-                emptyHint("Configured automatically once a log-based provider is detected.", icon: "gauge.with.needle")
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(capacityRows) { row in
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(SettingsView.color(for: row.provider))
-                                .frame(width: 8, height: 8)
-                            Text(row.provider).fontWeight(.medium)
-                            Text(row.window).font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            TextField("tokens", text: capacityBinding(row.id))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 130)
-                                .monospacedDigit()
-                                .multilineTextAlignment(.trailing)
-                            Text(formattedCapacity(store.planCapacities[row.id]))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .frame(width: 60, alignment: .trailing)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func formattedCapacity(_ value: Int?) -> String {
-        value.map { TokenFormat.format($0) } ?? "—"
-    }
 
 }
 
