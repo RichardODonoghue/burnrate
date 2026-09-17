@@ -113,3 +113,50 @@ void br_ui_quit(void) {
         }
     }
 }
+
+/* ---- settings window ---------------------------------------------------- */
+
+static GtkWidget *g_settings_window = NULL;
+static GtkWidget *g_settings_box = NULL;
+static br_checkbox_cb g_settings_cb = NULL;
+static void *g_settings_ctx = NULL;
+
+static void on_checkbox_toggled(GtkCheckButton *button, gpointer data) {
+    int id = GPOINTER_TO_INT(data);
+    if (g_settings_cb) {
+        g_settings_cb(id, gtk_check_button_get_active(button), g_settings_ctx);
+    }
+}
+
+void br_settings_show(const char *title, const br_checkbox *items, int count,
+                      br_checkbox_cb callback, void *ctx) {
+    g_settings_cb = callback;
+    g_settings_ctx = ctx;
+
+    if (!g_settings_window) {
+        g_settings_window = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(g_settings_window), title ? title : "Settings");
+        gtk_window_set_default_size(GTK_WINDOW(g_settings_window), 360, 320);
+        g_settings_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+        gtk_widget_set_margin_top(g_settings_box, 14);
+        gtk_widget_set_margin_bottom(g_settings_box, 14);
+        gtk_widget_set_margin_start(g_settings_box, 14);
+        gtk_widget_set_margin_end(g_settings_box, 14);
+        gtk_window_set_child(GTK_WINDOW(g_settings_window), g_settings_box);
+    } else {
+        GtkWidget *child = gtk_widget_get_first_child(g_settings_box);
+        while (child) {
+            GtkWidget *next = gtk_widget_get_next_sibling(child);
+            gtk_box_remove(GTK_BOX(g_settings_box), child);
+            child = next;
+        }
+    }
+
+    for (int i = 0; i < count; i++) {
+        GtkWidget *check = gtk_check_button_new_with_label(items[i].label ? items[i].label : "");
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), items[i].checked ? TRUE : FALSE);
+        g_signal_connect(check, "toggled", G_CALLBACK(on_checkbox_toggled), GINT_TO_POINTER(items[i].id));
+        gtk_box_append(GTK_BOX(g_settings_box), check);
+    }
+    gtk_window_present(GTK_WINDOW(g_settings_window));
+}

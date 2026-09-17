@@ -44,52 +44,90 @@ private actor LinuxPoller {
     }
 }
 
-private let poller = LinuxPoller()
-private let notifier = LinuxNotifier()
-
-/// Tray click → action, guarded because D-Bus callbacks arrive on another thread.
+/// Per-tray click handlers, guarded because D-Bus callbacks arrive on other threads.
 private final class ActionStore: @unchecked Sendable {
     private let lock = NSLock()
     private var actions: [StatusMenuAction] = []
 
     func replace(_ newActions: [StatusMenuAction]) {
-        lock.lock()
-        actions = newActions
-        lock.unlock()
+        lock.withLock { actions = newActions }
     }
 
     func action(at index: Int32) -> StatusMenuAction? {
-        lock.lock()
-        defer { lock.unlock() }
-        return (index >= 0 && Int(index) < actions.count) ? actions[Int(index)] : nil
+        lock.withLock { (index >= 0 && Int(index) < actions.count) ? actions[Int(index)] : nil }
     }
 }
 
-private let actionStore = ActionStore()
+/// Shared app state, guarded for access from the GTK thread, D-Bus callbacks
+/// and the background poller.
+private final class AppState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _mainTray: Int32 = -1
+    private var _trayActions: [Int32: ActionStore] = [:]
+    private var _widgetTrays: [String: Int32] = [:]
+    private var _settingsProviders: [String] = []
+    private var _lastUsage: [ProviderUsage] = []
+
+    var mainTray: Int32 { lock.withLock { _mainTray } }
+    func setMainTray(_ value: Int32) { lock.withLock { _mainTray = value } }
+
+    func actionStore(_ tray: Int32) -> ActionStore? { lock.withLock { _trayActions[tray] } }
+    func setActionStore(_ store: ActionStore, for tray: Int32) { lock.withLock { _trayActions[tray] = store } }
+    func removeActionStore(_ tray: Int32) { lock.withLock { _trayActions.removeValue(forKey: tray) } }
+
+    func widgetTrays() -> [String: Int32] { lock.withLock { _widgetTrays } }
+    func widgetTray(_ provider: String) -> Int32? { lock.withLock { _widgetTrays[provider] } }
+    func setWidgetTray(_ tray: Int32, for provider: String) { lock.withLock { _widgetTrays[provider] = tray } }
+    func removeWidgetTray(_ provider: String) -> Int32? { lock.withLock { _widgetTrays.removeValue(forKey: provider) } }
+
+    var settingsProviders: [String] { lock.withLock { _settingsProviders } }
+    func setSettingsProviders(_ providers: [String]) { lock.withLock { _settingsProviders = providers } }
+
+    func lastUsage() -> [ProviderUsage] { lock.withLock { _lastUsage } }
+    func setLastUsage(_ usage: [ProviderUsage]) { lock.withLock { _lastUsage = usage } }
+}
+
+private let poller = LinuxPoller()
+private let settings = LinuxSettings()
+private let notifier = LinuxNotifier(settings: settings)
+private let state = AppState()
+
+/// Opens the GitHub releases page (Linux has no in-app updater yet).
+private func openReleases() {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/xdg-open")
+    process.arguments = ["https://github.com/RichardODonoghue/burnrate/releases"]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try? process.run()
+}
 
 private func handleAction(_ action: StatusMenuAction) {
     switch action {
-    case .openDashboard, .openSettings:
+    case .openDashboard:
         break // the window is already presented on Linux
+    case .openSettings:
+        showSettings()
+    case .checkForUpdates, .installUpdate:
+        openReleases()
     case .quit:
         br_ui_quit()
-    default:
-        break // updates / widgets are not wired on Linux yet
+    case .removeWidget(let provider):
+        settings.setWidget(provider, enabled: false)
+        syncWidgetTrays()
     }
 }
 
-private func onTrayAction(_ actionID: Int32, _ context: UnsafeMutableRawPointer?) {
-    if let action = actionStore.action(at: actionID) {
+private func onTrayAction(_ tray: Int32, _ actionID: Int32, _ context: UnsafeMutableRawPointer?) {
+    if let action = state.actionStore(tray)?.action(at: actionID) {
         handleAction(action)
     }
 }
 
-/// Mirrors the macOS tray menu using the shared `StatusMenuBuilder`.
-private func updateTray(usage: [ProviderUsage]) {
-    let model = StatusMenuBuilder.mainMenu(usage: usage, updateVersion: nil, isBusy: false)
+/// Builds `br_tray_item`s for a model and records the actions for `tray`.
+private func setTrayItems(_ tray: Int32, model: StatusMenuModel) {
     var rows: [(label: String, action: Int32, enabled: Bool)] = []
     var actions: [StatusMenuAction] = []
-
     for entry in model.entries {
         switch entry {
         case .providerHeader(let title):
@@ -106,8 +144,6 @@ private func updateTray(usage: [ProviderUsage]) {
         }
     }
 
-    actionStore.replace(actions)
-
     var pointers: [UnsafeMutablePointer<CChar>?] = []
     var items: [br_tray_item] = []
     for row in rows {
@@ -118,7 +154,85 @@ private func updateTray(usage: [ProviderUsage]) {
                                   enabled: row.enabled ? 1 : 0))
     }
     items.withUnsafeBufferPointer { buffer in
-        br_tray_set_items(buffer.baseAddress, Int32(buffer.count))
+        br_tray_set_items(tray, buffer.baseAddress, Int32(buffer.count))
+    }
+    for pointer in pointers { free(pointer) }
+
+    state.actionStore(tray)?.replace(actions)
+}
+
+private func updateMainTray(usage: [ProviderUsage]) {
+    guard state.mainTray >= 0 else { return }
+    setTrayItems(state.mainTray, model: StatusMenuBuilder.mainMenu(usage: usage, updateVersion: nil, isBusy: false))
+}
+
+/// Creates/removes per-provider widget trays to match settings.
+private func syncWidgetTrays(usage: [ProviderUsage]? = nil) {
+    let enabled = settings.snapshot.widgetProviders
+    let currentUsage = usage ?? state.lastUsage()
+
+    // Remove disabled widgets.
+    for (provider, tray) in state.widgetTrays() where !enabled.contains(provider) {
+        br_tray_remove(tray)
+        _ = state.removeWidgetTray(provider)
+        state.removeActionStore(tray)
+    }
+
+    // Add/update enabled widgets (each is its own tray item).
+    for provider in enabled {
+        var tray = state.widgetTray(provider)
+        if tray == nil {
+            let created = br_tray_add("utilities-system-monitor", provider, onTrayAction, nil)
+            if created >= 0 {
+                tray = created
+                state.setWidgetTray(created, for: provider)
+                state.setActionStore(ActionStore(), for: created)
+            }
+        }
+        guard let tray else { continue }
+        let widget = StatusMenuBuilder.widget(
+            provider: provider, usage: currentUsage.first { $0.providerName == provider })
+        br_tray_set_title(tray, widget.title)
+        setTrayItems(tray, model: widget.menu)
+    }
+}
+
+/// GTK calls this on the main thread when a settings checkbox is toggled.
+private func onSettingsToggle(_ id: Int32, _ checked: Int32, _ context: UnsafeMutableRawPointer?) {
+    let enabled = checked != 0
+    if id == 0 {
+        settings.setNotifyOnReset(enabled)
+        return
+    }
+    let providers = state.settingsProviders
+    let index = Int(id) - 1
+    guard index >= 0, index < providers.count else { return }
+    settings.setWidget(providers[index], enabled: enabled)
+    syncWidgetTrays()
+}
+
+private func showSettings() {
+    let providers = state.lastUsage().map(\.providerName).sorted()
+    state.setSettingsProviders(providers)
+    let values = settings.snapshot
+
+    var rows: [(label: String, id: Int32, checked: Bool)] = [
+        ("Notify when a window resets", 0, values.notifyOnReset),
+    ]
+    for (index, provider) in providers.enumerated() {
+        rows.append(("Menu-bar widget for \(provider)", Int32(index + 1),
+                     values.widgetProviders.contains(provider)))
+    }
+
+    var pointers: [UnsafeMutablePointer<CChar>?] = []
+    var items: [br_checkbox] = []
+    for row in rows {
+        let pointer = strdup(row.label)
+        pointers.append(pointer)
+        items.append(br_checkbox(label: pointer.map { UnsafePointer($0) }, id: row.id, checked: row.checked ? 1 : 0))
+    }
+    items.withUnsafeBufferPointer { buffer in
+        br_settings_show("BurnRate Settings", buffer.baseAddress, Int32(buffer.count), onSettingsToggle, nil)
     }
     for pointer in pointers { free(pointer) }
 }
@@ -128,7 +242,9 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
     Task.detached {
         let result = await poller.snapshot()
         result.text.withCString { br_ui_post($0) }
-        updateTray(usage: result.usage)
+        state.setLastUsage(result.usage)
+        updateMainTray(usage: result.usage)
+        syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
     }
 }
@@ -137,8 +253,13 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
 struct BurnRateLinuxMain {
     static func main() {
         // Tray is best-effort: without a session bus / watcher the app still runs.
-        _ = br_tray_start("utilities-system-monitor", "BurnRate", onTrayAction, nil)
+        let tray = br_tray_add("utilities-system-monitor", "BurnRate", onTrayAction, nil)
+        state.setMainTray(tray)
+        if tray >= 0 {
+            state.setActionStore(ActionStore(), for: tray)
+        }
+        syncWidgetTrays()
         br_ui_run("BurnRate", "Loading usage…", onRefresh, nil)
-        br_tray_stop()
+        br_tray_stop_all()
     }
 }

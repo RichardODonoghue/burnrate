@@ -6,21 +6,25 @@ import Foundation
 /// Deliberately separate from the macOS `MilestoneNotifier`: that type is
 /// `@MainActor`, and the GTK main loop does not drive Swift's MainActor
 /// executor, so calling it off the GLib thread would not run. This class is
-/// thread-safe and uses the shared `AlertDefaults` (Linux has no editor).
+/// thread-safe and reads the shared `LinuxSettings`.
 final class LinuxNotifier: @unchecked Sendable {
     private let lock = NSLock()
+    private let settings: LinuxSettings
     private var lastRemaining: [String: Double] = [:]
     private var history: [String: [(date: Date, remaining: Double)]] = [:]
     private var lastResetsAt: [String: Date] = [:]
     private var burnCooldown: [String: Date] = [:]
     private var recent: [String: Date] = [:]
 
-    private let milestones = AlertDefaults.milestones
-    private let burnAlerts = AlertDefaults.burnAlerts
     private static let historyRetention: TimeInterval = 6 * 3600
     private static let burnCooldownInterval: TimeInterval = 1800
 
+    init(settings: LinuxSettings) {
+        self.settings = settings
+    }
+
     func evaluate(_ usage: [ProviderUsage], now: Date = Date()) {
+        let values = settings.snapshot
         lock.lock()
         defer { lock.unlock() }
 
@@ -40,12 +44,12 @@ final class LinuxNotifier: @unchecked Sendable {
                 }
                 if let previous, current - previous >= 40 { isReset = true }
                 if let resetsAt = window.resetsAt { lastResetsAt[window.id] = resetsAt }
-                if previous != nil, isReset {
+                if previous != nil, isReset, values.notifyOnReset {
                     send(title: "\(provider.providerName) \(window.label) reset",
                          body: String(format: "Window reset — %.0f%% remaining.", current))
                 }
 
-                let band: Double? = milestones
+                let band: Double? = values.milestones
                     .filter { $0.provider == provider.providerName && $0.windowLabel == window.label }
                     .compactMap {
                         MilestoneEvaluator.crossedThreshold(
@@ -59,7 +63,8 @@ final class LinuxNotifier: @unchecked Sendable {
                 }
 
                 recordHistory(windowID: window.id, date: now, remaining: current)
-                evaluateBurn(provider: provider.providerName, window: window, now: now)
+                evaluateBurn(provider: provider.providerName, window: window, now: now,
+                             alerts: values.burnAlerts)
             }
         }
     }
@@ -71,9 +76,9 @@ final class LinuxNotifier: @unchecked Sendable {
         history[windowID] = entries.filter { $0.date >= cutoff }
     }
 
-    private func evaluateBurn(provider: String, window: UsageWindow, now: Date) {
+    private func evaluateBurn(provider: String, window: UsageWindow, now: Date, alerts: [BurnAlert]) {
         if let until = burnCooldown[window.id], now < until { return }
-        guard let alert = burnAlerts.first(where: {
+        guard let alert = alerts.first(where: {
             $0.provider == provider && $0.windowLabel == window.label
         }) else { return }
         guard let hit = BurnRateEvaluator.detect(
