@@ -20,8 +20,8 @@ jobs:
 
       - uses: compnerd/gha-setup-swift@main
         with:
-          branch: swift-6.0.3-release
-          tag: 6.0.3-RELEASE
+          branch: swift-6.1.2-release
+          tag: 6.1.2-RELEASE
 
       - name: Build + test platform-independent core
         run: |
