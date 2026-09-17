@@ -47,3 +47,34 @@ public enum SQLiteError: Error {
     case runnerUnavailable
     case queryFailed(Int32)
 }
+
+/// `SQLiteQuerying` via the `sqlite3` CLI in read-only mode (macOS/Linux).
+/// Windows would link a bundled sqlite3 instead.
+public struct ProcessSQLiteRunner: SQLiteQuerying {
+    public init() {}
+
+    public func query(databaseAt path: URL, sql: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = ["-readonly", path.path, "-separator", "\t", sql]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        // Read the pipe to EOF BEFORE waiting: draining concurrently avoids
+        // deadlock when output exceeds the pipe buffer.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw SQLiteError.queryFailed(process.terminationStatus)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
+/// Credential reader for platforms without a secret store: always misses
+/// (credentials are read from the CLI dotfiles instead).
+public struct NoopCredentialReader: CredentialReading {
+    public init() {}
+    public func genericPassword(service: String) -> Data? { nil }
+}

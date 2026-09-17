@@ -93,3 +93,5 @@ final class SettingsStore: ObservableObject {
         defaults.set(notifyOnReset, forKey: Self.notifyOnResetKey)
     }
 }
+
+extension SettingsStore: AlertSettings {}

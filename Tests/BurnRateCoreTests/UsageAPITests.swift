@@ -1,7 +1,6 @@
 import BurnRateCore
 import Foundation
 import Testing
-@testable import BurnRate
 
 struct UsageAPITests {
     @Test func parsesClaudeLimitsArrayIncludingModelScoped() throws {

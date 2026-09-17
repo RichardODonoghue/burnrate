@@ -50,12 +50,14 @@ directly to `main`.
 
 ## Architecture notes
 
-- **Targets:** `BurnRateCore` (platform-independent: `UsageModel`, `ModelUsage`,
+- **Targets:** `BurnRateCore` is platform-independent: models/aggregation,
   `Pricing`, `Alerts`/evaluators, `ProviderThrottle`/`QuotaCache`, `ChartData`,
-  `StatusMenu`, `IconSpec`) and `BurnRate` (macOS app: AppKit/SwiftUI/Combine/
-  UserNotifications). Keep new shared logic in `BurnRateCore` with `public` API;
-  do not import Apple-only frameworks there. `BurnRateCore` is the first step
-  toward a Linux/Windows port (plan kept outside the repo).
+  `StatusMenu`, `IconSpec`, and the runtime (providers `ClaudeUsageAPI` /
+  `OpenCodeGoUsageAPI`, log sources `UsageSources`, `MilestoneNotifier`).
+  `BurnRate` is the macOS app (AppKit/SwiftUI/Combine/UserNotifications). Keep
+  new shared logic in `BurnRateCore` with `public` API; do not import Apple-only
+  frameworks there. `BurnRateCore` is the first step toward a Linux/Windows port
+  (plan kept outside the repo).
 - **Platform seams** live in `BurnRateCore/Platform.swift` (`AppPaths`,
   `CredentialReading`, `SQLiteQuerying`) and `BurnRateCore/Presentation.swift`
   (`NotificationPresenting`, `SystemEventObserving`, `AppUpdating`); macOS

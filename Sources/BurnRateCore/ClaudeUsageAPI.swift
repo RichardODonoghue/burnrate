@@ -1,9 +1,11 @@
-import BurnRateCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Foundation
 
 /// A provider usage source that returns final window data. Implementations
 /// may use a provider API (authoritative %) or local log parsing.
-protocol UsageProvider: Actor {
+public protocol UsageProvider: Actor {
     nonisolated var name: String { get }
     /// `capacities` comes from settings at call time (weighted-token units).
     func fetchUsage(capacities: [String: Int]) async -> ProviderUsage?
@@ -13,16 +15,16 @@ protocol UsageProvider: Actor {
 }
 
 /// Wraps a local UsageSource (token log parsing) as a UsageProvider.
-actor LocalUsageProvider: UsageProvider {
-    nonisolated let name: String
+public actor LocalUsageProvider: UsageProvider {
+    public nonisolated let name: String
     private let source: any UsageSource
 
-    init(source: any UsageSource) {
+    public init(source: any UsageSource) {
         self.source = source
         self.name = source.name
     }
 
-    func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
+    public func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
         let samples = (try? await source.collectSamples()) ?? []
         // No local data at all → provider is not set up on this machine;
         // returning nil omits it from the UI entirely.
@@ -38,7 +40,7 @@ actor LocalUsageProvider: UsageProvider {
         )
     }
 
-    func invalidateCache() {
+    public func invalidateCache() {
         // No cache — every fetch re-reads the logs.
     }
 }
@@ -55,10 +57,10 @@ actor LocalUsageProvider: UsageProvider {
 ///
 /// The endpoint rate-limits aggressively (429), so: min 60s between calls,
 /// exponential backoff on errors, and the last good snapshot is reused.
-actor ClaudeUsageAPIProvider: UsageProvider {
-    nonisolated let name = "Claude"
+public actor ClaudeUsageAPIProvider: UsageProvider {
+    public nonisolated let name = "Claude"
 
-    nonisolated static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    public nonisolated static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     nonisolated static let minInterval: TimeInterval = 60
     nonisolated static let backoff: TimeInterval = 300
 
@@ -81,11 +83,11 @@ actor ClaudeUsageAPIProvider: UsageProvider {
     /// one-off false reset/milestone alerts.
     private static let fingerprintKey = "claudeCredentialFingerprint"
 
-    init(
+    public init(
         credentialsURL: URL? = nil,
         claudeJSONURL: URL? = nil,
         paths: any AppPaths = FileManagerPaths(),
-        credentials: any CredentialReading = KeychainCredentialReader()
+        credentials: any CredentialReading = NoopCredentialReader()
     ) {
         self.credentials = credentials
         self.credentialsURL = credentialsURL
@@ -95,11 +97,11 @@ actor ClaudeUsageAPIProvider: UsageProvider {
         self.credentialFingerprint = UserDefaults.standard.string(forKey: Self.fingerprintKey)
     }
 
-    func setCredentialChangeHandler(_ handler: @escaping @MainActor @Sendable () -> Void) {
+    public func setCredentialChangeHandler(_ handler: @escaping @MainActor @Sendable () -> Void) {
         credentialChangeHandler = handler
     }
 
-    func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
+    public func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
         let now = Date()
         guard cache.shouldFetch(now: now) else {
             return cache.windows.map { ProviderUsage(providerName: name, plan: plan, windows: $0) }
@@ -116,16 +118,16 @@ actor ClaudeUsageAPIProvider: UsageProvider {
         }
     }
 
-    func invalidateCache() {
+    public func invalidateCache() {
         cache.invalidate()
     }
 
-    // MARK: - Account identity (internal for tests)
+    // MARK: - Account identity
 
     /// Signed-in account identity from Claude Code's `~/.claude.json`:
     /// `{"oauthAccount": {"accountUuid": "...", "organizationUuid": "..."}}`.
     /// Returns nil when the file is missing or has no account block.
-    nonisolated static func accountFingerprint(fromClaudeJSON data: Data) -> String? {
+    public nonisolated static func accountFingerprint(fromClaudeJSON data: Data) -> String? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let account = obj["oauthAccount"] as? [String: Any],
               let uuid = account["accountUuid"] as? String, !uuid.isEmpty
@@ -136,7 +138,7 @@ actor ClaudeUsageAPIProvider: UsageProvider {
 
     /// Falls back to the token itself when no account block exists; that can
     /// false-positive on an OAuth refresh, hence the preference for the uuid.
-    nonisolated static func fallbackFingerprint(token: String) -> String {
+    public nonisolated static func fallbackFingerprint(token: String) -> String {
         "token|" + token.hashValue.description
     }
 
@@ -176,8 +178,8 @@ actor ClaudeUsageAPIProvider: UsageProvider {
         return try Self.parseWindows(data)
     }
 
-    /// OAuth token: ~/.claude/.credentials.json first, else macOS Keychain
-    /// ("Claude Code-credentials" generic password, same JSON shape).
+    /// OAuth token: ~/.claude/.credentials.json first, else the platform
+    /// credential store ("Claude Code-credentials", same JSON shape).
     private func accessToken() throws -> String? {
         guard let oauth = readCredentialOAuth() else { return nil }
         return oauth["accessToken"] as? String
@@ -209,9 +211,9 @@ actor ClaudeUsageAPIProvider: UsageProvider {
         return json["claudeAiOauth"] as? [String: Any]
     }
 
-    // MARK: - Plan formatting (internal for tests)
+    // MARK: - Plan formatting
 
-    nonisolated static func formatPlan(subscriptionType: String, rateLimitTier: String?) -> String {
+    public nonisolated static func formatPlan(subscriptionType: String, rateLimitTier: String?) -> String {
         let name: String
         switch subscriptionType.lowercased() {
         case "max": name = "Max"
@@ -228,9 +230,9 @@ actor ClaudeUsageAPIProvider: UsageProvider {
         return multiplier.map { "\(name) \($0)" } ?? name
     }
 
-    // MARK: - Parsing (internal for tests)
+    // MARK: - Parsing
 
-    static func parseWindows(_ data: Data, now: Date = Date()) throws -> [UsageWindow] {
+    public static func parseWindows(_ data: Data, now: Date = Date()) throws -> [UsageWindow] {
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw URLError(.cannotParseResponse)
         }

@@ -1,11 +1,10 @@
-import BurnRateCore
 import Foundation
 
 /// A local data source for one plan provider. No network, no auth:
 /// everything is parsed from the CLI tools' own session logs on disk.
 /// Actors: parsing can take seconds and must not block the main thread;
 /// the actor also serializes cache access across overlapping polls.
-protocol UsageSource: Actor {
+public protocol UsageSource: Actor {
     nonisolated var name: String { get }
     /// All usage events found in local logs. Callers aggregate into windows.
     func collectSamples() async throws -> [UsageSample]
@@ -13,16 +12,16 @@ protocol UsageSource: Actor {
 
 /// Logs older than this cannot contribute to any tracked window (5hr/7d/30d),
 /// so sources skip and prune them.
-let sampleRetention: TimeInterval = 31 * 86400
+public let sampleRetention: TimeInterval = 31 * 86400
 
 /// Lossy UTF-8 read — a single bad byte must not zero out a whole file.
-func readTextFile(_ url: URL) -> String {
+public func readTextFile(_ url: URL) -> String {
     guard let data = try? Data(contentsOf: url) else { return "" }
     return String(decoding: data, as: UTF8.self)
 }
 
 /// ISO8601 timestamps used by Claude Code and Codex session logs.
-enum LogDate {
+public enum LogDate {
     // Formatters are expensive to build and `parse` runs per log line;
     // reused statically. ISO8601DateFormatter is thread-safe.
     nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
@@ -37,7 +36,7 @@ enum LogDate {
         return formatter
     }()
 
-    static func parse(_ string: String) -> Date? {
+    public static func parse(_ string: String) -> Date? {
         fractional.date(from: string) ?? plain.date(from: string)
     }
 }
@@ -47,8 +46,8 @@ enum LogDate {
 /// Assistant messages carry usage + timestamp; sum across all projects.
 /// Logs are append-only, so parses are incremental: unchanged files are
 /// skipped and grown files are read from the last-known byte offset.
-actor ClaudeUsageSource: UsageSource {
-    nonisolated let name = "Claude"
+public actor ClaudeUsageSource: UsageSource {
+    public nonisolated let name = "Claude"
     private let baseURL: URL
     /// Persisted incremental-cache state (see `collectSamples`). Survives app
     /// restarts so the ~560MB first parse happens once, not every launch.
@@ -62,14 +61,14 @@ actor ClaudeUsageSource: UsageSource {
     private var cacheLoaded = false
     private let cacheURL: URL
 
-    init(baseURL: URL? = nil, cacheURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
+    public init(baseURL: URL? = nil, cacheURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
         self.baseURL = baseURL
             ?? paths.homeDirectory.appendingPathComponent(".claude/projects")
         self.cacheURL = cacheURL
             ?? paths.appDirectory.appendingPathComponent("claude-cache.json")
     }
 
-    func collectSamples() throws -> [UsageSample] {
+    public func collectSamples() throws -> [UsageSample] {
         guard FileManager.default.fileExists(atPath: baseURL.path) else { return [] }
         if !cacheLoaded {
             cache = Self.loadCache(from: cacheURL)
@@ -132,13 +131,13 @@ actor ClaudeUsageSource: UsageSource {
     /// Lines repeat per requestId (streaming/resume rewrites), so results are
     /// deduped: one sample per request, keeping the last (final cumulative)
     /// reading.
-    static func parseFile(at url: URL) throws -> [UsageSample] {
+    public static func parseFile(at url: URL) throws -> [UsageSample] {
         let text = readTextFile(url)
         return dedupe(parseLines(text))
     }
 
     /// Keeps the last occurrence per requestId; samples without one pass through.
-    static func dedupe(_ samples: [UsageSample]) -> [UsageSample] {
+    public static func dedupe(_ samples: [UsageSample]) -> [UsageSample] {
         var byRequest: [String: (index: Int, sample: UsageSample)] = [:]
         var result: [UsageSample] = []
         for sample in samples {
@@ -156,7 +155,7 @@ actor ClaudeUsageSource: UsageSource {
         return result
     }
 
-    static func parseLines(_ text: String) -> [UsageSample] {
+    public static func parseLines(_ text: String) -> [UsageSample] {
         var samples: [UsageSample] = []
         for line in text.split(separator: "\n") {
             // Cheap prefilter: only JSON lines with a usage block are parsed.
@@ -202,18 +201,18 @@ actor ClaudeUsageSource: UsageSource {
 
 /// Sessions emit cumulative `token_count` events; the last event per session
 /// file holds that session's total.
-actor CodexUsageSource: UsageSource {
-    nonisolated let name = "Codex"
+public actor CodexUsageSource: UsageSource {
+    public nonisolated let name = "Codex"
     private let baseURL: URL
     /// path -> last cumulative sample (nil = parsed, no token events found).
     private var cache: [String: UsageSample?] = [:]
 
-    init(baseURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
+    public init(baseURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
         self.baseURL = baseURL
             ?? paths.homeDirectory.appendingPathComponent(".codex/sessions")
     }
 
-    func collectSamples() throws -> [UsageSample] {
+    public func collectSamples() throws -> [UsageSample] {
         guard FileManager.default.fileExists(atPath: baseURL.path) else { return [] }
         let files = FileManager.default.enumerator(at: baseURL, includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }
@@ -239,7 +238,7 @@ actor CodexUsageSource: UsageSource {
 
     /// One sample per file: the last cumulative total_token_usage event.
     /// Model comes from the session's turn_context/session_meta lines.
-    static func parseSessionFile(at url: URL) throws -> UsageSample? {
+    public static func parseSessionFile(at url: URL) throws -> UsageSample? {
         let text = readTextFile(url)
         var last: UsageSample?
         var model: String?
@@ -284,13 +283,13 @@ actor CodexUsageSource: UsageSource {
 /// OpenCode stores assistant messages (with token counts and providerID) in
 /// SQLite. Query it read-only with a time filter — WAL lets concurrent
 /// readers run against the live DB, so no snapshot copy is needed.
-actor OpenCodeUsageSource: UsageSource {
-    nonisolated let name = "OpenCode Go"
-    let providerIDFilter: String?
-    let dbURL: URL
+public actor OpenCodeUsageSource: UsageSource {
+    public nonisolated let name = "OpenCode Go"
+    public let providerIDFilter: String?
+    public let dbURL: URL
     private let sqlite: any SQLiteQuerying
 
-    init(
+    public init(
         providerIDFilter: String? = nil,
         dbURL: URL? = nil,
         paths: any AppPaths = FileManagerPaths(),
@@ -302,7 +301,7 @@ actor OpenCodeUsageSource: UsageSource {
             ?? paths.homeDirectory.appendingPathComponent(".local/share/opencode/opencode.db")
     }
 
-    func collectSamples() throws -> [UsageSample] {
+    public func collectSamples() throws -> [UsageSample] {
         guard FileManager.default.fileExists(atPath: dbURL.path) else { return [] }
         let cutoffMs = Int(Date().addingTimeInterval(-sampleRetention).timeIntervalSince1970 * 1000)
         return try Self.querySamples(
@@ -311,7 +310,7 @@ actor OpenCodeUsageSource: UsageSource {
 
     /// Internal (not private) so tests can run it against a fixture DB.
     /// `providerIDFilter == nil` keeps all providers (model/cost views).
-    static func querySamples(
+    public static func querySamples(
         from dbPath: URL,
         providerIDFilter: String?,
         cutoffMs: Int,
@@ -335,7 +334,7 @@ actor OpenCodeUsageSource: UsageSource {
     }
 
     /// message.data JSON: {providerID, modelID, cost, tokens:{input,output,reasoning,cache:{read,write}}, time:{created: ms}}
-    static func parseMessageJSON(_ json: String) -> UsageSample? {
+    public static func parseMessageJSON(_ json: String) -> UsageSample? {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tokens = obj["tokens"] as? [String: Any],
