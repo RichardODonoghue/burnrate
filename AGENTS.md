@@ -45,6 +45,13 @@ directly to `main`.
   macOS app target and the Linux target are declared per-OS in `Package.swift`;
   `BurnRateCore` builds on both.
 - Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.
+- **Windows app:** `swift build --product BurnRate` on Windows (CI uses the
+  Swift 6.1.2 toolchain on `windows-2022`; it also runs the core tests). The UI
+  is a Win32 C shim (`CBurnRateWin32`: window + message loop, `Shell_NotifyIcon`
+  tray, balloon notifications, GDI charts); `BurnRateCore` builds on Windows too.
+  Package with `scripts/make_windows_app.ps1` (zip + Swift runtime DLLs). There
+  is no Windows settings/widgets GUI yet, and it is **compile-verified only** —
+  no Windows machine was available to run it.
 - No codegen, migrations, or lint config yet; add commands here as tooling lands.
 
 ## Bundle ID

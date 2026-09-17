@@ -1,0 +1,32 @@
+name: Core (Windows)
+
+# Proves BurnRateCore stays platform-independent: it must build and pass its
+# tests with the Windows Swift toolchain and no Apple frameworks.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: core-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.1.2-release
+          tag: 6.1.2-RELEASE
+
+      - name: Build + test platform-independent core
+        run: |
+          swift build --target BurnRateCore
+          swift test
+
+      - name: Build the Windows app
+        run: swift build --product BurnRate
