@@ -144,6 +144,11 @@ jobs:
     needs: [macos, linux, windows]
     runs-on: ubuntu-24.04
     steps:
+      # gh needs a git repository for release operations.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
       - uses: actions/download-artifact@v4
         with:
           path: assets
