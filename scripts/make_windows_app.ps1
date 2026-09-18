@@ -11,10 +11,16 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "==> swift build -c release --product BurnRate"
 # Link as a GUI subsystem app so launching BurnRate.exe doesn't open a console
-# window (SPM doesn't set the subsystem itself).
+# window. If the entry-point flags are rejected by the toolchain, fall back to
+# the default console link (the app still works).
 swift build -c release --product BurnRate `
     -Xlinker /SUBSYSTEM:WINDOWS `
     -Xlinker /ENTRY:mainCRTStartup
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "GUI-subsystem link failed; falling back to a console build"
+    swift build -c release --product BurnRate
+    if ($LASTEXITCODE -ne 0) { throw "swift build failed" }
+}
 
 $binary = ".build\release\BurnRate.exe"
 if (-not (Test-Path $binary)) { throw "error: $binary not found" }

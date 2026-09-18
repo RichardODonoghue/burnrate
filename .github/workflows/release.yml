@@ -9,6 +9,9 @@ name: Release
 # and events raised with that token do NOT trigger other workflows. The tag
 # push never fires this workflow, which is why v0.2.0 shipped without a
 # zip/dmg. release-please.yml therefore invokes this workflow directly.
+#
+# Builds are split per OS and a final job publishes every artifact plus one
+# combined SHA256SUMS (the in-app macOS updater requires a matching entry).
 on:
   push:
     tags: ["v*.*.*"]
@@ -29,7 +32,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  macos:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -66,30 +69,103 @@ jobs:
           hdiutil create -volname "BurnRate $VER" -srcfolder dmg-staging \
             -format UDZO -ov "BurnRate-$VER-arm64.dmg"
 
-      # Publish checksums: the in-app updater refuses to install a release
-      # that doesn't include a matching SHA256SUMS entry.
-      - name: Generate checksums
-        run: |
-          shasum -a 256 BurnRate-*.zip BurnRate-*.dmg > SHA256SUMS
-          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-macos
+          path: |
+            BurnRate-*-arm64.zip
+            BurnRate-*-arm64.dmg
+          retention-days: 14
 
-      # gh CLI rather than a release action: when release-please already
-      # published the release we only add assets and leave its notes intact;
-      # for a manual tag we create the release first.
-      - name: Attach zip, dmg + checksums to the GitHub release
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve tag and version
+        id: v
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install GTK4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
+      - name: Build Linux packages
+        run: scripts/make_linux_app.sh "${{ steps.v.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-linux
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+          retention-days: 14
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve tag and version
+        id: v
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag }}"
+          if ([string]::IsNullOrEmpty($tag)) { $tag = "${{ github.ref_name }}" }
+          "version=$($tag.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.1.2-release
+          tag: 6.1.2-RELEASE
+
+      - name: Build Windows package
+        shell: pwsh
+        run: scripts/make_windows_app.ps1 -Version "${{ steps.v.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-windows
+          path: dist/*.zip
+          retention-days: 14
+
+  publish:
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: v
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # The in-app updater refuses a release without a matching entry.
+      - name: Generate combined checksums
+        run: |
+          ls -la assets
+          ( cd assets && shasum -a 256 * > SHA256SUMS && cat SHA256SUMS )
+
+      - name: Attach all assets to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
         run: |
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" BurnRate-*.zip BurnRate-*.dmg SHA256SUMS --clobber
-
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: BurnRate-${{ steps.v.outputs.version }}-arm64
-          path: |
-            BurnRate-*-arm64.zip
-            BurnRate-*-arm64.dmg
-          retention-days: 14
+          gh release upload "$TAG" assets/* --clobber
