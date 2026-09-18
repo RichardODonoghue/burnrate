@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2](https://github.com/RichardODonoghue/burnrate/compare/v0.7.1...v0.7.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* parse OpenCode's migrated session_message table ([#64](https://github.com/RichardODonoghue/burnrate/issues/64)) ([f7b6795](https://github.com/RichardODonoghue/burnrate/commit/f7b67951ec48d2f6f4c16d78d941d96280611519))
+* stop Usage page re-rendering on every mouse event ([#62](https://github.com/RichardODonoghue/burnrate/issues/62)) ([3a5d534](https://github.com/RichardODonoghue/burnrate/commit/3a5d5341cf31e4f6364af0e88864c5ec35a75df2))
+
 ## [0.7.1](https://github.com/RichardODonoghue/burnrate/compare/v0.7.0...v0.7.1) (2026-09-17)
 
 
