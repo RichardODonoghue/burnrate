@@ -18,6 +18,8 @@ public protocol UsageProvider: Actor {
 public actor LocalUsageProvider: UsageProvider {
     public nonisolated let name: String
     private let source: any UsageSource
+    /// Reason the last fetch was empty (nil = had data).
+    public private(set) var lastStatus: String?
 
     public init(source: any UsageSource) {
         self.source = source
@@ -28,7 +30,11 @@ public actor LocalUsageProvider: UsageProvider {
         let samples = (try? await source.collectSamples()) ?? []
         // No local data at all → provider is not set up on this machine;
         // returning nil omits it from the UI entirely.
-        guard !samples.isEmpty else { return nil }
+        guard !samples.isEmpty else {
+            lastStatus = "no local \(name) session logs found"
+            return nil
+        }
+        lastStatus = nil
         return ProviderUsage(
             providerName: name,
             plan: nil,
@@ -67,6 +73,8 @@ public actor ClaudeUsageAPIProvider: UsageProvider {
     private var cache = QuotaCache(minInterval: minInterval, backoff: backoff)
     /// Plan tier from the OAuth credential, e.g. "Team 5x". Read once.
     private var plan: String?
+    /// Human-readable reason the last fetch produced no data (nil = healthy).
+    public private(set) var lastStatus: String?
 
     private let credentialsURL: URL
     private let claudeJSONURL: URL
@@ -165,16 +173,22 @@ public actor ClaudeUsageAPIProvider: UsageProvider {
     }
 
     private func performFetch() async throws -> [UsageWindow] {
-        guard let token = try accessToken() else { throw URLError(.userAuthenticationRequired) }
+        guard let token = try accessToken() else {
+            lastStatus = "no Claude credentials (\(credentialsURL.path) or Keychain)"
+            throw URLError(.userAuthenticationRequired)
+        }
         await noteCredentialIfChanged(token: token)
         var request = URLRequest(url: Self.endpoint)
         request.timeoutInterval = 15
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+        let code = (response as? HTTPURLResponse)?.statusCode
+        guard code == 200 else {
+            lastStatus = "Claude usage request failed (HTTP \(code.map(String.init) ?? "?"))"
             throw URLError(.badServerResponse)
         }
+        lastStatus = nil
         return try Self.parseWindows(data)
     }
 

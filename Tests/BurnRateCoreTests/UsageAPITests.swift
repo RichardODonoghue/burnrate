@@ -95,6 +95,19 @@ struct UsageAPITests {
         #expect(key == "sk-test-123")
     }
 
+    @Test func openCodeKeyFoundAcrossCandidatePaths() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("auth-multi-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let valid = dir.appendingPathComponent("auth.json")
+        try #"{"opencode-go":{"type":"api","key":"sk-found"}}"#.write(to: valid, atomically: true, encoding: .utf8)
+
+        let candidates = [dir.appendingPathComponent("missing.json"), valid]
+        #expect(OpenCodeGoUsageAPIProvider.readAPIKey(at: candidates) == "sk-found")
+        #expect(OpenCodeGoUsageAPIProvider.readAPIKey(at: [dir.appendingPathComponent("nope.json")]) == nil)
+    }
+
     // MARK: Claude account identity
 
     @Test func claudeAccountFingerprintUsesAccountAndOrg() throws {

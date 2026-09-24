@@ -298,7 +298,7 @@ public actor OpenCodeUsageSource: UsageSource {
         self.providerIDFilter = providerIDFilter
         self.sqlite = sqlite
         self.dbURL = dbURL
-            ?? paths.homeDirectory.appendingPathComponent(".local/share/opencode/opencode.db")
+            ?? paths.dataDirectory.appendingPathComponent("opencode/opencode.db")
     }
 
     public func collectSamples() throws -> [UsageSample] {
