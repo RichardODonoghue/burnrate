@@ -38,7 +38,11 @@ directly to `main`.
   reset notifications, milestone step spinning). The updater opens the releases
   page.
   Package with `scripts/make_linux_app.sh` (tarball + `.deb` + `.desktop` + install
-  script). The **Charts…** menu item opens a Cairo-rendered window
+  script); it **bundles the Swift runtime libraries** (not a distro package) and
+  sets an rpath of `$ORIGIN/../lib/BurnRate`, so the binary runs on distros
+  without a Swift toolchain. The install script checks `ldd` and reports missing
+  system libs (GTK4) with per-distro install commands. The **Charts…** menu item
+  opens a Cairo-rendered window
   (remaining-% trend lines + top-model ranking bars + daily stacked usage) fed
   from `TrendChartData`/`ModelUsage`, and the dashboard text lists per-model
   totals. CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The
