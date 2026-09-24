@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/RichardODonoghue/burnrate/compare/v0.7.3...v0.7.4) (2026-09-24)
+
+
+### Bug Fixes
+
+* find OpenCode creds via XDG and explain missing providers ([#71](https://github.com/RichardODonoghue/burnrate/issues/71)) ([bab6277](https://github.com/RichardODonoghue/burnrate/commit/bab62773d92832e1b75ec70e02d22b2cb76f3c32))
+
 ## [0.7.3](https://github.com/RichardODonoghue/burnrate/compare/v0.7.2...v0.7.3) (2026-09-24)
 
 
