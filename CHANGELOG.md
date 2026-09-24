@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/RichardODonoghue/burnrate/compare/v0.7.2...v0.7.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* bundle the Swift runtime in Linux packages ([#69](https://github.com/RichardODonoghue/burnrate/issues/69)) ([bf8f629](https://github.com/RichardODonoghue/burnrate/commit/bf8f6297050ce4fd3353aeab3a01eef8d35bd327))
+
 ## [0.7.2](https://github.com/RichardODonoghue/burnrate/compare/v0.7.1...v0.7.2) (2026-09-17)
 
 
