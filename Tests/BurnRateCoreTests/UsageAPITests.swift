@@ -108,6 +108,20 @@ struct UsageAPITests {
         #expect(OpenCodeGoUsageAPIProvider.readAPIKey(at: [dir.appendingPathComponent("nope.json")]) == nil)
     }
 
+    @Test func parsesOpenCodeV2AccountJSON() throws {
+        let json = #"""
+        {"version":2,"accounts":{"abc":{"id":"abc","serviceID":"lmstudio","credential":{"type":"api","key":"sk-lm"}},
+                                  "def":{"id":"def","serviceID":"opencode-go","description":"default",
+                                         "credential":{"type":"api","key":"sk-go-v2"}}}}
+        """#
+        #expect(OpenCodeGoUsageAPIProvider.apiKey(inJSON: Data(json.utf8)) == "sk-go-v2")
+    }
+
+    @Test func accountJSONWithoutOpenCodeReturnsNil() throws {
+        let json = #"{"version":2,"accounts":{"abc":{"id":"abc","serviceID":"lmstudio","credential":{"type":"api","key":"sk-lm"}}}}"#
+        #expect(OpenCodeGoUsageAPIProvider.apiKey(inJSON: Data(json.utf8)) == nil)
+    }
+
     // MARK: Claude account identity
 
     @Test func claudeAccountFingerprintUsesAccountAndOrg() throws {

@@ -110,8 +110,12 @@ directly to `main`.
        `five_hour`/`seven_day` keys on older shapes. Values are percent USED.
        Rate-limits aggressively: min 60s between calls, 300s backoff on error,
        reuse last snapshot.
-     - OpenCode Go: `GET opencode.ai/zen/go/v1/usage`, Bearer key from
-       `~/.local/share/opencode/auth.json` (`opencode-go.key`). Returns
+     - OpenCode Go: `GET opencode.ai/zen/go/v1/usage`, Bearer key from either
+       OpenCode version — v1 `auth.json` (`{"opencode-go":{"key":…}}`) or v2
+       `account.json` (`{"version":2,"accounts":{…serviceID:"opencode-go"…
+       credential.key}}`), searched under `$XDG_DATA_HOME`, `~/.local/share`
+       and `$XDG_CONFIG_HOME`; v2's DB `credential` table
+       (`integration_id='opencode-go'`) is a fallback. Returns
        rolling/weekly/monthly `percent` (used) + `resetsAt`. Plan shown as "Go".
      - Zen credit balance: NO public endpoint yet (feature request
        anomalyco/opencode#10448, assigned). Deliberately not implemented —

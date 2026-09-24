@@ -287,6 +287,8 @@ public actor OpenCodeUsageSource: UsageSource {
     public nonisolated let name = "OpenCode Go"
     public let providerIDFilter: String?
     public let dbURL: URL
+    /// v2 may store the DB under a different XDG dir; checked in order.
+    private let dbCandidates: [URL]
     private let sqlite: any SQLiteQuerying
 
     public init(
@@ -295,17 +297,26 @@ public actor OpenCodeUsageSource: UsageSource {
         paths: any AppPaths = FileManagerPaths(),
         sqlite: any SQLiteQuerying = ProcessSQLiteRunner()
     ) {
+        let candidates = [
+            paths.dataDirectory.appendingPathComponent("opencode/opencode.db"),
+            paths.homeDirectory.appendingPathComponent(".local/share/opencode/opencode.db"),
+            paths.configDirectory.appendingPathComponent("opencode/opencode.db"),
+        ]
+        self.dbCandidates = candidates
         self.providerIDFilter = providerIDFilter
         self.sqlite = sqlite
-        self.dbURL = dbURL
-            ?? paths.dataDirectory.appendingPathComponent("opencode/opencode.db")
+        self.dbURL = dbURL ?? candidates[0]
     }
 
     public func collectSamples() throws -> [UsageSample] {
-        guard FileManager.default.fileExists(atPath: dbURL.path) else { return [] }
+        guard let database = dbCandidates.first(where: {
+            FileManager.default.fileExists(atPath: $0.path)
+        }) ?? (FileManager.default.fileExists(atPath: dbURL.path) ? dbURL : nil) else {
+            return []
+        }
         let cutoffMs = Int(Date().addingTimeInterval(-sampleRetention).timeIntervalSince1970 * 1000)
         return try Self.querySamples(
-            from: dbURL, providerIDFilter: providerIDFilter, cutoffMs: cutoffMs, sqlite: sqlite)
+            from: database, providerIDFilter: providerIDFilter, cutoffMs: cutoffMs, sqlite: sqlite)
     }
 
     /// Internal (not private) so tests can run it against a fixture DB.
