@@ -12,6 +12,22 @@ extension AppPaths {
     public var appDirectory: URL {
         applicationSupportDirectory.appendingPathComponent("BurnRate")
     }
+
+    /// XDG data dir on Linux (`$XDG_DATA_HOME`, else `~/.local/share`).
+    public var dataDirectory: URL {
+        if let xdg = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdg.isEmpty {
+            return URL(fileURLWithPath: xdg, isDirectory: true)
+        }
+        return homeDirectory.appendingPathComponent(".local/share")
+    }
+
+    /// XDG config dir on Linux (`$XDG_CONFIG_HOME`, else `~/.config`).
+    public var configDirectory: URL {
+        if let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+            return URL(fileURLWithPath: xdg, isDirectory: true)
+        }
+        return homeDirectory.appendingPathComponent(".config")
+    }
 }
 
 /// Default `AppPaths` backed by `FileManager`. On macOS this is

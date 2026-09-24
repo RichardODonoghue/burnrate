@@ -21,12 +21,22 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
     nonisolated static let backoff: TimeInterval = 300
 
     private var cache = QuotaCache(minInterval: minInterval, backoff: backoff)
+    /// Human-readable reason the last fetch produced no data (nil = healthy).
+    public private(set) var lastStatus: String?
 
-    private let authURL: URL
+    /// Candidate credential locations, checked in order.
+    public nonisolated let authURLs: [URL]
 
     public init(authURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
-        self.authURL = authURL
-            ?? paths.homeDirectory.appendingPathComponent(".local/share/opencode/auth.json")
+        if let authURL {
+            self.authURLs = [authURL]
+        } else {
+            self.authURLs = [
+                paths.dataDirectory.appendingPathComponent("opencode/auth.json"),
+                paths.homeDirectory.appendingPathComponent(".local/share/opencode/auth.json"),
+                paths.configDirectory.appendingPathComponent("opencode/auth.json"),
+            ]
+        }
     }
 
     public func fetchUsage(capacities: [String: Int]) async -> ProviderUsage? {
@@ -50,25 +60,39 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
     }
 
     private func performFetch() async throws -> [UsageWindow] {
-        guard let key = Self.readAPIKey(at: authURL) else { throw URLError(.userAuthenticationRequired) }
+        guard let key = Self.readAPIKey(at: authURLs) else {
+            lastStatus = "no OpenCode key in \(authURLs.map(\.path).joined(separator: ", "))"
+            throw URLError(.userAuthenticationRequired)
+        }
         var request = URLRequest(url: Self.endpoint)
         request.timeoutInterval = 30
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+        let code = (response as? HTTPURLResponse)?.statusCode
+        guard code == 200 else {
+            lastStatus = "OpenCode usage request failed (HTTP \(code.map(String.init) ?? "?"))"
             throw URLError(.badServerResponse)
         }
+        lastStatus = nil
         return try Self.parseWindows(data)
     }
 
-    /// API key from OpenCode's auth.json (written by `/connect`).
+    /// API key from OpenCode's auth.json (written by `/connect`), or nil.
     public nonisolated static func readAPIKey(at url: URL) -> String? {
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let goEntry = obj["opencode-go"] as? [String: Any]
         else { return nil }
         return goEntry["key"] as? String
+    }
+
+    /// First of several candidate locations that holds a key.
+    public nonisolated static func readAPIKey(at urls: [URL]) -> String? {
+        for url in urls {
+            if let key = readAPIKey(at: url) { return key }
+        }
+        return nil
     }
 
     // MARK: - Parsing (internal for tests)

@@ -41,7 +41,9 @@ directly to `main`.
   script); it **bundles the Swift runtime libraries** (not a distro package) and
   sets an rpath of `$ORIGIN/../lib/BurnRate`, so the binary runs on distros
   without a Swift toolchain. The install script checks `ldd` and reports missing
-  system libs (GTK4) with per-distro install commands. The **Charts…** menu item
+  system libs (GTK4) with per-distro install commands. The Linux app logs and
+  shows which providers were not detected and why (missing credential paths,
+  HTTP failures). The **Charts…** menu item
   opens a Cairo-rendered window
   (remaining-% trend lines + top-model ranking bars + daily stacked usage) fed
   from `TrendChartData`/`ModelUsage`, and the dashboard text lists per-model

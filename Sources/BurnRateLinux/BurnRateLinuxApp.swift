@@ -6,15 +6,12 @@ import Glibc
 
 /// Fetches usage from every configured provider.
 private actor LinuxPoller {
-    private let providers: [any UsageProvider]
+    private let claude = ClaudeUsageAPIProvider()
+    private let openCode = OpenCodeGoUsageAPIProvider()
+    private let local = LocalUsageProvider(source: CodexUsageSource())
     private let costSources: [(name: String, source: any UsageSource)]
 
     init() {
-        self.providers = [
-            ClaudeUsageAPIProvider(),
-            OpenCodeGoUsageAPIProvider(),
-            LocalUsageProvider(source: CodexUsageSource()),
-        ]
         self.costSources = [
             ("Claude", ClaudeUsageSource()),
             ("OpenCode", OpenCodeUsageSource()),
@@ -22,15 +19,27 @@ private actor LinuxPoller {
         ]
     }
 
+    /// One line per provider that produced nothing, explaining why.
+    private func diagnostics() async -> [String] {
+        var lines: [String] = []
+        if await claude.lastStatus != nil { lines.append("Claude: \(await claude.lastStatus!)") }
+        if await openCode.lastStatus != nil { lines.append("OpenCode: \(await openCode.lastStatus!)") }
+        if await local.lastStatus != nil { lines.append("Codex: \(await local.lastStatus!)") }
+        return lines
+    }
+
     func snapshot() async -> (text: String, usage: [ProviderUsage],
                               buckets: [(provider: String, samples: [UsageSample])],
-                              costs: [(provider: String, cost: Double)]) {
+                              costs: [(provider: String, cost: Double)],
+                              missing: [String]) {
         var usage: [ProviderUsage] = []
+        let providers: [any UsageProvider] = [claude, openCode, local]
         for provider in providers {
             if let result = await provider.fetchUsage(capacities: PlanCapacities.byProviderWindow) {
                 usage.append(result)
             }
         }
+        let missing = await diagnostics()
 
         let todayStart = Calendar.current.startOfDay(for: Date())
         var buckets: [(provider: String, samples: [UsageSample])] = []
@@ -58,16 +67,20 @@ private actor LinuxPoller {
             lines.append("")
         }
         let text = lines.isEmpty
-            ? "No providers configured.\n\nLog in to a supported CLI, then press Refresh."
+            ? "No providers found.\n\nLog in to a supported CLI, then press Refresh."
             : lines.joined(separator: "\n")
+
+        let diagnosticsText = missing.isEmpty
+            ? ""
+            : "\n\nNot detected:\n" + missing.map { "    \($0)" }.joined(separator: "\n")
 
         var modelLines: [String] = []
         let totals = ModelUsageAggregator.totals(buckets: buckets)
         for entry in totals.prefix(10) {
             modelLines.append("    \(entry.displayName): \(TokenFormat.format(entry.totalTokens)) tokens · \(entry.requests) req")
         }
-        let modelText = modelLines.isEmpty ? "" : "\nModels (30d)\n" + modelLines.joined(separator: "\n")
-        return (text + modelText, usage, buckets, costs)
+        let modelText = modelLines.isEmpty ? "" : "\n\nModels (30d)\n" + modelLines.joined(separator: "\n")
+        return (text + modelText + diagnosticsText, usage, buckets, costs, missing)
     }
 }
 
@@ -426,6 +439,9 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
     Task.detached {
         let result = await poller.snapshot()
         result.text.withCString { br_ui_post($0) }
+        if !result.missing.isEmpty {
+            NSLog("%@", "BurnRate: providers not detected — " + result.missing.joined(separator: " | "))
+        }
         history.append(usage: result.usage, date: Date())
         state.setLastUsage(result.usage)
         updateMainTray(usage: result.usage)
