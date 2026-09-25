@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/RichardODonoghue/burnrate/compare/v0.7.4...v0.8.0) (2026-09-25)
+
+
+### Features
+
+* support OpenCode v2 credentials ([#73](https://github.com/RichardODonoghue/burnrate/issues/73)) ([c814fba](https://github.com/RichardODonoghue/burnrate/commit/c814fba82d24c7fa96c3dd53b36cc522c8a7afd0))
+
 ## [0.7.4](https://github.com/RichardODonoghue/burnrate/compare/v0.7.3...v0.7.4) (2026-09-24)
 
 
