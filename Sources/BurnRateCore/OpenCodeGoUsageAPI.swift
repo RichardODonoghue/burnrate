@@ -24,18 +24,32 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
     /// Human-readable reason the last fetch produced no data (nil = healthy).
     public private(set) var lastStatus: String?
 
-    /// Candidate credential locations, checked in order.
+    /// Candidate credential locations, checked in order. v1 keeps keys in
+    /// `auth.json`; v2 uses `account.json` (and the DB `credential` table).
     public nonisolated let authURLs: [URL]
+    /// Candidate OpenCode databases, for the v2 `credential` table fallback.
+    public nonisolated let dbURLs: [URL]
+    private let sqlite: any SQLiteQuerying
 
-    public init(authURL: URL? = nil, paths: any AppPaths = FileManagerPaths()) {
+    public init(authURL: URL? = nil, paths: any AppPaths = FileManagerPaths(),
+                sqlite: any SQLiteQuerying = ProcessSQLiteRunner()) {
+        self.sqlite = sqlite
         if let authURL {
             self.authURLs = [authURL]
+            self.dbURLs = []
         } else {
-            self.authURLs = [
-                paths.dataDirectory.appendingPathComponent("opencode/auth.json"),
-                paths.homeDirectory.appendingPathComponent(".local/share/opencode/auth.json"),
-                paths.configDirectory.appendingPathComponent("opencode/auth.json"),
+            let dirs = [
+                paths.dataDirectory.appendingPathComponent("opencode"),
+                paths.homeDirectory.appendingPathComponent(".local/share/opencode"),
+                paths.configDirectory.appendingPathComponent("opencode"),
             ]
+            var files: [URL] = []
+            for dir in dirs {
+                files.append(dir.appendingPathComponent("auth.json"))
+                files.append(dir.appendingPathComponent("account.json"))
+            }
+            self.authURLs = files
+            self.dbURLs = dirs.map { $0.appendingPathComponent("opencode.db") }
         }
     }
 
@@ -60,7 +74,11 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
     }
 
     private func performFetch() async throws -> [UsageWindow] {
-        guard let key = Self.readAPIKey(at: authURLs) else {
+        var key = Self.readAPIKey(at: authURLs)
+        if key == nil, let fromDB = openCodeKeyFromDatabase() {
+            key = fromDB
+        }
+        guard let key else {
             lastStatus = "no OpenCode key in \(authURLs.map(\.path).joined(separator: ", "))"
             throw URLError(.userAuthenticationRequired)
         }
@@ -78,19 +96,62 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
         return try Self.parseWindows(data)
     }
 
-    /// API key from OpenCode's auth.json (written by `/connect`), or nil.
+    /// API key from one credential file. Supports OpenCode v1 `auth.json`
+    /// (`{"opencode-go":{"key":…}}`) and v2 `account.json`
+    /// (`{"version":2,"accounts":{…serviceID:"opencode-go"…credential.key}}`).
     public nonisolated static func readAPIKey(at url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let goEntry = obj["opencode-go"] as? [String: Any]
-        else { return nil }
-        return goEntry["key"] as? String
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return apiKey(inJSON: data)
     }
 
     /// First of several candidate locations that holds a key.
     public nonisolated static func readAPIKey(at urls: [URL]) -> String? {
         for url in urls {
             if let key = readAPIKey(at: url) { return key }
+        }
+        return nil
+    }
+
+    /// Extracts the `opencode-go` key from either credential-file shape.
+    public nonisolated static func apiKey(inJSON data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+
+        // v1: {"opencode-go": {"type": "api", "key": "…"}}
+        if let entry = obj["opencode-go"] as? [String: Any], let key = entry["key"] as? String {
+            return key
+        }
+
+        // v2 account.json: {"version":2,"accounts":{id:{serviceID,credential:{key}}}}
+        if let accounts = obj["accounts"] as? [String: Any] {
+            for value in accounts.values {
+                guard let entry = value as? [String: Any],
+                      (entry["serviceID"] as? String) == "opencode-go",
+                      let credential = entry["credential"] as? [String: Any],
+                      let key = credential["key"] as? String
+                else { continue }
+                return key
+            }
+        }
+
+        return nil
+    }
+
+    /// v2 also stores keys in the DB `credential` table
+    /// (`integration_id = 'opencode-go'`, `value` JSON with a `key`).
+    private func openCodeKeyFromDatabase() -> String? {
+        for url in dbURLs where FileManager.default.fileExists(atPath: url.path) {
+            guard let output = try? sqlite.query(
+                databaseAt: url,
+                sql: "SELECT value FROM credential WHERE integration_id='opencode-go' LIMIT 1;"
+            ) else { continue }
+            let value = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            if let key = Self.apiKey(inJSON: Data(value.utf8)) { return key }
+            // value may be {"type":"key","key":"…"} — same flat shape.
+            if let obj = try? JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any],
+               let key = obj["key"] as? String {
+                return key
+            }
         }
         return nil
     }
