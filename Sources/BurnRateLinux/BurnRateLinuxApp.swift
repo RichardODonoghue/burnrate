@@ -132,11 +132,23 @@ private let settings = LinuxSettings()
 private let notifier = LinuxNotifier(settings: settings)
 private let state = AppState()
 
-/// In-memory remaining-% history for the trend chart (app lifetime).
+/// Remaining-% history for the trend chart. Persisted, not just in memory:
+/// a 5-minute poll only yields ~288 points a day, so losing the file on every
+/// restart would leave the trend chart permanently empty until you had been
+/// running for a week.
 private final class HistoryStore: @unchecked Sendable {
     private let lock = NSLock()
     private var samples: [RemainingSample] = []
+    private let paths: any AppPaths
     private static let retention: TimeInterval = 7 * 86400
+    private static let file = "remaining-history.json"
+
+    init(paths: any AppPaths = FileManagerPaths()) {
+        self.paths = paths
+        let loaded = AppStateFiles.load([RemainingSample].self, from: Self.file, paths: paths) ?? []
+        let cutoff = Date().addingTimeInterval(-Self.retention)
+        samples = loaded.filter { $0.date >= cutoff }
+    }
 
     func append(usage: [ProviderUsage], date: Date) {
         lock.withLock {
@@ -149,6 +161,7 @@ private final class HistoryStore: @unchecked Sendable {
             }
             let cutoff = date.addingTimeInterval(-Self.retention)
             samples = samples.filter { $0.date >= cutoff }
+            AppStateFiles.save(samples, to: Self.file, paths: paths)
         }
     }
 

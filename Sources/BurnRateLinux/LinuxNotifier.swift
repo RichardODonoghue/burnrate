@@ -10,6 +10,7 @@ import Foundation
 final class LinuxNotifier: @unchecked Sendable {
     private let lock = NSLock()
     private let settings: LinuxSettings
+    private let paths: any AppPaths
     private var lastRemaining: [String: Double] = [:]
     private var history: [String: [(date: Date, remaining: Double)]] = [:]
     private var lastResetsAt: [String: Date] = [:]
@@ -22,9 +23,72 @@ final class LinuxNotifier: @unchecked Sendable {
 
     private static let historyRetention: TimeInterval = 6 * 3600
     private static let burnCooldownInterval: TimeInterval = 1800
+    private static let stateFile = "notifier-state.json"
 
-    init(settings: LinuxSettings) {
+    /// Alert bookkeeping persisted across launches. Without it every restart
+    /// treats the first poll as a fresh baseline: the current milestone band
+    /// re-fires, a reset we already announced fires again, and the once-per-day
+    /// cost gate resets. Mirrors the macOS `MilestoneNotifier`'s `NotifierState`.
+    private struct NotifierState: Codable {
+        var lastRemaining: [String: Double] = [:]
+        var costFired: [String] = []
+        var burnCooldown: [String: Date] = [:]
+        var resetsAt: [String: Date] = [:]
+
+        // Fields were added over time; older files must still decode.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            lastRemaining = try c.decodeIfPresent([String: Double].self, forKey: .lastRemaining) ?? [:]
+            costFired = try c.decodeIfPresent([String].self, forKey: .costFired) ?? []
+            burnCooldown = try c.decodeIfPresent([String: Date].self, forKey: .burnCooldown) ?? [:]
+            resetsAt = try c.decodeIfPresent([String: Date].self, forKey: .resetsAt) ?? [:]
+        }
+
+        // Declared explicitly: a custom `init(from:)` in the main declaration
+        // suppresses the synthesised memberwise init.
+        init(lastRemaining: [String: Double], costFired: [String],
+             burnCooldown: [String: Date], resetsAt: [String: Date]) {
+            self.lastRemaining = lastRemaining
+            self.costFired = costFired
+            self.burnCooldown = burnCooldown
+            self.resetsAt = resetsAt
+        }
+    }
+
+    init(settings: LinuxSettings, paths: any AppPaths = FileManagerPaths()) {
         self.settings = settings
+        self.paths = paths
+        if let state = AppStateFiles.load(NotifierState.self, from: Self.stateFile, paths: paths) {
+            lastRemaining = state.lastRemaining
+            burnCooldown = state.burnCooldown
+            lastResetsAt = state.resetsAt
+            costFired = Set(state.costFired)
+        }
+    }
+
+    /// Drop spent day-keys so the file cannot grow without bound. Yesterday is
+    /// kept so a clock change or a late poll cannot re-open a spent gate.
+    private func pruneCostFired(now: Date) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let yesterday = today.addingTimeInterval(-86400)
+        costFired = costFired.filter { key in
+            guard let day = Double(key.split(separator: "|").last ?? "") else { return false }
+            let start = Date(timeIntervalSince1970: day)
+            return start >= yesterday && start <= today.addingTimeInterval(86400)
+        }
+    }
+
+    private func saveState(now: Date) {
+        pruneCostFired(now: now)
+        AppStateFiles.save(
+            NotifierState(
+                lastRemaining: lastRemaining,
+                costFired: Array(costFired),
+                burnCooldown: burnCooldown,
+                resetsAt: lastResetsAt
+            ),
+            to: Self.stateFile, paths: paths)
     }
 
     func evaluate(_ usage: [ProviderUsage], now: Date = Date()) {
@@ -71,6 +135,7 @@ final class LinuxNotifier: @unchecked Sendable {
                              alerts: values.burnAlerts)
             }
         }
+        saveState(now: now)
     }
 
     func evaluateCosts(_ costs: [(provider: String, cost: Double)], now: Date = Date()) {
@@ -88,6 +153,7 @@ final class LinuxNotifier: @unchecked Sendable {
             send(title: "\(alert.provider) daily spend",
                  body: String(format: "$%.2f spent today (limit $%.2f).", spend, alert.dailyLimitUSD))
         }
+        saveState(now: now)
     }
 
     private func recordHistory(windowID: String, date: Date, remaining: Double) {
