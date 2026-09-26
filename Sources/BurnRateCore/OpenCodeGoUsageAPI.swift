@@ -74,12 +74,8 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
     }
 
     private func performFetch() async throws -> [UsageWindow] {
-        var key = Self.readAPIKey(at: authURLs)
-        if key == nil, let fromDB = openCodeKeyFromDatabase() {
-            key = fromDB
-        }
-        guard let key else {
-            lastStatus = "no OpenCode key in \(authURLs.map(\.path).joined(separator: ", "))"
+        // Sets `lastStatus` to a precise reason when no key can be resolved.
+        guard let key = resolveAPIKey() else {
             throw URLError(.userAuthenticationRequired)
         }
         var request = URLRequest(url: Self.endpoint)
@@ -136,24 +132,73 @@ public actor OpenCodeGoUsageAPIProvider: UsageProvider {
         return nil
     }
 
-    /// v2 also stores keys in the DB `credential` table
-    /// (`integration_id = 'opencode-go'`, `value` JSON with a `key`).
-    private func openCodeKeyFromDatabase() -> String? {
-        for url in dbURLs where FileManager.default.fileExists(atPath: url.path) {
-            guard let output = try? sqlite.query(
-                databaseAt: url,
-                sql: "SELECT value FROM credential WHERE integration_id='opencode-go' LIMIT 1;"
-            ) else { continue }
-            let value = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty else { continue }
-            if let key = Self.apiKey(inJSON: Data(value.utf8)) { return key }
-            // value may be {"type":"key","key":"…"} — same flat shape.
-            if let obj = try? JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any],
-               let key = obj["key"] as? String {
-                return key
-            }
+    /// Resolves the Go API key from a credential file (v1/v2) or the database
+    /// (v2). On failure `lastStatus` explains precisely what was missing —
+    /// OpenCode v2 keeps the key *only* in `opencode.db`, so without that
+    /// distinction a missing `sqlite3` reads as a missing subscription.
+    private func resolveAPIKey() -> String? {
+        if let key = Self.readAPIKey(at: authURLs) { return key }
+        switch openCodeKeyFromDatabase() {
+        case .found(let key):
+            return key
+        case .noDatabase:
+            lastStatus = "no OpenCode key: no auth.json/account.json in "
+                + "\(authURLs.map(\.path).joined(separator: ", ")) and no opencode.db"
+        case .noCredentialRow:
+            lastStatus = "no opencode-go credential in the OpenCode database "
+                + "(run /connect in OpenCode to add one)"
+        case .unreadable(let why):
+            lastStatus = "no OpenCode key — \(why)"
         }
         return nil
+    }
+
+    /// Outcome of the v2 database fallback, so a missing `sqlite3` is reported
+    /// as such instead of masquerading as a missing subscription.
+    private enum DatabaseKeyLookup {
+        case found(String)
+        /// No `opencode.db` at any candidate path (pre-v2 layout, or not OpenCode).
+        case noDatabase
+        /// The database was read but holds no `opencode-go` row.
+        case noCredentialRow
+        /// A database exists but the key could not be read — `reason` is for humans.
+        case unreadable(String)
+    }
+
+    /// v2 also stores keys in the DB `credential` table
+    /// (`integration_id = 'opencode-go'`, `value` JSON with a `key`).
+    private func openCodeKeyFromDatabase() -> DatabaseKeyLookup {
+        let existing = dbURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existing.isEmpty else { return .noDatabase }
+
+        var failure: String?
+        for url in existing {
+            let output: String
+            do {
+                output = try sqlite.query(
+                    databaseAt: url,
+                    sql: "SELECT value FROM credential WHERE integration_id='opencode-go' LIMIT 1;"
+                )
+            } catch SQLiteError.runnerUnavailable {
+                failure = "the sqlite3 CLI is not installed, so \(url.lastPathComponent) "
+                    + "cannot be read (install your distro's sqlite package)"
+                continue
+            } catch {
+                failure = "could not query \(url.path): \(error)"
+                continue
+            }
+            let value = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            if let key = Self.apiKey(inJSON: Data(value.utf8)) { return .found(key) }
+            // value may be {"type":"key","key":"…"} — same flat shape.
+            if let obj = try? JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any],
+               let key = obj["key"] as? String
+            {
+                return .found(key)
+            }
+        }
+        if let failure { return .unreadable(failure) }
+        return .noCredentialRow
     }
 
     // MARK: - Parsing (internal for tests)

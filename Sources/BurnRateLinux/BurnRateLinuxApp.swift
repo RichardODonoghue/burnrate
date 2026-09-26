@@ -240,14 +240,30 @@ private func updateCharts(buckets: [(provider: String, samples: [UsageSample])])
     }
 }
 
-/// Opens the GitHub releases page (Linux has no in-app updater yet).
+/// Opens the GitHub releases page in the desktop browser (Linux has no in-app
+/// updater yet). Tries the usual openers, since a hardcoded path only works on
+/// the distro it was written on.
 private func openReleases() {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/xdg-open")
-    process.arguments = ["https://github.com/RichardODonoghue/burnrate/releases"]
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
-    try? process.run()
+    let url = "https://github.com/RichardODonoghue/burnrate/releases"
+    // (tool, leading arguments) — first one present on PATH wins.
+    let openers: [(tool: String, arguments: [String])] = [
+        ("xdg-open", []),
+        ("gio", ["open"]),
+        ("sensible-browser", []),
+        ("x-www-browser", []),
+        ("gnome-open", []),
+        ("kde-open", []),
+    ]
+    for opener in openers {
+        guard let path = ExternalTool.locate(named: opener.tool) else { continue }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = opener.arguments + [url]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        return
+    }
 }
 
 private func handleAction(_ action: StatusMenuAction) {

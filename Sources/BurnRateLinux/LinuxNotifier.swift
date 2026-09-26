@@ -16,6 +16,9 @@ final class LinuxNotifier: @unchecked Sendable {
     private var burnCooldown: [String: Date] = [:]
     private var recent: [String: Date] = [:]
     private var costFired: Set<String> = []
+    /// Set when alerts could not be delivered (e.g. `notify-send` missing), so
+    /// the app can say so instead of silently showing nothing.
+    public private(set) var lastError: String?
 
     private static let historyRetention: TimeInterval = 6 * 3600
     private static let burnCooldownInterval: TimeInterval = 1800
@@ -115,8 +118,17 @@ final class LinuxNotifier: @unchecked Sendable {
         guard recent[key] == nil else { return }
         recent[key] = now
 
+        // Resolved from PATH, not hardcoded: `notify-send` lives in different
+        // places per distro and is absent on minimal installs, where every
+        // alert would otherwise vanish without a trace.
+        guard let tool = ExternalTool.locate(named: "notify-send") else {
+            lastError = "notify-send not found — desktop alerts are disabled "
+                + "(install your distro's libnotify/notify-tools package)"
+            return
+        }
+        lastError = nil
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/notify-send")
+        process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = [title, body]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
