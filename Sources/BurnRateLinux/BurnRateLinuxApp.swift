@@ -4,6 +4,21 @@ import CBurnRateTray
 import Foundation
 import Glibc
 
+/// One provider's local-log samples for the dashboard.
+private struct Bucket: Sendable {
+    let provider: String
+    let samples: [UsageSample]
+}
+
+/// Everything the window needs for one poll. Cached so that changing a picker
+/// re-renders instantly instead of re-scanning every usage log.
+private struct DashboardSnapshot: Sendable {
+    var usage: [ProviderUsage] = []
+    var buckets: [Bucket] = []
+    var costs: [(provider: String, cost: Double)] = []
+    var missing: [String] = []
+}
+
 /// Fetches usage from every configured provider.
 private actor LinuxPoller {
     private let claude = ClaudeUsageAPIProvider()
@@ -28,59 +43,27 @@ private actor LinuxPoller {
         return lines
     }
 
-    func snapshot() async -> (text: String, usage: [ProviderUsage],
-                              buckets: [(provider: String, samples: [UsageSample])],
-                              costs: [(provider: String, cost: Double)],
-                              missing: [String]) {
-        var usage: [ProviderUsage] = []
+    func snapshot() async -> DashboardSnapshot {
+        var snapshot = DashboardSnapshot()
         let providers: [any UsageProvider] = [claude, openCode, local]
         for provider in providers {
             if let result = await provider.fetchUsage(capacities: PlanCapacities.byProviderWindow) {
-                usage.append(result)
+                snapshot.usage.append(result)
             }
         }
-        let missing = await diagnostics()
+        snapshot.missing = await diagnostics()
+        notifier.lastError.map { snapshot.missing.append($0) }
 
         let todayStart = Calendar.current.startOfDay(for: Date())
-        var buckets: [(provider: String, samples: [UsageSample])] = []
-        var costs: [(provider: String, cost: Double)] = []
         for (name, source) in costSources {
             let samples = (try? await source.collectSamples()) ?? []
-            buckets.append((name, samples))
+            snapshot.buckets.append(Bucket(provider: name, samples: samples))
             let spend = samples
                 .filter { $0.timestamp >= todayStart }
                 .reduce(0.0) { $0 + PricingService.shared.cost(of: $1) }
-            costs.append((name, spend))
+            snapshot.costs.append((name, spend))
         }
-
-        var lines: [String] = []
-        for entry in usage {
-            lines.append(entry.plan.map { "\(entry.providerName) - \($0)" } ?? entry.providerName)
-            for window in entry.windows {
-                let percent = window.percentRemaining.map { String(format: "%.0f", $0) } ?? "--"
-                var detail = "\(percent)%"
-                if let resetsAt = window.resetsAt {
-                    detail += " · resets \(RelativeTime.format(resetsAt))"
-                }
-                lines.append("    \(window.label): \(detail)")
-            }
-            lines.append("")
-        }
-        let text = lines.isEmpty
-            ? "No providers found.\n\nLog in to a supported CLI, then press Refresh."
-            : lines.joined(separator: "\n")
-
-        let diagnosticsText = missing.isEmpty
-            ? ""
-            : "\n\nNot detected:\n" + missing.map { "    \($0)" }.joined(separator: "\n")
-
-        var modelLines: [String] = []
-        let totals = ModelUsageAggregator.totals(buckets: buckets)
-        for entry in totals.prefix(10) {
-            modelLines.append("    \(entry.displayName): \(TokenFormat.format(entry.totalTokens)) tokens · \(entry.requests) req")
-        }
-        let modelText = modelLines.isEmpty ? "" : "\n\nModels (30d)\n" + modelLines.joined(separator: "\n")
-        return (text + modelText + diagnosticsText, usage, buckets, costs, missing)
+        return snapshot
     }
 }
 
@@ -125,6 +108,15 @@ private final class AppState: @unchecked Sendable {
 
     func lastUsage() -> [ProviderUsage] { lock.withLock { _lastUsage } }
     func setLastUsage(_ usage: [ProviderUsage]) { lock.withLock { _lastUsage = usage } }
+
+    /// Last poll's data plus the selection to render it for, so a picker change
+    /// re-renders from cache instead of re-scanning every usage log.
+    private var _snapshot: DashboardSnapshot?
+    private var _query: br_query?
+    func snapshot() -> DashboardSnapshot? { lock.withLock { _snapshot } }
+    func setSnapshot(_ value: DashboardSnapshot?) { lock.withLock { _snapshot = value } }
+    func query() -> br_query? { lock.withLock { _query } }
+    func setQuery(_ value: br_query) { lock.withLock { _query = value } }
 }
 
 private let poller = LinuxPoller()
@@ -170,11 +162,6 @@ private final class HistoryStore: @unchecked Sendable {
 
 private let history = HistoryStore()
 
-private let modelPalette: [(Double, Double, Double)] = [
-    (0.85, 0.47, 0.34), (0.25, 0.55, 0.95), (0.20, 0.68, 0.44), (0.72, 0.45, 0.85),
-    (0.95, 0.62, 0.24), (0.30, 0.72, 0.78), (0.83, 0.36, 0.55), (0.55, 0.60, 0.35),
-]
-
 private func providerRGB(_ provider: String) -> (Double, Double, Double) {
     switch provider {
     case "Claude": (0.85, 0.47, 0.34)
@@ -184,73 +171,206 @@ private func providerRGB(_ provider: String) -> (Double, Double, Double) {
     }
 }
 
-/// Pushes the trend and ranking charts from core chart data.
-private func updateCharts(buckets: [(provider: String, samples: [UsageSample])]) {
-    let samples = history.snapshot()
-    let cutoff = TrendChartData.trendCutoff(for: .week, now: Date())
+/// Matches the desktop file / package version. The Linux app is installed
+/// unpackaged, so there is no bundle to read an Info.plist from.
+private let appVersion = "0.8.0"
+
+/// One provider's entry for one day, with the metric the user selected.
+private func metricValue(_ entry: ModelUsageEntry, cost: Bool) -> Double {
+    cost ? entry.cost : Double(entry.totalTokens)
+}
+
+/// Builds the whole window contents for one query. This is the only place that
+/// knows how a selection maps onto data — the GTK layer just draws what comes
+/// out, so adding a control means adding a field here and a widget there, not
+/// inventing a parallel data path.
+private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> UnsafeMutablePointer<br_view>! {
+    let view = br_view_new()!
+    view.pointee.version = br_dup(appVersion)
+
+    // The provider list must stay stable across refreshes or the dropdown's
+    // selection would silently jump. "All" is always index 0.
+    let names = ["All"] + Array(Set(snapshot?.buckets.map(\.provider) ?? [])).sorted()
+    view.pointee.providers = dupCStrings(names)
+    view.pointee.provider_count = Int32(names.count)
+    let providerFilter: String? = {
+        let index = Int(query.provider)
+        guard index > 0, index < names.count else { return nil }
+        return names[index]
+    }()
+
+    let cost = Int(query.metric) == BR_METRIC_COST
+    let range: ChartRange = switch Int(query.range) {
+    case BR_RANGE_24H: .today
+    case BR_RANGE_30D: .month
+    default: .week
+    }
+
+    let buckets = (snapshot?.buckets ?? []).filter { bucket in
+        providerFilter == nil || bucket.provider == providerFilter
+    }
+    let rawTotals = ModelUsageAggregator.totals(
+        buckets: buckets.map { (provider: $0.provider, samples: $0.samples) })
+
+    // ---- cards -------------------------------------------------------------
+    let latest = TrendChartData.latestRolling(
+        samples: history.snapshot(), providerFilter: providerFilter)
+    let todayEntries: [ModelUsageEntry] = {
+        guard let day = TrendChartData.dayBucket(
+            for: Date(), in: ModelUsageAggregator.daily(
+                buckets: buckets.map { (provider: $0.provider, samples: $0.samples) },
+                days: Int(range.span / 86400) + 1))
+        else { return [] }
+        return day.entries
+    }()
+
+    var cards: [br_card] = []
+    for item in latest {
+        cards.append(br_card(
+            label: br_dup("\(item.provider) · rolling"),
+            value: br_dup(String(format: "%.0f%%", item.remaining)),
+            detail: nil))
+    }
+    let tokenTotal = todayEntries.reduce(0) { $0 + $1.totalTokens }
+    let requestTotal = todayEntries.reduce(0) { $0 + $1.requests }
+    cards.append(br_card(
+        label: br_dup("Tokens today"),
+        value: br_dup(tokenTotal > 0 ? TokenFormat.format(tokenTotal) : "—"),
+        detail: br_dup("\(requestTotal) requests")))
+    let costTotal = todayEntries.reduce(0.0) { $0 + $1.cost }
+    cards.append(br_card(
+        label: br_dup("Cost today"),
+        value: br_dup(costTotal > 0 ? String(format: "$%.2f", costTotal) : "—"),
+        detail: br_dup("list-price estimate")))
+    if !cards.isEmpty {
+        let buffer = UnsafeMutablePointer<br_card>.allocate(capacity: cards.count)
+        for (index, card) in cards.enumerated() { buffer[index] = card }
+        view.pointee.cards = buffer
+        view.pointee.card_count = Int32(cards.count)
+    }
+
+    // ---- trend -------------------------------------------------------------
+    let cutoff = TrendChartData.trendCutoff(for: range, now: Date())
+    let now = Date()
+    let span = max(now.timeIntervalSince(cutoff), 1)
+    let availableLabels = trendLabels(samples: history.snapshot(), range: range,
+                                      providerFilter: providerFilter)
+    view.pointee.trend_labels = dupCStrings(availableLabels)
+    view.pointee.trend_label_count = Int32(availableLabels.count)
+    let labelIndex = Int(query.trend_label)
+    let label = (labelIndex >= 0 && labelIndex < availableLabels.count)
+        ? availableLabels[labelIndex] : (availableLabels.first ?? "Rolling")
+
     let series = TrendChartData.buildTrendSeries(
-        samples: samples, label: "Rolling", providerFilter: nil, cutoff: cutoff)
-
+        samples: history.snapshot(), label: label,
+        providerFilter: providerFilter, cutoff: cutoff)
     if !series.isEmpty {
-        let dates = series.flatMap { $0.samples.map(\.date) }
-        if let minDate = dates.min(), let maxDate = dates.max() {
-            let span = max(maxDate.timeIntervalSince(minDate), 1)
-            var points: [br_trend_point] = []
-            var rgb: [Double] = []
-            for (index, item) in series.enumerated() {
-                let color = providerRGB(item.provider)
-                rgb.append(contentsOf: [color.0, color.1, color.2])
-                for point in item.samples {
-                    let x = max(0, min(1, point.date.timeIntervalSince(minDate) / span))
-                    points.append(br_trend_point(series: Int32(index), x: x, y: point.remaining))
-                }
+        let buffer = UnsafeMutablePointer<br_series>.allocate(capacity: series.count)
+        for (index, item) in series.enumerated() {
+            let color = providerRGB(item.provider)
+            let points = UnsafeMutablePointer<br_xy>.allocate(capacity: item.samples.count)
+            for (j, sample) in item.samples.enumerated() {
+                points[j] = br_xy(
+                    x: max(0, min(1, sample.date.timeIntervalSince(cutoff) / span)),
+                    y: sample.remaining)
             }
-            points.withUnsafeBufferPointer { pointBuffer in
-                rgb.withUnsafeBufferPointer { rgbBuffer in
-                    br_chart_set_trend(pointBuffer.baseAddress, Int32(pointBuffer.count),
-                                       rgbBuffer.baseAddress, Int32(series.count))
-                }
-            }
+            buffer[index] = br_series(
+                name: br_dup(item.name), rgb: (color.0, color.1, color.2),
+                dashed: item.scoped ? 1 : 0, count: Int32(item.samples.count), pts: points)
         }
+        view.pointee.series = buffer
+        view.pointee.series_count = Int32(series.count)
     }
 
-    let totals = Array(ModelUsageAggregator.totals(buckets: buckets).prefix(8))
-    if !totals.isEmpty {
-        let maxTokens = Double(totals.map(\.totalTokens).max() ?? 1)
-        var values: [Double] = []
-        var colors: [Double] = []
-        var labels: [String] = []
-        for entry in totals {
-            let color = modelPalette[abs(entry.displayName.hashValue) % modelPalette.count]
-            values.append(maxTokens > 0 ? Double(entry.totalTokens) / maxTokens : 0)
-            colors.append(contentsOf: [color.0, color.1, color.2])
-            labels.append(entry.displayName)
-        }
-        values.withUnsafeBufferPointer { valueBuffer in
-            colors.withUnsafeBufferPointer { colorBuffer in
-                labels.joined(separator: "\n").withCString { labelPointer in
-                    br_chart_set_bars(valueBuffer.baseAddress, colorBuffer.baseAddress,
-                                      Int32(values.count), labelPointer)
-                }
-            }
-        }
-    }
-
-    let daily = ModelUsageAggregator.daily(buckets: buckets, days: 14)
+    // ---- daily + ranking ---------------------------------------------------
+    let dayCount = Int(range.span / 86400) + 1
+    let daily = ModelUsageAggregator.daily(
+        buckets: buckets.map { (provider: $0.provider, samples: $0.samples) }, days: dayCount)
     if !daily.isEmpty {
-        var segments: [br_bar_segment] = []
+        var segments: [br_seg] = []
         for (dayIndex, day) in daily.enumerated() {
             for entry in day.entries {
-                let color = modelPalette[abs(entry.displayName.hashValue) % modelPalette.count]
-                segments.append(br_bar_segment(day: Int32(dayIndex),
-                                               value: Double(entry.totalTokens),
-                                               red: color.0, green: color.1, blue: color.2))
+                let color = modelColor(entry.displayName)
+                segments.append(br_seg(
+                    day: Int32(dayIndex), value: metricValue(entry, cost: cost),
+                    rgb: (color.0, color.1, color.2)))
             }
         }
-        segments.withUnsafeBufferPointer { buffer in
-            br_chart_set_daily(buffer.baseAddress, Int32(segments.count), Int32(daily.count))
+        let buffer = UnsafeMutablePointer<br_seg>.allocate(capacity: segments.count)
+        for (index, segment) in segments.enumerated() { buffer[index] = segment }
+        view.pointee.segments = buffer
+        view.pointee.segment_count = Int32(segments.count)
+        view.pointee.day_count = Int32(daily.count)
+    }
+
+    let ranked = Array(rawTotals.prefix(8))
+    if !ranked.isEmpty {
+        let peak = ranked.map { metricValue($0, cost: cost) }.max() ?? 1
+        let buffer = UnsafeMutablePointer<br_bar>.allocate(capacity: ranked.count)
+        for (index, entry) in ranked.enumerated() {
+            let color = modelColor(entry.displayName)
+            let value = metricValue(entry, cost: cost)
+            buffer[index] = br_bar(
+                label: br_dup(cost
+                    ? String(format: "%@ $%.2f", entry.displayName, entry.cost)
+                    : "\(entry.displayName) · \(TokenFormat.format(entry.totalTokens))"),
+                value: peak > 0 ? value / peak : 0,
+                rgb: (color.0, color.1, color.2))
+        }
+        view.pointee.bars = buffer
+        view.pointee.bar_count = Int32(ranked.count)
+    }
+
+    // ---- status + diagnostics ---------------------------------------------
+    if snapshot == nil {
+        view.pointee.status = br_dup("Loading usage…")
+    } else if series.isEmpty && daily.isEmpty && ranked.isEmpty {
+        view.pointee.status = br_dup("No usage data yet. It appears once the local logs contain data, "
+            + "or a plan reports usage.")
+    } else if snapshot!.usage.isEmpty {
+        view.pointee.status = br_dup("No providers found — log in to a supported CLI, then press Refresh.")
+    }
+    if let missing = snapshot?.missing, !missing.isEmpty {
+        view.pointee.diagnostics = br_dup(
+            ("Not working:\n" + missing.map { "  \($0)" }.joined(separator: "\n")))
+    }
+    return view
+}
+
+/// Window labels that actually have data in the range, so the picker never
+/// offers a window that would render an empty chart.
+private func trendLabels(samples: [RemainingSample], range: ChartRange,
+                         providerFilter: String?) -> [String] {
+    let cutoff = TrendChartData.trendCutoff(for: range, now: Date())
+    let scoped = Set(samples.filter { $0.date >= cutoff }
+        .map { TrendChartData.canonicalTrendLabel($0.label) })
+    for candidate in ["Rolling", "Weekly", "Monthly"] where scoped.contains(candidate) {
+        if providerFilter == nil || samples.contains(where: {
+            $0.provider == providerFilter && $0.date >= cutoff
+                && TrendChartData.canonicalTrendLabel($0.label) == candidate
+        }) {
+            return [candidate]
         }
     }
+    return scoped.sorted().isEmpty ? ["Rolling"] : Array(scoped.sorted())
+}
+
+private func modelColor(_ name: String) -> (Double, Double, Double) {
+    let palette: [(Double, Double, Double)] = [
+        (0.85, 0.47, 0.34), (0.25, 0.55, 0.95), (0.20, 0.68, 0.44), (0.72, 0.45, 0.85),
+        (0.95, 0.62, 0.24), (0.30, 0.72, 0.78), (0.83, 0.36, 0.55), (0.55, 0.60, 0.35),
+    ]
+    var hash: UInt64 = 5381
+    for byte in name.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
+    return palette[Int(hash % UInt64(palette.count))]
+}
+
+/// C-owned copies of a string array, for a view the GTK layer will free.
+private func dupCStrings(_ items: [String]) -> UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>? {
+    guard !items.isEmpty else { return nil }
+    let buffer = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: items.count)
+    for (index, item) in items.enumerated() { buffer[index] = br_dup(item) }
+    return buffer
 }
 
 /// Opens the GitHub releases page in the desktop browser (Linux has no in-app
@@ -284,7 +404,7 @@ private func handleAction(_ action: StatusMenuAction) {
     case .openDashboard:
         break // the window is already presented on Linux
     case .openCharts:
-        br_chart_show("BurnRate Charts")
+        br_ui_show_pane(Int32(BR_PANE_USAGE))
     case .openSettings:
         showSettings()
     case .checkForUpdates, .installUpdate:
@@ -474,26 +594,30 @@ private func showSettings() {
 private func onRefresh(_ context: UnsafeMutableRawPointer?) {
     Task.detached {
         let result = await poller.snapshot()
-        // A provider can be healthy while its alerts are dead (notify-send
-        // missing), so fold that into the same "not working" list.
-        var missing = result.missing
-        if let notifierError = notifier.lastError { missing.append(notifierError) }
-
-        let text = missing.isEmpty
-            ? result.text
-            : result.text + "\n\nNot detected:\n" + missing.map { "    \($0)" }.joined(separator: "\n")
-        text.withCString { br_ui_post($0) }
-        if !missing.isEmpty {
-            NSLog("%@", "BurnRate: providers not detected — " + missing.joined(separator: " | "))
+        if !result.missing.isEmpty {
+            NSLog("%@", "BurnRate: providers not detected — " + result.missing.joined(separator: " | "))
         }
         history.append(usage: result.usage, date: Date())
         state.setLastUsage(result.usage)
-        updateMainTray(usage: result.usage, diagnostics: missing)
+        state.setSnapshot(result)
+        updateMainTray(usage: result.usage, diagnostics: result.missing)
         syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
         notifier.evaluateCosts(result.costs)
-        updateCharts(buckets: result.buckets)
+        presentWindow()
     }
+}
+
+/// GTK calls this on the main thread whenever a picker or pane changes. It must
+/// return immediately — the redraw happens when `br_ui_present` lands.
+private func onQuery(_ query: br_query, _ context: UnsafeMutableRawPointer?) {
+    state.setQuery(query)
+    presentWindow()
+}
+
+private func presentWindow() {
+    guard let query = state.query() else { return }
+    br_ui_present(buildView(query, snapshot: state.snapshot()))
 }
 
 @main
@@ -506,7 +630,7 @@ struct BurnRateLinuxMain {
             state.setActionStore(ActionStore(), for: tray)
         }
         syncWidgetTrays()
-        br_ui_run("BurnRate", "Loading usage…", onRefresh, nil)
+        br_ui_run("BurnRate", onQuery, onRefresh, nil)
         br_tray_stop_all()
     }
 }
