@@ -327,10 +327,17 @@ private func setTrayItems(_ tray: Int32, model: StatusMenuModel) {
     state.actionStore(tray)?.replace(actions)
 }
 
-private func updateMainTray(usage: [ProviderUsage]) {
+private func updateMainTray(usage: [ProviderUsage], diagnostics: [String]) {
     guard state.mainTray >= 0 else { return }
+    // Show the worst rolling remaining as the item's visible label, the way the
+    // macOS status item bakes it into its icon. Without this the menu-bar item
+    // read a static "BurnRate", and the numbers were only visible after opening
+    // the dropdown or the dashboard window.
+    let remaining = StatusMenuBuilder.worstRollingRemaining(usage: usage)
+    br_tray_set_title(state.mainTray, remaining.map { String(format: "%.0f%%", $0) } ?? "BurnRate")
     setTrayItems(state.mainTray, model: StatusMenuBuilder.mainMenu(
-        usage: usage, updateVersion: nil, isBusy: false, includesCharts: true))
+        usage: usage, updateVersion: nil, isBusy: false, includesCharts: true,
+        diagnostics: diagnostics))
 }
 
 /// Creates/removes per-provider widget trays to match settings.
@@ -454,13 +461,21 @@ private func showSettings() {
 private func onRefresh(_ context: UnsafeMutableRawPointer?) {
     Task.detached {
         let result = await poller.snapshot()
-        result.text.withCString { br_ui_post($0) }
-        if !result.missing.isEmpty {
-            NSLog("%@", "BurnRate: providers not detected — " + result.missing.joined(separator: " | "))
+        // A provider can be healthy while its alerts are dead (notify-send
+        // missing), so fold that into the same "not working" list.
+        var missing = result.missing
+        if let notifierError = notifier.lastError { missing.append(notifierError) }
+
+        let text = missing.isEmpty
+            ? result.text
+            : result.text + "\n\nNot detected:\n" + missing.map { "    \($0)" }.joined(separator: "\n")
+        text.withCString { br_ui_post($0) }
+        if !missing.isEmpty {
+            NSLog("%@", "BurnRate: providers not detected — " + missing.joined(separator: " | "))
         }
         history.append(usage: result.usage, date: Date())
         state.setLastUsage(result.usage)
-        updateMainTray(usage: result.usage)
+        updateMainTray(usage: result.usage, diagnostics: missing)
         syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
         notifier.evaluateCosts(result.costs)
