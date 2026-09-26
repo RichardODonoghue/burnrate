@@ -71,6 +71,30 @@ struct StatusMenuTests {
         #expect(model.entries.contains(.windowRow(label: "Rolling", detail: "--%")))
     }
 
+    /// A tray app that silently drops a provider is indistinguishable from one
+    /// that is idle — the reason has to be in the menu.
+    @Test func diagnosticsAppearInMainMenu() {
+        let model = StatusMenuBuilder.mainMenu(
+            usage: [usage("OpenCode", windows: [("Rolling", 82, nil)])],
+            updateVersion: nil, isBusy: false,
+            diagnostics: ["Claude: no Claude credentials"], now: now
+        )
+        #expect(model.entries.contains(.text("Not working:")))
+        #expect(model.entries.contains(.text("  Claude: no Claude credentials")))
+        // Still a usable menu: the actions survive below the warning block.
+        #expect(model.entries.contains { entry in
+            if case .action(title: "Settings…", action: .openSettings, isEnabled: true) = entry {
+                true
+            } else { false }
+        })
+    }
+
+    @Test func noDiagnosticsBlockWhenHealthy() {
+        let model = StatusMenuBuilder.mainMenu(
+            usage: [], updateVersion: nil, isBusy: false, diagnostics: [], now: now)
+        #expect(!model.entries.contains(.text("Not working:")))
+    }
+
     @Test func widgetTitlePrefersMonthlyThenFirstWindow() {
         #expect(StatusMenuBuilder.widgetTitle(provider: "OpenCode", usage: usage("OpenCode", windows: [
             ("Rolling", 40, nil), ("Monthly", 75, nil),

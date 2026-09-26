@@ -53,6 +53,7 @@ public enum StatusMenuBuilder {
         updateVersion: String?,
         isBusy: Bool,
         includesCharts: Bool = false,
+        diagnostics: [String] = [],
         now: Date = Date()
     ) -> StatusMenuModel {
         var entries: [StatusMenuEntry] = []
@@ -67,6 +68,18 @@ public enum StatusMenuBuilder {
         }
         if usage.isEmpty {
             entries.append(.text("Loading usage…"))
+            entries.append(.separator)
+        }
+
+        // Anything that isn't working, stated in the menu itself. A tray app
+        // that silently drops a provider is indistinguishable from one that is
+        // idle, and the reason usually lives in a log nobody opens (a CLI
+        // missing from PATH, an account that is not authenticated).
+        if !diagnostics.isEmpty {
+            entries.append(.text("Not working:"))
+            for line in diagnostics {
+                entries.append(.text("  \(line)"))
+            }
             entries.append(.separator)
         }
 

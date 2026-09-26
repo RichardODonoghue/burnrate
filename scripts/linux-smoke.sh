@@ -46,16 +46,34 @@ echo "tray count=$COUNT"
 SVC=$(printf "%s" "$ITEMS" | grep -oE "org\.kde\.StatusNotifierItem-[0-9]+-0" | head -1)
 [ -n "$SVC" ] || { echo "tray: no main item"; exit 1; }
 echo "tray: registered $SVC"
-gdbus call --session --dest "$SVC" --object-path /MenuBar --method com.canonical.dbusmenu.GetLayout -- 0 -1 "[]" \
-    | grep -q "Quit" && echo "tray: menu OK" || { echo "tray: empty menu"; exit 1; }
-# Open the charts window (id 4) and let Cairo draw it.
+LAYOUT=$(gdbus call --session --dest "$SVC" --object-path /MenuBar \
+    --method com.canonical.dbusmenu.GetLayout -- 0 -1 "[]")
+printf "%s" "$LAYOUT" | grep -q "Quit" && echo "tray: menu OK" || { echo "tray: empty menu"; exit 1; }
+
+# Resolve item ids by label. The menu row count is not fixed — a "Not working:"
+# block only appears when a provider is broken — so positional ids drift.
+menu_id() {
+  printf "%s" "$LAYOUT" | python3 -c "
+import re, sys
+want = sys.argv[1]
+for m in re.finditer(r\"<\\((\\d+), \\{[\\x27]label[\\x27]: <[\\x27]([^\\x27]*)[\\x27]>\", sys.stdin.read()):
+    if m.group(2).startswith(want):
+        print(m.group(1)); break
+" "$1"
+}
+CHARTS_ID=$(menu_id "Charts")
+QUIT_ID=$(menu_id "Quit")
+[ -n "$CHARTS_ID" ] && [ -n "$QUIT_ID" ] || { echo "tray: could not resolve menu ids"; exit 1; }
+echo "tray: charts id=$CHARTS_ID quit id=$QUIT_ID"
+
+# Open the charts window and let Cairo draw it.
 gdbus call --session --dest "$SVC" --object-path /MenuBar \
-    --method com.canonical.dbusmenu.Event -- 4 clicked "<uint32 0>" 0 >/dev/null || true
+    --method com.canonical.dbusmenu.Event -- "$CHARTS_ID" clicked "<uint32 0>" 0 >/dev/null || true
 sleep 3
 if kill -0 "$APP" 2>/dev/null; then echo "charts: window OK"; else echo "charts: crash"; cat /tmp/app.log; exit 1; fi
-# Quit (id 7).
+# Quit.
 gdbus call --session --dest "$SVC" --object-path /MenuBar \
-    --method com.canonical.dbusmenu.Event -- 7 clicked "<uint32 0>" 0 >/dev/null || true
+    --method com.canonical.dbusmenu.Event -- "$QUIT_ID" clicked "<uint32 0>" 0 >/dev/null || true
 sleep 3
 if kill -0 "$APP" 2>/dev/null; then echo "tray: click not dispatched"; exit 1; else echo "tray: click dispatched"; fi
 INNER
