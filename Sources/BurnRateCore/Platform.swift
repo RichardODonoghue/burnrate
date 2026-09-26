@@ -59,9 +59,43 @@ public protocol SQLiteQuerying: Sendable {
     func query(databaseAt path: URL, sql: String) throws -> String
 }
 
-public enum SQLiteError: Error {
+public enum SQLiteError: Error, Equatable {
     case runnerUnavailable
     case queryFailed(Int32)
+}
+
+/// Locates the external command-line tools the app shells out to.
+///
+/// Distros disagree about where these live (Homebrew, Nix, `/usr/local`, and
+/// minimal images omit them entirely), so a hardcoded absolute path silently
+/// disables whatever feature needed the tool — invisibly, because the tool is
+/// only reached on a code path the user may never exercise. Walk `$PATH`
+/// first, then the well-known absolute locations.
+public enum ExternalTool {
+    /// - Parameter additionalCandidates: extra absolute paths to try after
+    ///   `$PATH` and the generic fallbacks — for kegs whose directory is named
+    ///   after the *package* rather than the binary (`sqlite`, not `sqlite3`).
+    public nonisolated static func locate(
+        named name: String,
+        additionalCandidates: [String] = [],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> String? {
+        var candidates: [String] = []
+        if let path = environment["PATH"] {
+            candidates += path
+                .split(separator: ":", omittingEmptySubsequences: true)
+                .map { "\($0)/\(name)" }
+        }
+        candidates += [
+            "/usr/bin/\(name)",                 // macOS, Fedora, Debian
+            "/bin/\(name)",
+            "/usr/local/bin/\(name)",
+            "/opt/homebrew/bin/\(name)",        // Homebrew, Apple Silicon
+        ]
+        candidates += additionalCandidates
+        return candidates.first(where: isExecutable)
+    }
 }
 
 /// `SQLiteQuerying` via the `sqlite3` CLI in read-only mode (macOS/Linux).
@@ -69,9 +103,26 @@ public enum SQLiteError: Error {
 public struct ProcessSQLiteRunner: SQLiteQuerying {
     public init() {}
 
+    /// Locates the `sqlite3` CLI. This one matters more than it looks: OpenCode
+    /// v2 keeps its `opencode-go` key only in `opencode.db`, so a missing
+    /// runner made the whole subscription read as "no OpenCode key".
+    public nonisolated static func sqlite3Executable(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> String? {
+        ExternalTool.locate(
+            named: "sqlite3",
+            // Homebrew's keg is named after the package, not the binary.
+            additionalCandidates: ["/usr/local/opt/sqlite/bin/sqlite3"],
+            environment: environment, isExecutable: isExecutable)
+    }
+
     public func query(databaseAt path: URL, sql: String) throws -> String {
+        guard let executable = Self.sqlite3Executable() else {
+            throw SQLiteError.runnerUnavailable
+        }
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = ["-readonly", path.path, "-separator", "\t", sql]
         let pipe = Pipe()
         process.standardOutput = pipe
