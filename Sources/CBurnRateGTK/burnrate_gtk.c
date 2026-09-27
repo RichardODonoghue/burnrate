@@ -18,6 +18,16 @@ void *br_alloc(size_t bytes) {
 
 /// Frees everything a view owns, but not the view itself — so it can be reused
 /// for a static instance as well as a heap one.
+static void free_string_array(char **items, int count) {
+    if (!items) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        g_free(items[i]);
+    }
+    g_free(items);
+}
+
 static void view_clear(br_view *view) {
     if (!view) {
         return;
@@ -962,14 +972,457 @@ static GtkWidget *build_usage_pane(void) {
     return scroller;
 }
 
-static GtkWidget *placeholder_pane(const char *message) {
+/* ---- settings panes ------------------------------------------------------ */
+
+br_settings *br_settings_new(void) {
+    return g_new0(br_settings, 1);
+}
+
+/// Frees everything a settings payload owns, but not the payload itself, so it
+/// can be reused for a static instance as well as a heap one.
+static void settings_clear(br_settings *settings) {
+    if (!settings) {
+        return;
+    }
+    for (int i = 0; i < settings->rule_count; i++) {
+        g_free(settings->rules[i].provider);
+        g_free(settings->rules[i].window_label);
+    }
+    g_free(settings->rules);
+    g_free(settings->widgets_on);
+    g_free(settings->alerts_status);
+    g_free(settings->version);
+    g_free(settings->update_status);
+    memset(settings, 0, sizeof(*settings));
+}
+
+void br_settings_free(br_settings *settings) {
+    if (!settings) {
+        return;
+    }
+    settings_clear(settings);
+    g_free(settings);
+}
+
+static GtkWidget *g_notifications = NULL;
+static GtkWidget *g_widgets_pane = NULL;
+static GtkWidget *g_about = NULL;
+static br_settings g_settings;
+static char **g_providers = NULL;
+static int g_provider_count = 0;
+static char **g_window_labels = NULL;
+static int g_window_label_count = 0;
+static br_settings_cb g_pane_cb = NULL;
+static void *g_pane_ctx = NULL;
+
+static void fire(int action, int index, const char *provider,
+                 const char *window_label, double value) {
+    if (g_pane_cb) {
+        g_pane_cb(action, index, provider, window_label, value, g_pane_ctx);
+    }
+}
+
+/* A titled group, matching the macOS Card panes. */
+static GtkWidget *card(const char *title) {
+    GtkWidget *frame = gtk_frame_new(title);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(box, 10);
+    gtk_widget_set_margin_bottom(box, 10);
+    gtk_widget_set_margin_start(box, 12);
+    gtk_widget_set_margin_end(box, 12);
+    gtk_frame_set_child(GTK_FRAME(frame), box);
+    return frame;
+}
+
+static GtkWidget *card_body(GtkWidget *card_widget) {
+    return gtk_frame_get_child(GTK_FRAME(card_widget));
+}
+
+static GtkWidget *row_box(void) {
+    return gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+}
+
+static void on_reset_toggled(GtkToggleButton *button, gpointer data) {
+    (void)data;
+    if (g_syncing) {
+        return;
+    }
+    fire(BR_ACT_RESET_TOGGLE, 0, NULL, NULL,
+         gtk_toggle_button_get_active(button) ? 1 : 0);
+}
+
+static void on_widget_toggled(GtkToggleButton *button, gpointer data) {
+    int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "widget-index"));
+    if (g_syncing) {
+        return;
+    }
+    fire(BR_ACT_WIDGET_TOGGLE, index, NULL, NULL,
+         gtk_toggle_button_get_active(button) ? 1 : 0);
+}
+
+/* Every rule edit carries the rule's index, so one shape of handler serves all
+ * three rule kinds. */
+static void rule_edit(GtkWidget *widget, int action) {
+    if (g_syncing) {
+        return;
+    }
+    int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "rule-index"));
+    double value = GTK_IS_SPIN_BUTTON(widget)
+        ? gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget)) : 0;
+    fire(action, index, NULL, NULL, value);
+}
+
+static void on_rule_step_changed(GtkSpinButton *s, gpointer d) { (void)d; rule_edit(GTK_WIDGET(s), BR_ACT_RULE_STEP); }
+static void on_rule_drop_changed(GtkSpinButton *s, gpointer d) { (void)d; rule_edit(GTK_WIDGET(s), BR_ACT_RULE_DROP); }
+static void on_rule_minutes_changed(GtkSpinButton *s, gpointer d) { (void)d; rule_edit(GTK_WIDGET(s), BR_ACT_RULE_MINUTES); }
+static void on_rule_cost_changed(GtkSpinButton *s, gpointer d) { (void)d; rule_edit(GTK_WIDGET(s), BR_ACT_RULE_COST); }
+
+static void on_rule_deleted(GtkButton *button, gpointer data) {
+    (void)button;
+    if (g_syncing) {
+        return;
+    }
+    int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(data), "rule-index"));
+    fire(BR_ACT_RULE_DELETE, index, NULL, NULL, 0);
+}
+
+static void on_rule_added(GtkButton *button, gpointer data) {
+    (void)button;
+    if (g_syncing) {
+        return;
+    }
+    fire(BR_ACT_RULE_ADD, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(data), "rule-kind")),
+         NULL, NULL, 0);
+}
+
+static void on_check_updates(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    fire(BR_ACT_CHECK_UPDATES, 0, NULL, NULL, 0);
+}
+
+static GtkWidget *readonly_dropdown(char **items, int count, const char *selected) {
+    const char *const fallback[] = {"—", NULL};
+    GtkWidget *dd = gtk_drop_down_new_from_strings(count > 0 ? (const char *const *)items : fallback);
+    if (count > 0) {
+        GtkStringList *list = gtk_string_list_new(NULL);
+        for (int i = 0; i < count; i++) {
+            gtk_string_list_append(list, items[i] ? items[i] : "");
+        }
+        gtk_drop_down_set_model(GTK_DROP_DOWN(dd), G_LIST_MODEL(list));
+        g_object_unref(list);
+        for (int i = 0; selected && i < count; i++) {
+            if (g_strcmp0(items[i], selected) == 0) {
+                gtk_drop_down_set_selected(GTK_DROP_DOWN(dd), (guint)i);
+                break;
+            }
+        }
+    }
+    /* Read-only: the rows mirror the host's rules, and re-pointing one at a
+     * different provider/window would need a create-or-update path the host does
+     * not expose. Thresholds and steps are editable in place. */
+    gtk_widget_set_sensitive(dd, FALSE);
+    return dd;
+}
+
+static GtkWidget *spin(double value, double min, double max, double step, GCallback changed) {
+    GtkWidget *spin_button = gtk_spin_button_new_with_range(min, max, step);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin_button), value);
+    g_signal_connect(spin_button, "value-changed", changed, NULL);
+    gtk_widget_set_size_request(spin_button, 80, -1);
+    return spin_button;
+}
+
+static GtkWidget *caption(const char *text) {
+    return scaled_label(text, 0.85, FALSE, 0.45, 0.45, 0.45);
+}
+
+static GtkWidget *build_rule_row(const br_rule *rule, int index) {
+    GtkWidget *row = row_box();
+    g_object_set_data(G_OBJECT(row), "rule-index", GINT_TO_POINTER(index));
+    gtk_box_append(GTK_BOX(row), readonly_dropdown(g_providers, g_provider_count, rule->provider));
+    if (rule->kind == BR_RULE_COST) {
+        gtk_box_append(GTK_BOX(row), caption("per day, $"));
+        GtkWidget *limit = spin(rule->cost_limit, 1, 10000, 1, G_CALLBACK(on_rule_cost_changed));
+        g_object_set_data(G_OBJECT(limit), "rule-index", GINT_TO_POINTER(index));
+        gtk_box_append(GTK_BOX(row), limit);
+    } else {
+        gtk_box_append(GTK_BOX(row),
+                       readonly_dropdown(g_window_labels, g_window_label_count, rule->window_label));
+        if (rule->kind == BR_RULE_MILESTONE) {
+            gtk_box_append(GTK_BOX(row), caption("every %"));
+            GtkWidget *step_spin = spin(rule->step, 5, 50, 1, G_CALLBACK(on_rule_step_changed));
+            g_object_set_data(G_OBJECT(step_spin), "rule-index", GINT_TO_POINTER(index));
+            gtk_box_append(GTK_BOX(row), step_spin);
+        } else {
+            gtk_box_append(GTK_BOX(row), caption("drop % within"));
+            GtkWidget *drop = spin(rule->percent_drop, 5, 95, 1, G_CALLBACK(on_rule_drop_changed));
+            g_object_set_data(G_OBJECT(drop), "rule-index", GINT_TO_POINTER(index));
+            gtk_box_append(GTK_BOX(row), drop);
+            gtk_box_append(GTK_BOX(row), caption("min"));
+            GtkWidget *mins = spin(rule->minutes, 5, 240, 5, G_CALLBACK(on_rule_minutes_changed));
+            g_object_set_data(G_OBJECT(mins), "rule-index", GINT_TO_POINTER(index));
+            gtk_box_append(GTK_BOX(row), mins);
+        }
+    }
+    GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(row), spacer);
+    GtkWidget *remove = gtk_button_new_with_label("Remove");
+    g_signal_connect(remove, "clicked", G_CALLBACK(on_rule_deleted), row);
+    gtk_box_append(GTK_BOX(row), remove);
+    return row;
+}
+
+static GtkWidget *rule_section(const char *footnote, int kind) {
+    GtkWidget *frame = card(NULL);
+    GtkWidget *box = card_body(frame);
+    gtk_box_append(GTK_BOX(box), caption(footnote));
+    gboolean any = FALSE;
+    for (int i = 0; i < g_settings.rule_count; i++) {
+        if (g_settings.rules[i].kind == kind) {
+            gtk_box_append(GTK_BOX(box), build_rule_row(&g_settings.rules[i], i));
+            any = TRUE;
+        }
+    }
+    if (!any) {
+        gtk_box_append(GTK_BOX(box), caption("No rules."));
+    }
+    GtkWidget *add = gtk_button_new_with_label("Add rule");
+    g_object_set_data(G_OBJECT(add), "rule-kind", GINT_TO_POINTER(kind));
+    g_signal_connect(add, "clicked", G_CALLBACK(on_rule_added), NULL);
+    gtk_widget_set_halign(add, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(box), add);
+    return frame;
+}
+
+static void rebuild_notifications(void) {
+    if (!g_notifications) {
+        return;
+    }
+    clear_box(g_notifications);
+
+    /* macOS shows a "System permission" card. Linux has no permission API, so
+     * the equivalent question is whether alerts can be delivered at all. */
+    GtkWidget *perm = card("Desktop alerts");
+    GtkWidget *perm_box = card_body(perm);
+    gtk_box_append(GTK_BOX(perm_box), scaled_label(
+        g_settings.alerts_status ? g_settings.alerts_status : "Unknown", 0.95, FALSE,
+        -1, -1, -1));
+    gtk_box_append(GTK_BOX(perm_box), caption(
+        g_settings.alerts_ok
+            ? "BurnRate keeps polling and updating the menu either way."
+            : "Install your distro's libnotify package to enable banners."));
+    gtk_box_append(GTK_BOX(g_notifications), perm);
+
+    GtkWidget *resets = card("Window resets");
+    GtkWidget *reset_box = card_body(resets);
+    GtkWidget *reset_toggle = gtk_check_button_new_with_label("Notify when a window resets");
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(reset_toggle),
+                                g_settings.notify_on_reset ? TRUE : FALSE);
+    g_signal_connect(reset_toggle, "toggled", G_CALLBACK(on_reset_toggled), NULL);
+    gtk_box_append(GTK_BOX(reset_box), reset_toggle);
+    gtk_box_append(GTK_BOX(reset_box),
+                   caption("Fires when a quota window starts over and remaining jumps back up."));
+    gtk_box_append(GTK_BOX(g_notifications), resets);
+
+    gtk_box_append(GTK_BOX(g_notifications), rule_section(
+        "Fires each time remaining drops past another increment. One rule per plan window.",
+        BR_RULE_MILESTONE));
+    gtk_box_append(GTK_BOX(g_notifications), rule_section(
+        "Fires when remaining falls sharply inside a trailing window.", BR_RULE_BURN));
+    gtk_box_append(GTK_BOX(g_notifications), rule_section(
+        "Fires once per day when local-log spend passes a limit.", BR_RULE_COST));
+}
+
+static void rebuild_widgets_pane(void) {
+    if (!g_widgets_pane) {
+        return;
+    }
+    clear_box(g_widgets_pane);
+    GtkWidget *frame = card("Extra menu-bar widgets");
+    GtkWidget *box = card_body(frame);
+    gtk_box_append(GTK_BOX(box), caption(
+        "Each widget is an additional menu-bar item showing live usage % for that provider."));
+    if (g_provider_count == 0) {
+        gtk_box_append(GTK_BOX(box), scaled_label(
+            "No providers are active. Log in to a supported CLI to see it here.",
+            0.9, FALSE, 0.45, 0.45, 0.45));
+    }
+    for (int i = 0; i < g_provider_count; i++) {
+        GtkWidget *row = row_box();
+        GtkWidget *name = gtk_label_new(g_providers[i] ? g_providers[i] : "");
+        gtk_label_set_xalign(GTK_LABEL(name), 0.0f);
+        gtk_widget_set_hexpand(name, TRUE);
+        gtk_box_append(GTK_BOX(row), name);
+        int on = (i < g_settings.widget_count) ? g_settings.widgets_on[i] : 0;
+        GtkWidget *toggle = gtk_check_button_new();
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), on ? TRUE : FALSE);
+        g_object_set_data(G_OBJECT(toggle), "widget-index", GINT_TO_POINTER(i));
+        g_signal_connect(toggle, "toggled", G_CALLBACK(on_widget_toggled), NULL);
+        gtk_box_append(GTK_BOX(row), toggle);
+        gtk_box_append(GTK_BOX(box), row);
+    }
+    gtk_box_append(GTK_BOX(g_widgets_pane), frame);
+}
+
+static void rebuild_about(void) {
+    if (!g_about) {
+        return;
+    }
+    clear_box(g_about);
+
+    GtkWidget *head = card(NULL);
+    GtkWidget *head_box = card_body(head);
+    gtk_box_append(GTK_BOX(head_box), scaled_label("BurnRate", 1.5, TRUE, -1, -1, -1));
+    gtk_box_append(GTK_BOX(head_box), caption(g_settings.version ? g_settings.version : ""));
+    gtk_box_append(GTK_BOX(g_about), head);
+
+    GtkWidget *updates = card("Updates");
+    GtkWidget *updates_box = card_body(updates);
+    GtkWidget *check = gtk_button_new_with_label("Check for Updates…");
+    g_signal_connect(check, "clicked", G_CALLBACK(on_check_updates), NULL);
+    gtk_widget_set_halign(check, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(updates_box), check);
+    if (g_settings.update_status && *g_settings.update_status) {
+        gtk_box_append(GTK_BOX(updates_box),
+                       scaled_label(g_settings.update_status, 0.9, FALSE, -1, -1, -1));
+    }
+    gtk_box_append(GTK_BOX(updates_box),
+                   caption("Opens the GitHub Releases page in your browser."));
+    gtk_box_append(GTK_BOX(g_about), updates);
+
+    const char *does[] = {
+        "Menu bar: per-provider % remaining, reset countdown and plan tier — no Dock icon",
+        "Usage dashboard: remaining-% trends, daily usage by model, model ranking and token/cost breakdowns",
+        "Notifications: plan-% milestones, burn-rate spikes, daily cost caps and window resets",
+        "Optional extra menu-bar widgets, one per provider",
+    };
+    GtkWidget *what = card("What it does");
+    GtkWidget *what_box = card_body(what);
+    for (unsigned i = 0; i < G_N_ELEMENTS(does); i++) {
+        gtk_box_append(GTK_BOX(what_box), scaled_label(does[i], 0.9, FALSE, -1, -1, -1));
+    }
+    gtk_box_append(GTK_BOX(g_about), what);
+
+    const char *sources[] = {
+        "Vendor quota APIs — Claude and OpenCode Go percentages, reset times and plan tier, using the credentials their CLIs already stored",
+        "Local session logs — Codex usage, plus per-model token statistics and cost estimates. Nothing is sent anywhere",
+    };
+    GtkWidget *data = card("Data sources");
+    GtkWidget *data_box = card_body(data);
+    for (unsigned i = 0; i < G_N_ELEMENTS(sources); i++) {
+        gtk_box_append(GTK_BOX(data_box), scaled_label(sources[i], 0.9, FALSE, -1, -1, -1));
+    }
+    gtk_box_append(GTK_BOX(g_about), data);
+}
+
+static GtkWidget *pane_scroller(GtkWidget *content) {
     GtkWidget *scroller = gtk_scrolled_window_new();
-    GtkWidget *label = gtk_label_new(message);
-    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
-    gtk_widget_set_margin_top(label, 24);
-    gtk_widget_set_margin_start(label, 16);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), label);
+    /* Scroll horizontally rather than clip: a rule row carries two pickers, a
+     * caption, a spin and a Remove button, and clipping the Remove would make
+     * the rule undeletable. */
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_margin_top(content, 10);
+    gtk_widget_set_margin_bottom(content, 10);
+    gtk_widget_set_margin_start(content, 12);
+    gtk_widget_set_margin_end(content, 12);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), content);
     return scroller;
+}
+
+/* Handed over from the poller thread, consumed here on the GTK thread. */
+static br_settings *g_pending_settings = NULL;
+static char **g_pending_providers = NULL;
+static int g_pending_provider_count = 0;
+static char **g_pending_windows = NULL;
+static int g_pending_window_count = 0;
+
+static gboolean apply_settings(gpointer data) {
+    (void)data;
+    br_settings *settings = NULL;
+    char **providers = NULL;
+    int provider_count = 0;
+    char **windows = NULL;
+    int window_count = 0;
+
+    g_mutex_lock(&g_pending_lock);
+    settings = g_pending_settings;
+    g_pending_settings = NULL;
+    providers = g_pending_providers;
+    provider_count = g_pending_provider_count;
+    g_pending_providers = NULL;
+    g_pending_provider_count = 0;
+    windows = g_pending_windows;
+    window_count = g_pending_window_count;
+    g_pending_windows = NULL;
+    g_pending_window_count = 0;
+    g_mutex_unlock(&g_pending_lock);
+
+    if (!settings) {
+        free_string_array(providers, provider_count);
+        free_string_array(windows, window_count);
+        return G_SOURCE_REMOVE;
+    }
+
+    free_string_array(g_providers, g_provider_count);
+    g_providers = providers;
+    g_provider_count = provider_count;
+    free_string_array(g_window_labels, g_window_label_count);
+    g_window_labels = windows;
+    g_window_label_count = window_count;
+
+    /* `g_settings` is static, so clear it in place rather than freeing it. */
+    settings_clear(&g_settings);
+    g_settings = *settings;
+    g_free(settings);
+
+    g_syncing = TRUE;
+    rebuild_notifications();
+    rebuild_widgets_pane();
+    rebuild_about();
+    g_syncing = FALSE;
+    return G_SOURCE_REMOVE;
+}
+
+void br_settings_present(br_settings *settings,
+                         char **providers, int provider_count,
+                         char **window_labels, int window_label_count,
+                         br_settings_cb callback, void *ctx) {
+    /* Called from the GTK thread (a settings edit) *and* from the poller's
+     * background thread (every refresh), so the handover is marshalled the same
+     * way the usage view model is. Presenting straight from the caller's thread
+     * let the two race on the static panes and double-free. */
+    char **provider_copy = g_new0(char *, provider_count > 0 ? provider_count : 1);
+    for (int i = 0; i < provider_count; i++) {
+        provider_copy[i] = g_strdup(providers && providers[i] ? providers[i] : "");
+    }
+    char **window_copy = g_new0(char *, window_label_count > 0 ? window_label_count : 1);
+    for (int i = 0; i < window_label_count; i++) {
+        window_copy[i] = g_strdup(window_labels && window_labels[i] ? window_labels[i] : "");
+    }
+
+    g_mutex_lock(&g_pending_lock);
+    if (g_pending_settings) {
+        br_settings_free(g_pending_settings);
+    }
+    g_pending_settings = settings;
+    for (int i = 0; i < g_pending_provider_count; i++) {
+        g_free(g_pending_providers[i]);
+    }
+    g_free(g_pending_providers);
+    g_pending_providers = provider_copy;
+    g_pending_provider_count = provider_count;
+    for (int i = 0; i < g_pending_window_count; i++) {
+        g_free(g_pending_windows[i]);
+    }
+    g_free(g_pending_windows);
+    g_pending_windows = window_copy;
+    g_pending_window_count = window_label_count;
+    g_pane_cb = callback;
+    g_pane_ctx = ctx;
+    g_mutex_unlock(&g_pending_lock);
+    g_idle_add(apply_settings, NULL);
 }
 
 /* ---- rendering ----------------------------------------------------------- */
@@ -1068,8 +1521,29 @@ static gboolean on_timeout(gpointer data) {
     return G_SOURCE_CONTINUE;
 }
 
+/* Closing the window must not end the app: the menu-bar item is the product, and
+ * the window is just its settings face. Hiding leaves the tray polling in the
+ * background, and the tray's "Usage Dashboard…" action brings the window back. */
+static gboolean refresh_on_main_idle(gpointer data) {
+    (void)data;
+    notify_query();
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean on_window_close_request(GtkWindow *window, gpointer data) {
+    (void)data;
+    gtk_widget_set_visible(GTK_WIDGET(window), FALSE);
+    return TRUE; /* handled: do not destroy */
+}
+
 static void on_activate(GtkApplication *app, gpointer data) {
     (void)data;
+    /* Re-activating (a second launch, or the desktop entry) must surface the
+     * existing window, not build a second one. */
+    if (g_window) {
+        gtk_window_present(GTK_WINDOW(g_window));
+        return;
+    }
     g_mutex_init(&g_pending_lock);
 
     GtkWidget *window = gtk_application_window_new(app);
@@ -1083,15 +1557,15 @@ static void on_activate(GtkApplication *app, gpointer data) {
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
     g_stack = gtk_stack_new();
+    g_notifications = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    g_widgets_pane = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    g_about = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_stack_add_named(GTK_STACK(g_stack), build_usage_pane(), PANE_NAMES[BR_PANE_USAGE]);
-    gtk_stack_add_named(GTK_STACK(g_stack),
-                        placeholder_pane("Notification settings arrive in a follow-up."),
+    gtk_stack_add_named(GTK_STACK(g_stack), pane_scroller(g_notifications),
                         PANE_NAMES[BR_PANE_NOTIFICATIONS]);
-    gtk_stack_add_named(GTK_STACK(g_stack),
-                        placeholder_pane("Widget settings arrive in a follow-up."),
+    gtk_stack_add_named(GTK_STACK(g_stack), pane_scroller(g_widgets_pane),
                         PANE_NAMES[BR_PANE_WIDGETS]);
-    gtk_stack_add_named(GTK_STACK(g_stack), placeholder_pane("About arrives in a follow-up."),
-                        PANE_NAMES[BR_PANE_ABOUT]);
+    gtk_stack_add_named(GTK_STACK(g_stack), pane_scroller(g_about), PANE_NAMES[BR_PANE_ABOUT]);
     gtk_stack_set_visible_child_name(GTK_STACK(g_stack), PANE_NAMES[BR_PANE_USAGE]);
 
     g_list = gtk_list_box_new();
@@ -1120,6 +1594,7 @@ static void on_activate(GtkApplication *app, gpointer data) {
     gtk_widget_set_vexpand(paned, TRUE);
     gtk_box_append(GTK_BOX(root), paned);
     gtk_window_set_child(GTK_WINDOW(window), root);
+    g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), NULL);
     gtk_window_present(GTK_WINDOW(window));
 
     /* Ask for data twice over: once for the default selection, so the window
@@ -1162,6 +1637,16 @@ void br_ui_present(br_view *view) {
 /// name, so they can never disagree. The containing hicolor directory is added
 /// to the search path because a freshly installed icon is otherwise invisible
 /// until the icon cache is rebuilt.
+/// Re-raises the current query on the GTK main thread.
+///
+/// The poller finishes on a background thread, and everything it feeds — the
+/// usage view model *and* the settings panes — builds GTK-facing state, so it
+/// has to hop back here rather than touch widgets off-thread. Calling straight
+/// into `notify_query` from the poller segfaulted.
+void br_ui_refresh_on_main(void) {
+    g_idle_add((GSourceFunc)refresh_on_main_idle, NULL);
+}
+
 void br_ui_set_icon(const char *theme_name, const char *icon_dir) {
     if (!g_window || !theme_name || !*theme_name) {
         return;

@@ -399,17 +399,17 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
 private func trendLabels(samples: [RemainingSample], range: ChartRange,
                          providerFilter: String?) -> [String] {
     let cutoff = TrendChartData.trendCutoff(for: range, now: Date())
-    let scoped = Set(samples.filter { $0.date >= cutoff }
-        .map { TrendChartData.canonicalTrendLabel($0.label) })
-    for candidate in ["Rolling", "Weekly", "Monthly"] where scoped.contains(candidate) {
-        if providerFilter == nil || samples.contains(where: {
-            $0.provider == providerFilter && $0.date >= cutoff
-                && TrendChartData.canonicalTrendLabel($0.label) == candidate
-        }) {
-            return [candidate]
+    func hasData(_ label: String) -> Bool {
+        samples.contains {
+            $0.date >= cutoff
+                && TrendChartData.canonicalTrendLabel($0.label) == label
+                && (providerFilter == nil || $0.provider == providerFilter)
         }
     }
-    return scoped.sorted().isEmpty ? ["Rolling"] : Array(scoped.sorted())
+    // Every window that has data in the range, in canonical order — so the
+    // filter offers Rolling/Weekly/Monthly like macOS, not just the first hit.
+    let present = ["Rolling", "Weekly", "Monthly"].filter(hasData)
+    return present.isEmpty ? ["Rolling"] : present
 }
 
 private func modelColor(_ name: String) -> (Double, Double, Double) {
@@ -684,7 +684,9 @@ private func onRefresh(_ context: UnsafeMutableRawPointer?) {
         syncWidgetTrays(usage: result.usage)
         notifier.evaluate(result.usage)
         notifier.evaluateCosts(result.costs)
-        presentWindow()
+        // Hop back to the GTK thread for the window rebuild: the usage view
+        // model and the settings panes both construct widget-facing state.
+        br_ui_refresh_on_main()
     }
 }
 
@@ -698,6 +700,119 @@ private func onQuery(_ query: br_query, _ context: UnsafeMutableRawPointer?) {
 private func presentWindow() {
     guard let query = state.query() else { return }
     br_ui_present(buildView(query, snapshot: state.snapshot()))
+    presentSettingsPane()
+}
+
+/// The settings panes are static apart from the rule rows, so they are rebuilt
+/// from the settings file rather than carried in the usage view model.
+private func presentSettingsPane() {
+    let values = settings.snapshot
+    let payload = br_settings_new()!
+    payload.pointee.notify_on_reset = values.notifyOnReset ? 1 : 0
+
+    let alertsTool = ExternalTool.locate(named: "notify-send") != nil
+    payload.pointee.alerts_ok = alertsTool ? 1 : 0
+    payload.pointee.alerts_status = br_dup(alertsTool
+        ? "Desktop alerts are available (notify-send)."
+        : "Desktop alerts are unavailable — notify-send was not found on PATH.")
+    payload.pointee.version = br_dup("Version \(appVersion)")
+
+    var rules: [br_rule] = []
+    for milestone in values.milestones {
+        rules.append(br_rule(kind: Int32(BR_RULE_MILESTONE),
+                             provider: br_dup(milestone.provider),
+                             window_label: br_dup(milestone.windowLabel),
+                             step: milestone.step, percent_drop: 0, minutes: 0,
+                             cost_limit: 0))
+    }
+    for alert in values.burnAlerts {
+        rules.append(br_rule(kind: Int32(BR_RULE_BURN),
+                             provider: br_dup(alert.provider),
+                             window_label: br_dup(alert.windowLabel),
+                             step: 0, percent_drop: alert.percentDrop,
+                             minutes: Int32(alert.minutes), cost_limit: 0))
+    }
+    for alert in values.costAlerts {
+        rules.append(br_rule(kind: Int32(BR_RULE_COST),
+                             provider: br_dup(alert.provider), window_label: nil,
+                             step: 0, percent_drop: 0, minutes: 0,
+                             cost_limit: alert.dailyLimitUSD))
+    }
+    if !rules.isEmpty {
+        let buffer = alloc(br_rule.self, rules.count)
+        for (index, rule) in rules.enumerated() { buffer[index] = rule }
+        payload.pointee.rules = buffer
+        payload.pointee.rule_count = Int32(rules.count)
+    }
+
+    // Provider and window choices come from live usage, so the pickers only ever
+    // offer pairs that actually exist.
+    let snapshot = state.snapshot()
+    let providerNames = (snapshot?.usage.map(\.providerName) ?? []).sorted()
+    let windowLabels = orderedWindowLabels()
+    let widgets = alloc(Int32.self, max(providerNames.count, 1))
+    for (index, name) in providerNames.enumerated() {
+        widgets[index] = values.widgetProviders.contains(name) ? 1 : 0
+    }
+    payload.pointee.widgets_on = UnsafeMutablePointer<Int32>(widgets)
+    payload.pointee.widget_count = Int32(providerNames.count)
+    payload.pointee.version = br_dup("Version \(appVersion)")
+
+    // `br_settings_present` takes ownership of the payload; freeing it here
+    // would leave the panes holding pointers that were already released.
+    br_settings_present(payload, dupCStrings(providerNames), Int32(providerNames.count),
+                        dupCStrings(windowLabels), Int32(windowLabels.count),
+                        onSettingsAction, nil)
+}
+
+/// Canonical window order, restricted to what the providers actually report.
+private func orderedWindowLabels() -> [String] {
+    let usage = state.snapshot()?.usage ?? []
+    let present = Set(usage.flatMap { entry in entry.windows.map(\.label) })
+    let ordered = ["Rolling", "Weekly", "Monthly"].filter { present.contains($0) }
+    return ordered.isEmpty ? ["Rolling"] : ordered
+}
+
+/// GTK calls this on the main thread for every settings edit.
+private func onSettingsAction(_ action: Int32, _ index: Int32, _ provider: UnsafePointer<CChar>?,
+                              _ windowLabel: UnsafePointer<CChar>?, _ value: Double,
+                              _ context: UnsafeMutableRawPointer?) {
+    let i = Int(index)
+    switch Int(action) {
+    case BR_ACT_RESET_TOGGLE:
+        settings.setNotifyOnReset(value != 0)
+    case BR_ACT_RULE_STEP:
+        settings.setMilestoneStep(at: i, step: value.rounded())
+    case BR_ACT_RULE_DROP, BR_ACT_RULE_MINUTES:
+        let values = settings.snapshot
+        let j = i - values.milestones.count
+        guard j >= 0, j < values.burnAlerts.count else { return }
+        settings.setBurnAlert(at: j,
+                              drop: action == BR_ACT_RULE_DROP ? value.rounded() : nil,
+                              minutes: action == BR_ACT_RULE_MINUTES ? Double(value.rounded()) : nil)
+    case BR_ACT_RULE_COST:
+        let values = settings.snapshot
+        let j = i - values.milestones.count - values.burnAlerts.count
+        guard j >= 0, j < values.costAlerts.count else { return }
+        settings.setCostAlertLimit(at: j, limit: value)
+    case BR_ACT_RULE_DELETE:
+        settings.removeRule(at: i)
+    case BR_ACT_RULE_ADD:
+        let provider = state.snapshot()?.usage.first?.providerName ?? "OpenCode"
+        settings.defaultRule(kind: index, provider: provider,
+                             windowLabel: orderedWindowLabels().first ?? "Rolling")
+        syncWidgetTrays()
+    case BR_ACT_WIDGET_TOGGLE:
+        let names = (state.snapshot()?.usage.map(\.providerName) ?? []).sorted()
+        guard i >= 0, i < names.count else { return }
+        settings.setWidget(names[i], enabled: value != 0)
+        syncWidgetTrays()
+    case BR_ACT_CHECK_UPDATES:
+        openReleases()
+    default:
+        return
+    }
+    presentSettingsPane()
 }
 
 @main

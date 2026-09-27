@@ -149,6 +149,10 @@ void br_ui_present(br_view *view);
 /// Brings the window forward on the given pane (menu actions).
 void br_ui_show_pane(int pane);
 
+/// Re-raises the current query on the GTK main thread. Safe to call from the
+/// poller's background thread; this is how post-poll work reaches the widgets.
+void br_ui_refresh_on_main(void);
+
 /// Sets the window icon from a themed icon name, and registers `icon_dir` with
 /// the icon theme so a freshly installed icon resolves without a cache rebuild.
 /// Both arguments are ignored when absent.
@@ -187,5 +191,68 @@ void br_settings_show(const char *title,
                       const br_spin *spins, int spin_count,
                       br_checkbox_cb checkbox_callback, br_spin_cb spin_callback,
                       void *ctx);
+
+/* ---- Settings panes ------------------------------------------------------ */
+
+enum { BR_RULE_MILESTONE = 0, BR_RULE_BURN = 1, BR_RULE_COST = 2 };
+
+/// One editable alert rule. The three kinds share a row shape so the pane can
+/// be built generically; unused fields are zero.
+typedef struct {
+    int kind;
+    char *provider;
+    char *window_label;  /* unused for cost rules */
+    double step;         /* milestone: percent-point increment */
+    double percent_drop; /* burn: drop that triggers the alert */
+    int minutes;         /* burn: trailing window */
+    double cost_limit;   /* cost: USD per day */
+} br_rule;
+
+/// Everything the Notifications / Widgets / About panes render.
+typedef struct {
+    int notify_on_reset;
+    /// Whether desktop alerts can be delivered at all (notify-send present).
+    int alerts_ok;
+    char *alerts_status;  /* human-readable, shown verbatim */
+    br_rule *rules;
+    int rule_count;
+    /// One entry per provider, in the same order as `providers`.
+    int *widgets_on;
+    int widget_count;
+    char *version;
+    char *update_status;
+} br_settings;
+
+enum {
+    BR_ACT_RESET_TOGGLE = 1,
+    BR_ACT_RULE_STEP,
+    BR_ACT_RULE_DROP,
+    BR_ACT_RULE_MINUTES,
+    BR_ACT_RULE_COST,
+    BR_ACT_RULE_DELETE,
+    BR_ACT_RULE_ADD,
+    BR_ACT_WIDGET_TOGGLE,
+    BR_ACT_CHECK_UPDATES,
+};
+
+/// Invoked on the GTK main thread when the user edits a setting.
+typedef void (*br_settings_cb)(int action, int index, const char *provider,
+                               const char *window_label, double value, void *ctx);
+
+/// Shows (or refreshes) the Notifications, Widgets and About panes.
+///
+/// **Takes ownership of `settings`** — the panes keep its contents and free
+/// them on the next call, so the host must not free it afterwards.
+/// `providers` and `window_labels` are copied; `callback` must be non-null.
+void br_settings_present(br_settings *settings,
+                         char **providers, int provider_count,
+                         char **window_labels, int window_label_count,
+                         br_settings_cb callback, void *ctx);
+
+/// Frees a settings payload built by the host.
+void br_settings_free(br_settings *settings);
+
+/// Allocates a zeroed settings payload.
+br_settings *br_settings_new(void);
 
 #endif

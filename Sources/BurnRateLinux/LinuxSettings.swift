@@ -66,6 +66,65 @@ final class LinuxSettings: @unchecked Sendable {
         }
     }
 
+    /// Rules are keyed by provider+window, so adding one is idempotent — the
+    /// pane's "Add rule" can be pressed twice without creating a duplicate.
+    func addMilestone(_ milestone: Milestone) {
+        mutate { values in
+            values.milestones.removeAll { $0.key == milestone.key }
+            values.milestones.append(milestone)
+        }
+    }
+
+    func addBurnAlert(_ alert: BurnAlert) {
+        mutate { values in
+            values.burnAlerts.removeAll {
+                $0.provider == alert.provider && $0.windowLabel == alert.windowLabel
+            }
+            values.burnAlerts.append(alert)
+        }
+    }
+
+    func addCostAlert(provider: String, limit: Double) {
+        mutate { values in
+            values.costAlerts.removeAll { $0.provider == provider }
+            values.costAlerts.append(CostAlert(provider: provider, dailyLimitUSD: limit))
+        }
+    }
+
+    /// Removes whichever rule of any kind sits at `index` in the flattened
+    /// order the pane renders (milestones, then burn alerts, then cost alerts).
+    func removeRule(at index: Int) {
+        mutate { values in
+            if index < values.milestones.count {
+                values.milestones.remove(at: index)
+            } else {
+                let rest = index - values.milestones.count
+                if rest < values.burnAlerts.count {
+                    values.burnAlerts.remove(at: rest)
+                } else {
+                    let tail = rest - values.burnAlerts.count
+                    if tail < values.costAlerts.count { values.costAlerts.remove(at: tail) }
+                }
+            }
+        }
+    }
+
+    /// Default rule for a kind, seeded from the first configured provider and
+    /// window so "Add rule" produces something sensible instead of an orphan.
+    /// `kind` mirrors `BR_RULE_*` in burnrate_gtk.h; spelled numerically so the
+    /// settings model does not have to import the GTK shim.
+    func defaultRule(kind: Int32, provider: String, windowLabel: String) {
+        switch kind {
+        case 0: // milestone
+            addMilestone(Milestone(provider: provider, windowLabel: windowLabel, step: 20))
+        case 1: // burn rate
+            addBurnAlert(BurnAlert(provider: provider, windowLabel: windowLabel,
+                                   percentDrop: 20, minutes: 60))
+        default: // daily cost
+            addCostAlert(provider: provider, limit: 20)
+        }
+    }
+
     private func mutate(_ body: (inout Values) -> Void) {
         lock.lock()
         body(&values)
