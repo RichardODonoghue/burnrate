@@ -229,11 +229,19 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
     }()
 
     let cost = Int(query.metric) == BR_METRIC_COST
+    // Card titles embed these, exactly as the macOS ones do.
+    view.pointee.metric_label = br_dup(cost ? "Cost" : "Tokens")
     let range: ChartRange = switch Int(query.range) {
     case BR_RANGE_24H: .today
     case BR_RANGE_30D: .month
     default: .week
     }
+    let rangeText: String = switch range {
+    case .today: "24h"
+    case .week: "7d"
+    case .month: "30d"
+    }
+    view.pointee.range_label = br_dup(rangeText)
 
     let buckets = (snapshot?.buckets ?? []).filter { bucket in
         providerFilter == nil || bucket.provider == providerFilter
@@ -254,11 +262,15 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
     }()
 
     var cards: [br_card] = []
-    for item in latest {
-        cards.append(br_card(
-            label: br_dup("\(item.provider) · rolling"),
-            value: br_dup(String(format: "%.0f%%", item.remaining)),
-            detail: nil))
+    // macOS has a single "Rolling usage" card listing every provider, not one
+    // card per provider.
+    if !latest.isEmpty {
+        let lines = latest.map { item in
+            "\(item.provider)  \(String(format: "%.0f%%", item.remaining))"
+        }.joined(separator: "\n")
+        cards.append(br_card(label: br_dup("Rolling usage"),
+                             value: br_dup("\(latest.count) provider\(latest.count == 1 ? "" : "s")"),
+                             detail: br_dup(lines)))
     }
     let tokenTotal = todayEntries.reduce(0) { $0 + $1.totalTokens }
     let requestTotal = todayEntries.reduce(0) { $0 + $1.requests }
@@ -310,8 +322,15 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
         view.pointee.series = buffer
         view.pointee.series_count = Int32(series.count)
 
-        // x-axis ticks, formatted here so the C layer needs no date code.
-        let ticks = TrendChartData.trendTickDates(cutoff: cutoff, now: now)
+        // x-axis ticks. Short spans are labelled hourly, as macOS does via
+        // trendXHourly/trendHourStride; multi-day spans get day ticks.
+        let ticks: [Date]
+        if TrendChartData.trendXHourly(span: span) {
+            ticks = stride(from: 0.0, through: span, by: 3600.0)
+                .map { cutoff.addingTimeInterval($0) }
+        } else {
+            ticks = TrendChartData.trendTickDates(cutoff: cutoff, now: now)
+        }
         view.pointee.x_labels = dupCStrings(ticks.map { TrendChartData.trendTickLabel($0) })
         view.pointee.x_label_count = Int32(ticks.count)
     }
@@ -406,12 +425,20 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
 
     // ---- status + diagnostics ---------------------------------------------
     if snapshot == nil {
-        view.pointee.status = br_dup("Loading usage…")
+        view.pointee.status = br_dup("Parsing local usage logs…")
     } else if series.isEmpty && daily.isEmpty && ranked.isEmpty {
         view.pointee.status = br_dup("No usage data yet. It appears once the local logs contain data, "
             + "or a plan reports usage.")
     } else if snapshot!.usage.isEmpty {
         view.pointee.status = br_dup("No providers found — log in to a supported CLI, then press Refresh.")
+    }
+    if label == "Monthly", latest.contains(where: { $0.provider == "Claude" }) {
+        // macOS explains the sparse-looking chart rather than leaving it blank.
+        view.pointee.hint = br_dup(
+            "Claude has no monthly limit — its windows are 5-hour and weekly.")
+    } else if series.isEmpty {
+        view.pointee.hint = br_dup(
+            "Collecting history… this chart fills in as BurnRate polls (a point every 5 minutes).")
     }
     if let missing = snapshot?.missing, !missing.isEmpty {
         view.pointee.diagnostics = br_dup(

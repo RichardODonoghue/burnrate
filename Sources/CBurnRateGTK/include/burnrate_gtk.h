@@ -126,6 +126,11 @@ typedef struct {
     int row_count;
     /// When set, the charts are replaced by this message (loading/empty state).
     char *status;
+    /// Contextual note shown under the trend chart (e.g. why a window is sparse).
+    char *hint;
+    /// Metric and range labels, so card titles match macOS ("Top models (7d)").
+    char *metric_label;
+    char *range_label;
     /// Shown in the About pane.
     char *version;
     /// Newline-separated "not working" lines; shown under the charts.

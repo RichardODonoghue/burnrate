@@ -76,6 +76,9 @@ static void view_clear(br_view *view) {
     g_free(view->day_tips);
     g_free(view->day_labels);
     g_free(view->status);
+    g_free(view->hint);
+    g_free(view->metric_label);
+    g_free(view->range_label);
     g_free(view->version);
     g_free(view->diagnostics);
     memset(view, 0, sizeof(*view));
@@ -128,6 +131,7 @@ static GtkWidget *g_status = NULL;
 static GtkWidget *g_diag = NULL;
 static GtkWidget *g_empty = NULL;
 static GtkWidget *g_table_grid = NULL;
+static GtkWidget *g_hint = NULL;
 
 /* Hover state, in pixels. Resolved to a datum at draw time so a tooltip always
  * describes the data currently on screen, and kept out of the query so moving
@@ -980,11 +984,16 @@ static GtkWidget *build_usage_pane(void) {
     g_legend = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 14);
     gtk_box_append(GTK_BOX(outer), g_legend);
 
-    struct { const char *title; GtkWidget **area; GtkWidget **frame;
+    char *metric = g_strdup(g_view.metric_label ? g_view.metric_label : "Tokens");
+    char *range = g_strdup(g_view.range_label ? g_view.range_label : "7d");
+    char daily_title[96], bars_title[96];
+    g_snprintf(daily_title, sizeof(daily_title), "Daily usage by model (%s)", metric);
+    g_snprintf(bars_title, sizeof(bars_title), "Top models (%s)", range);
+    struct { char *title; GtkWidget **area; GtkWidget **frame;
              GtkDrawingAreaDrawFunc draw; } charts[] = {
         {"Remaining over time", &g_trend, &g_trend_frame, draw_trend},
-        {"Daily usage", &g_daily, &g_daily_frame, draw_daily},
-        {"Top models", &g_bars, &g_bars_frame, draw_bars},
+        {daily_title, &g_daily, &g_daily_frame, draw_daily},
+        {bars_title, &g_bars, &g_bars_frame, draw_bars},
     };
     for (unsigned i = 0; i < G_N_ELEMENTS(charts); i++) {
         GtkWidget *area = gtk_drawing_area_new();
@@ -1017,6 +1026,14 @@ static GtkWidget *build_usage_pane(void) {
         *charts[i].area = area;
         *charts[i].frame = frame;
     }
+    g_free(metric);
+    g_free(range);
+    g_hint = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(g_hint), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(g_hint), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(g_hint), 90);
+    gtk_box_append(GTK_BOX(outer), g_hint);
+
     track_hover(g_trend, on_trend_motion);
     track_hover(g_daily, on_daily_motion);
     track_hover(g_bars, on_bars_motion);
@@ -1024,7 +1041,10 @@ static GtkWidget *build_usage_pane(void) {
     g_table_grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(g_table_grid), 4);
     gtk_grid_set_column_spacing(GTK_GRID(g_table_grid), 16);
-    GtkWidget *table_frame = gtk_frame_new("Per-model breakdown");
+    char *table_title = g_strdup_printf("Breakdown (%s)",
+        g_view.range_label ? g_view.range_label : "7d");
+    GtkWidget *table_frame = gtk_frame_new(table_title);
+    g_free(table_title);
     gtk_frame_set_child(GTK_FRAME(table_frame), g_table_grid);
     gtk_widget_set_margin_top(table_frame, 4);
     gtk_box_append(GTK_BOX(outer), table_frame);
@@ -1831,6 +1851,10 @@ static gboolean apply_view(gpointer data) {
     if (g_status) {
         gtk_label_set_text(GTK_LABEL(g_status), g_view.status ? g_view.status : "");
         gtk_widget_set_visible(g_status, g_view.status && *g_view.status);
+    }
+    if (g_hint) {
+        gtk_label_set_text(GTK_LABEL(g_hint), g_view.hint ? g_view.hint : "");
+        gtk_widget_set_visible(g_hint, g_view.hint && *g_view.hint);
     }
     if (g_diag) {
         gtk_label_set_text(GTK_LABEL(g_diag), g_view.diagnostics ? g_view.diagnostics : "");
