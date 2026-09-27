@@ -109,19 +109,22 @@ final class LinuxSettings: @unchecked Sendable {
         }
     }
 
-    /// Default rule for a kind, seeded from the first configured provider and
-    /// window so "Add rule" produces something sensible instead of an orphan.
-    /// `kind` mirrors `BR_RULE_*` in burnrate_gtk.h; spelled numerically so the
-    /// settings model does not have to import the GTK shim.
-    func defaultRule(kind: Int32, provider: String, windowLabel: String) {
+    /// Creates or updates the rule the pane's add form describes.
+    ///
+    /// One path for both, because macOS's button is Add *or* Update depending
+    /// on whether a rule already exists for that provider+window, and both
+    /// resolve to an upsert. `kind` mirrors `BR_RULE_*` in burnrate_gtk.h;
+    /// spelled numerically so this model need not import the GTK shim.
+    func upsertDraft(kind: Int32, provider: String, windowLabel: String,
+                     value: Double, minutes: Int) {
         switch kind {
-        case 0: // milestone
-            addMilestone(Milestone(provider: provider, windowLabel: windowLabel, step: 20))
-        case 1: // burn rate
+        case 0: // milestone — the form offers 5/10/20/25, as macOS does
+            addMilestone(Milestone(provider: provider, windowLabel: windowLabel, step: value))
+        case 1: // burn rate — minutes arrive pre-snapped to 15 by the form
             addBurnAlert(BurnAlert(provider: provider, windowLabel: windowLabel,
-                                   percentDrop: 20, minutes: 60))
-        default: // daily cost
-            addCostAlert(provider: provider, limit: 20)
+                                   percentDrop: value, minutes: minutes))
+        default:
+            if value > 0 { addCostAlert(provider: provider, limit: value) }
         }
     }
 

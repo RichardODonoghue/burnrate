@@ -339,6 +339,32 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
         dayFormatter.dateFormat = range == .today ? "HH:mm" : "d MMM"
         view.pointee.day_labels = dupCStrings(daily.map { dayFormatter.string(from: $0.day) })
         view.pointee.day_label_count = Int32(daily.count)
+
+        // Per-day tooltip text. Formatted here because only this side knows the
+        // metric: a raw token count is unreadable, and a $0.003 cost printed
+        // with "%.0f" is just "0".
+        var tips: [br_day_tip] = []
+        for day in daily {
+            let ranked = day.entries
+                .sorted { metricValue($0, cost: cost) > metricValue($1, cost: cost) }
+            let total = ranked.reduce(0.0) { $0 + metricValue($1, cost: cost) }
+            let totalText = total > 0
+                ? (cost ? String(format: "$%.2f", total) : "\(TokenFormat.format(Int(total))) tokens")
+                : "—"
+            let details = ranked.prefix(5)
+                .map { entry in
+                    cost ? String(format: "%@  $%.2f", entry.displayName, entry.cost)
+                         : "\(entry.displayName)  \(TokenFormat.format(entry.totalTokens))"
+                }
+                .joined(separator: "\n")
+            tips.append(br_day_tip(total: br_dup(totalText),
+                                   details: br_dup(details)))
+        }
+        if !tips.isEmpty {
+            let tipBuffer = alloc(br_day_tip.self, tips.count)
+            for (index, tip) in tips.enumerated() { tipBuffer[index] = tip }
+            view.pointee.day_tips = tipBuffer
+        }
     }
 
     let ranked = Array(rawTotals.prefix(8))
@@ -719,24 +745,29 @@ private func presentSettingsPane() {
 
     var rules: [br_rule] = []
     for milestone in values.milestones {
-        rules.append(br_rule(kind: Int32(BR_RULE_MILESTONE),
-                             provider: br_dup(milestone.provider),
-                             window_label: br_dup(milestone.windowLabel),
-                             step: milestone.step, percent_drop: 0, minutes: 0,
-                             cost_limit: 0))
+        let rgb = providerRGB(milestone.provider)
+        rules.append(br_rule(
+            kind: Int32(BR_RULE_MILESTONE), provider: br_dup(milestone.provider),
+            window_label: br_dup(milestone.windowLabel), step: milestone.step,
+            percent_drop: 0, minutes: 0, cost_limit: 0,
+            // Same wording as the macOS chip.
+            chip: br_dup("Every \(Int(milestone.step))%"),
+            rgb: (rgb.0, rgb.1, rgb.2)))
     }
     for alert in values.burnAlerts {
-        rules.append(br_rule(kind: Int32(BR_RULE_BURN),
-                             provider: br_dup(alert.provider),
-                             window_label: br_dup(alert.windowLabel),
-                             step: 0, percent_drop: alert.percentDrop,
-                             minutes: Int32(alert.minutes), cost_limit: 0))
+        rules.append(br_rule(
+            kind: Int32(BR_RULE_BURN), provider: br_dup(alert.provider),
+            window_label: br_dup(alert.windowLabel), step: 0,
+            percent_drop: alert.percentDrop, minutes: Int32(alert.minutes), cost_limit: 0,
+            chip: br_dup(String(format: "↓%.0f%% / %d min", alert.percentDrop, alert.minutes)),
+            rgb: (0.95, 0.55, 0.15)))
     }
     for alert in values.costAlerts {
-        rules.append(br_rule(kind: Int32(BR_RULE_COST),
-                             provider: br_dup(alert.provider), window_label: nil,
-                             step: 0, percent_drop: 0, minutes: 0,
-                             cost_limit: alert.dailyLimitUSD))
+        rules.append(br_rule(
+            kind: Int32(BR_RULE_COST), provider: br_dup(alert.provider), window_label: nil,
+            step: 0, percent_drop: 0, minutes: 0, cost_limit: alert.dailyLimitUSD,
+            chip: br_dup(String(format: "≥ $%.2f/day", alert.dailyLimitUSD)),
+            rgb: (0.20, 0.68, 0.44)))
     }
     if !rules.isEmpty {
         let buffer = alloc(br_rule.self, rules.count)
@@ -773,6 +804,27 @@ private func orderedWindowLabels() -> [String] {
     return ordered.isEmpty ? ["Rolling"] : ordered
 }
 
+/// The add form's state, mirroring macOS's `@State` in MilestonesView.
+private final class DraftState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Int: Double] = [:]
+    private var _minutes = 30
+    var provider = ""
+    var window = "Rolling"
+    var minutes: Int { lock.withLock { _minutes } }
+
+    func set(_ value: Double, for card: Int) {
+        lock.withLock { values[card] = value }
+        if card == BR_RULE_BURN { lock.withLock { _minutes = 30 } }
+    }
+
+    func value(for card: Int) -> Double {
+        lock.withLock { values[card] ?? (card == BR_RULE_MILESTONE ? 20 : 20) }
+    }
+}
+
+private let draft = DraftState()
+
 /// GTK calls this on the main thread for every settings edit.
 private func onSettingsAction(_ action: Int32, _ index: Int32, _ provider: UnsafePointer<CChar>?,
                               _ windowLabel: UnsafePointer<CChar>?, _ value: Double,
@@ -798,15 +850,25 @@ private func onSettingsAction(_ action: Int32, _ index: Int32, _ provider: Unsaf
     case BR_ACT_RULE_DELETE:
         settings.removeRule(at: i)
     case BR_ACT_RULE_ADD:
-        let provider = state.snapshot()?.usage.first?.providerName ?? "OpenCode"
-        settings.defaultRule(kind: index, provider: provider,
-                             windowLabel: orderedWindowLabels().first ?? "Rolling")
-        syncWidgetTrays()
+        // The pane forwards the draft's provider, window and value, so add and
+        // update are the same upsert — matching macOS's Add/Update button.
+        guard let provider, let windowLabel else { return }
+        let card = Int(index)
+        settings.upsertDraft(kind: index, provider: String(cString: provider),
+                             windowLabel: String(cString: windowLabel),
+                             value: draft.value(for: card),
+                             minutes: draft.minutes)
     case BR_ACT_WIDGET_TOGGLE:
         let names = (state.snapshot()?.usage.map(\.providerName) ?? []).sorted()
         guard i >= 0, i < names.count else { return }
         settings.setWidget(names[i], enabled: value != 0)
         syncWidgetTrays()
+    case BR_ACT_DRAFT_PROVIDER:
+        draft.provider = provider.map { String(cString: $0) } ?? ""
+    case BR_ACT_DRAFT_WINDOW:
+        draft.window = windowLabel.map { String(cString: $0) } ?? "Rolling"
+    case BR_ACT_DRAFT_VALUE:
+        draft.set(value, for: Int(index))
     case BR_ACT_CHECK_UPDATES:
         openReleases()
     default:

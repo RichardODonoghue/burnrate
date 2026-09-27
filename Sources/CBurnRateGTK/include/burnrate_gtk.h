@@ -88,6 +88,14 @@ typedef struct {
     int cell_count;
 } br_row;
 
+/// Preformatted per-day tooltip text. The host formats these because only it
+/// knows the metric and the units: a raw token count is unreadable, and a cost
+/// like 0.003 rendered with "%.0f" is just "0".
+typedef struct {
+    char *total;   /* e.g. "1.2M tokens" or "$3.40" */
+    char *details; /* newline-separated "model value" lines, top contributors */
+} br_day_tip;
+
 typedef struct {
     br_card *cards;
     int card_count;
@@ -111,6 +119,8 @@ typedef struct {
     /// Formatted column labels for the daily chart, oldest first.
     char **day_labels;
     int day_label_count;
+    /// Tooltip text per day, parallel to `day_count`.
+    br_day_tip *day_tips;
     /// Per-model breakdown rows, already formatted for display.
     br_row *rows;
     int row_count;
@@ -206,6 +216,11 @@ typedef struct {
     double percent_drop; /* burn: drop that triggers the alert */
     int minutes;         /* burn: trailing window */
     double cost_limit;   /* cost: USD per day */
+    /// Preformatted summary chip, e.g. "Every 20%" / "↓15% / 30 min" /
+    /// "≥ $5.00/day". The host formats it so the wording matches macOS exactly.
+    char *chip;
+    /// Provider colour, for the row's dot.
+    double rgb[3];
 } br_rule;
 
 /// Everything the Notifications / Widgets / About panes render.
@@ -233,6 +248,10 @@ enum {
     BR_ACT_RULE_ADD,
     BR_ACT_WIDGET_TOGGLE,
     BR_ACT_CHECK_UPDATES,
+    /* Draft (add-form) edits: which card, and what the user picked. */
+    BR_ACT_DRAFT_PROVIDER,
+    BR_ACT_DRAFT_WINDOW,
+    BR_ACT_DRAFT_VALUE,
 };
 
 /// Invoked on the GTK main thread when the user edits a setting.

@@ -69,6 +69,11 @@ static void view_clear(br_view *view) {
     for (int i = 0; i < view->day_label_count; i++) {
         g_free(view->day_labels[i]);
     }
+    for (int i = 0; i < view->day_count; i++) {
+        g_free(view->day_tips[i].total);
+        g_free(view->day_tips[i].details);
+    }
+    g_free(view->day_tips);
     g_free(view->day_labels);
     g_free(view->status);
     g_free(view->version);
@@ -139,6 +144,14 @@ static double g_bars_hover_y = -1;
  * and no user input ever processed. Declared up here because the segmented
  * controls' handlers consult it too. */
 static gboolean g_syncing = FALSE;
+/* A draft control changed: recompute the Add/Update label without re-querying. */
+static gboolean g_settings_dirty = FALSE;
+/* Draft state per card, mirroring macOS's @State. Index is the rule kind. */
+static int g_draft_provider[3] = {0, 0, 0};
+static int g_draft_window[3] = {0, 0, 0};
+static double g_draft_value[3] = {20, 20, 5};
+static GtkWidget *g_add_button[3] = {NULL, NULL, NULL};
+static GtkWidget *g_burn_summary = NULL;
 
 static const char *const PANE_NAMES[BR_PANE_COUNT] = {
     "usage", "notifications", "widgets", "about"
@@ -300,34 +313,31 @@ static GtkWidget *build_segment(const char *const *items, int count, int active,
     return box;
 }
 
-/* Reads the active index out of a segment group. */
-static int segment_selected(GtkWidget *group) {
-    GtkWidget *child = gtk_widget_get_first_child(group);
-    while (child) {
-        if (gtk_widget_get_visible(child)
-            && gtk_widget_get_sensitive(child)
-            && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(child))) {
-            return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(child), "segment-index"));
-        }
-        child = gtk_widget_get_next_sibling(child);
-    }
-    return -1;
-}
-
 static void on_segment_toggled(GtkToggleButton *button, gpointer group) {
     if (g_syncing) {
         return;
     }
-    int index = segment_selected(GTK_WIDGET(group));
+    /* Use the clicked button's own index. Scanning for "the active one" is
+     * ambiguous mid-click: both buttons report active for an instant. */
+    int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "segment-index"));
     if (index < 0) {
         return;
     }
     /* A toggle group must never end up with nothing selected. */
     if (!gtk_toggle_button_get_active(button)) {
+        /* This fires when we deactivate a sibling below, so suppress the
+         * re-entrant handler before touching it. */
+        gboolean saved = g_syncing;
+        g_syncing = TRUE;
         gtk_toggle_button_set_active(button, TRUE);
+        g_syncing = saved;
         return;
     }
-    /* Enforce single selection: activating one clears the rest. */
+    /* Enforce single selection: activating one clears the rest. The guard is
+     * essential — clearing a sibling re-enters this handler, which would
+     * otherwise re-activate it and recurse until the stack overflowed. */
+    gboolean saved = g_syncing;
+    g_syncing = TRUE;
     GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(group));
     while (child) {
         if (child != GTK_WIDGET(button)
@@ -336,6 +346,7 @@ static void on_segment_toggled(GtkToggleButton *button, gpointer group) {
         }
         child = gtk_widget_get_next_sibling(child);
     }
+    g_syncing = saved;
     g_object_set_data(G_OBJECT(group), "segment-active", GINT_TO_POINTER(index));
     if (group == g_metric_group) {
         g_query.metric = index;
@@ -344,6 +355,14 @@ static void on_segment_toggled(GtkToggleButton *button, gpointer group) {
     } else if (group == g_label_group) {
         g_query.trend_label = index;
     } else {
+        /* A draft segment inside a settings card: it edits the add form's step,
+         * not the query. Announced so the button label can be recomputed. */
+        int card = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "draft-card"));
+        if (card < 0 || card > 2) {
+            return;
+        }
+        g_draft_value[card] = index;
+        g_settings_dirty = TRUE;
         return;
     }
     notify_query();
@@ -433,6 +452,8 @@ static void set_source_rgb(cairo_t *cr, double r, double g, double b, double alp
  * box painted at a clamped offset.
  */
 
+/* `detail` may contain newlines; each line is measured and drawn separately so
+ * the box grows to fit rather than clipping the breakdown. */
 static void draw_tooltip(cairo_t *cr, double surface_w, double anchor_x, double anchor_y,
                          const char *title, const char *detail) {
     if (!title || !*title) {
@@ -448,9 +469,33 @@ static void draw_tooltip(cairo_t *cr, double surface_w, double anchor_x, double 
     if (detail && *detail) {
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, 11);
-        cairo_text_extents(cr, detail, &te);
-        detail_w = te.x_advance;
-        detail_h = 14;
+        /* Measure the widest line, and count the lines. */
+        cairo_text_extents_t line_te;
+        int start = 0;
+        for (int i = 0; detail[i]; i++) {
+            if (detail[i] != '\n') {
+                continue;
+            }
+            char line[160];
+            int n = i - start < 155 ? i - start : 155;
+            memcpy(line, detail + start, (size_t)n);
+            line[n] = '\0';
+            cairo_text_extents(cr, line, &line_te);
+            if (line_te.x_advance > detail_w) {
+                detail_w = line_te.x_advance;
+            }
+            detail_h += 14;
+            start = i + 1;
+        }
+        char last[160];
+        int n = (int)strlen(detail + start) < 155 ? (int)strlen(detail + start) : 155;
+        memcpy(last, detail + start, (size_t)n);
+        last[n] = '\0';
+        cairo_text_extents(cr, last, &line_te);
+        if (line_te.x_advance > detail_w) {
+            detail_w = line_te.x_advance;
+        }
+        detail_h += 14;
     }
     double box_w = MAX(title_w, detail_w) + 18;
     double box_h = title_h + detail_h + 12;
@@ -484,8 +529,23 @@ static void draw_tooltip(cairo_t *cr, double surface_w, double anchor_x, double 
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, 11);
         cairo_set_source_rgba(cr, 1, 1, 1, 0.78);
-        cairo_move_to(cr, bx + 9, by + 6 + title_h + detail_h - 4);
-        cairo_show_text(cr, detail);
+        double y = by + 6 + title_h + 10;
+        int start = 0;
+        for (int i = 0; ; i++) {
+            if (detail[i] == '\n' || detail[i] == '\0') {
+                char line[160];
+                int n = i - start < 155 ? i - start : 155;
+                memcpy(line, detail + start, (size_t)n);
+                line[n] = '\0';
+                cairo_move_to(cr, bx + 9, y);
+                cairo_show_text(cr, line);
+                y += 14;
+                if (detail[i] == '\0') {
+                    break;
+                }
+                start = i + 1;
+            }
+        }
     }
     cairo_restore(cr);
 }
@@ -694,18 +754,26 @@ static void draw_daily(GtkDrawingArea *area, cairo_t *cr, int width, int height,
                 cairo_rectangle(cr, PAD_L + day * col + 0.5, PAD_T + 0.5,
                                 MAX(col - 1, 1), h - 1);
                 cairo_stroke(cr);
-                double total = 0;
-                for (int i = 0; i < g_view.segment_count; i++) {
-                    if (g_view.segments[i].day == day) {
-                        total += g_view.segments[i].value;
-                    }
-                }
-                char title[64];
-                g_snprintf(title, sizeof(title), "%.0f", total);
+                /* Title and breakdown come preformatted from the host, which
+                 * knows the metric: a bare number is useless for tokens, and
+                 * rounds a $0.003 cost to "0". */
+                const br_day_tip *tip = (day < g_view.day_count) ? &g_view.day_tips[day] : NULL;
                 const char *label = (day < g_view.day_label_count && g_view.day_labels[day])
                                         ? g_view.day_labels[day] : "";
+                char title[192];
+                if (tip && tip->total) {
+                    g_snprintf(title, sizeof(title), "%s", tip->total);
+                } else {
+                    double total = 0;
+                    for (int i = 0; i < g_view.segment_count; i++) {
+                        if (g_view.segments[i].day == day) {
+                            total += g_view.segments[i].value;
+                        }
+                    }
+                    g_snprintf(title, sizeof(title), "%.0f", total);
+                }
                 draw_tooltip(cr, width, PAD_L + day * col + col / 2, PAD_T + h / 2,
-                             title, label);
+                             title, (tip && tip->details) ? tip->details : label);
             }
         }
     }
@@ -737,8 +805,14 @@ static void draw_bars(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
             cairo_fill(cr);
         }
         cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
+        /* Clip the label to its column: a long model name otherwise runs under
+         * the bar it belongs to. */
+        cairo_save(cr);
+        cairo_rectangle(cr, pad, cy, label_w - 8, row_h);
+        cairo_clip(cr);
         cairo_move_to(cr, pad, cy + row_h / 2 + 4);
         cairo_show_text(cr, b->label ? b->label : "");
+        cairo_restore(cr);
         set_source_rgb(cr, b->rgb[0], b->rgb[1], b->rgb[2], hovered ? 1.0 : 0.9);
         cairo_rectangle(cr, pad + label_w, cy + (row_h - bar_h) / 2,
                         bar_max * CLAMP(b->value, 0.0, 1.0), bar_h);
@@ -987,6 +1061,7 @@ static void settings_clear(br_settings *settings) {
     for (int i = 0; i < settings->rule_count; i++) {
         g_free(settings->rules[i].provider);
         g_free(settings->rules[i].window_label);
+        g_free(settings->rules[i].chip);
     }
     g_free(settings->rules);
     g_free(settings->widgets_on);
@@ -1101,8 +1176,10 @@ static void on_check_updates(GtkButton *button, gpointer data) {
 }
 
 static GtkWidget *readonly_dropdown(char **items, int count, const char *selected) {
-    const char *const fallback[] = {"—", NULL};
-    GtkWidget *dd = gtk_drop_down_new_from_strings(count > 0 ? (const char *const *)items : fallback);
+    /* Start from a NULL-terminated literal rather than `items`: GTK builds the
+     * initial model from this array, and our `char **` has no NULL terminator,
+     * so it walked off the end of the heap and crashed in g_strdup. */
+    GtkWidget *dd = gtk_drop_down_new_from_strings((const char *const[]){"—", NULL});
     if (count > 0) {
         GtkStringList *list = gtk_string_list_new(NULL);
         for (int i = 0; i < count; i++) {
@@ -1136,47 +1213,244 @@ static GtkWidget *caption(const char *text) {
     return scaled_label(text, 0.85, FALSE, 0.45, 0.45, 0.45);
 }
 
-static GtkWidget *build_rule_row(const br_rule *rule, int index) {
-    GtkWidget *row = row_box();
-    g_object_set_data(G_OBJECT(row), "rule-index", GINT_TO_POINTER(index));
-    gtk_box_append(GTK_BOX(row), readonly_dropdown(g_providers, g_provider_count, rule->provider));
-    if (rule->kind == BR_RULE_COST) {
-        gtk_box_append(GTK_BOX(row), caption("per day, $"));
-        GtkWidget *limit = spin(rule->cost_limit, 1, 10000, 1, G_CALLBACK(on_rule_cost_changed));
-        g_object_set_data(G_OBJECT(limit), "rule-index", GINT_TO_POINTER(index));
-        gtk_box_append(GTK_BOX(row), limit);
-    } else {
-        gtk_box_append(GTK_BOX(row),
-                       readonly_dropdown(g_window_labels, g_window_label_count, rule->window_label));
-        if (rule->kind == BR_RULE_MILESTONE) {
-            gtk_box_append(GTK_BOX(row), caption("every %"));
-            GtkWidget *step_spin = spin(rule->step, 5, 50, 1, G_CALLBACK(on_rule_step_changed));
-            g_object_set_data(G_OBJECT(step_spin), "rule-index", GINT_TO_POINTER(index));
-            gtk_box_append(GTK_BOX(row), step_spin);
-        } else {
-            gtk_box_append(GTK_BOX(row), caption("drop % within"));
-            GtkWidget *drop = spin(rule->percent_drop, 5, 95, 1, G_CALLBACK(on_rule_drop_changed));
-            g_object_set_data(G_OBJECT(drop), "rule-index", GINT_TO_POINTER(index));
-            gtk_box_append(GTK_BOX(row), drop);
-            gtk_box_append(GTK_BOX(row), caption("min"));
-            GtkWidget *mins = spin(rule->minutes, 5, 240, 5, G_CALLBACK(on_rule_minutes_changed));
-            g_object_set_data(G_OBJECT(mins), "rule-index", GINT_TO_POINTER(index));
-            gtk_box_append(GTK_BOX(row), mins);
+/* ---- Notifications pane --------------------------------------------------
+ *
+ * Mirrors the macOS MilestonesView card for card: the list, a divider, then a
+ * creation form whose button reads Add / Update / Already added depending on
+ * whether a rule already exists for the picked provider+window.
+ */
+
+
+/* macOS offers Claude a model-scoped "Fable" weekly that the others lack. */
+static int window_options(const char *provider, const char ***out) {
+    static const char *claude[] = {"Rolling", "Weekly", "Fable", "Monthly", NULL};
+    static const char *other[] = {"Rolling", "Weekly", "Monthly", NULL};
+    const char **set = (g_strcmp0(provider, "Claude") == 0) ? claude : other;
+    int n = 0;
+    while (set[n]) { n++; }
+    if (out) { *out = set; }
+    return n;
+}
+
+static const char *provider_name(int index) {
+    return (index >= 0 && index < g_provider_count && g_providers[index])
+        ? g_providers[index] : "";
+}
+
+static int window_options(const char *provider, const char ***out);
+
+static void on_draft_provider(GObject *obj, GParamSpec *pspec, gpointer data) {
+    (void)pspec; (void)data;
+    if (g_syncing) { return; }
+    int card = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(obj), "draft-card"));
+    g_draft_provider[card] = gtk_drop_down_get_selected(GTK_DROP_DOWN(obj));
+    /* macOS resets the window to Rolling when the provider changes. */
+    g_draft_window[card] = 0;
+    fire(BR_ACT_DRAFT_PROVIDER, card, provider_name(g_draft_provider[card]), NULL, 0);
+    g_settings_dirty = TRUE;
+}
+
+static void on_draft_window(GObject *obj, GParamSpec *pspec, gpointer data) {
+    (void)pspec; (void)data;
+    if (g_syncing) { return; }
+    int card = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(obj), "draft-card"));
+    g_draft_window[card] = gtk_drop_down_get_selected(GTK_DROP_DOWN(obj));
+    {
+        const char *provider = (g_draft_provider[card] >= 0 && g_draft_provider[card] < g_provider_count)
+            ? g_providers[g_draft_provider[card]] : "";
+        const char **options = NULL;
+        int n = window_options(provider, &options);
+        fire(BR_ACT_DRAFT_WINDOW, card,
+             (g_draft_window[card] < n) ? options[g_draft_window[card]] : options[0], NULL, 0);
+    }
+    g_settings_dirty = TRUE;
+}
+
+static void on_draft_value(GtkWidget *widget, gpointer data) {
+    (void)data;
+    if (g_syncing) { return; }
+    int card = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "draft-card"));
+    if (card >= 100) {
+        /* Trailing-window minutes, snapped to 15 like macOS. */
+        int minutes = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
+        if (minutes < 15) { minutes = 15; }
+        g_draft_window[card - 100] = (minutes / 15) * 15;
+        fire(BR_ACT_DRAFT_VALUE, card - 100, NULL, NULL, g_draft_window[card - 100]);
+        return;
+    }
+    if (GTK_IS_SPIN_BUTTON(widget)) {
+        g_draft_value[card] = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
+    } else if (GTK_IS_SCALE(widget)) {
+        g_draft_value[card] = gtk_range_get_value(GTK_RANGE(widget));
+    } else if (GTK_IS_ENTRY(widget)) {
+        g_draft_value[card] = g_ascii_strtod(gtk_editable_get_text(GTK_EDITABLE(widget)), NULL);
+    }
+    fire(BR_ACT_DRAFT_VALUE, card, NULL, NULL, g_draft_value[card]);
+}
+
+static const br_rule *existing_rule(int card, const char **provider_out,
+                                    const char **window_out);
+
+static void on_draft_add(GtkButton *button, gpointer data) {
+    (void)data;
+    if (g_syncing) { return; }
+    int card = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "draft-card"));
+    /* Forward the draft's provider and window so add and update share one
+     * path: the host upserts on (provider, window). */
+    const char *provider = NULL, *window = NULL;
+    existing_rule(card, &provider, &window);
+    fire(BR_ACT_RULE_ADD, card, provider, window, 0);
+}
+
+static GtkWidget *provider_picker(int card) {
+    GtkWidget *dd = gtk_drop_down_new_from_strings(
+        g_provider_count > 0 ? (const char *const *)g_providers : (const char *[]){"—", NULL});
+    if (g_provider_count > 0) {
+        GtkStringList *list = gtk_string_list_new(NULL);
+        for (int i = 0; i < g_provider_count; i++) {
+            gtk_string_list_append(list, g_providers[i] ? g_providers[i] : "");
+        }
+        gtk_drop_down_set_model(GTK_DROP_DOWN(dd), G_LIST_MODEL(list));
+        g_object_unref(list);
+        if (g_draft_provider[card] >= 0 && g_draft_provider[card] < g_provider_count) {
+            gtk_drop_down_set_selected(GTK_DROP_DOWN(dd), (guint)g_draft_provider[card]);
         }
     }
+    g_object_set_data(G_OBJECT(dd), "draft-card", GINT_TO_POINTER(card));
+    g_signal_connect(dd, "notify::selected", G_CALLBACK(on_draft_provider), NULL);
+    gtk_widget_set_sensitive(dd, g_provider_count > 0);
+    return dd;
+}
+
+static GtkWidget *window_picker(int card) {
+    const char *provider = (g_draft_provider[card] >= 0 && g_draft_provider[card] < g_provider_count)
+        ? g_providers[g_draft_provider[card]] : "";
+    const char **options = NULL;
+    int n = window_options(provider, &options);
+    GtkWidget *dd = gtk_drop_down_new_from_strings(options);
+    if (g_draft_window[card] >= 0 && g_draft_window[card] < n) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(dd), (guint)g_draft_window[card]);
+    }
+    g_object_set_data(G_OBJECT(dd), "draft-card", GINT_TO_POINTER(card));
+    g_signal_connect(dd, "notify::selected", G_CALLBACK(on_draft_window), NULL);
+    return dd;
+}
+
+static GtkWidget *labelled(const char *text, GtkWidget *control) {
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *label = gtk_label_new(text);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_widget_set_size_request(label, 118, -1);
+    gtk_box_append(GTK_BOX(row), label);
+    gtk_box_append(GTK_BOX(row), control);
+    return row;
+}
+
+static const br_rule *existing_rule(int card, const char **provider_out,
+                                    const char **window_out) {
+    const char *provider = (g_draft_provider[card] >= 0 && g_draft_provider[card] < g_provider_count)
+        ? g_providers[g_draft_provider[card]] : "";
+    const char **options = NULL;
+    int n = window_options(provider, &options);
+    const char *window = (g_draft_window[card] >= 0 && g_draft_window[card] < n)
+        ? options[g_draft_window[card]] : options[0];
+    if (provider_out) { *provider_out = provider; }
+    if (window_out) { *window_out = window; }
+    for (int i = 0; i < g_settings.rule_count; i++) {
+        const br_rule *r = &g_settings.rules[i];
+        if (r->kind != card) { continue; }
+        if (g_strcmp0(r->provider, provider) != 0) { continue; }
+        if (card == BR_RULE_COST || g_strcmp0(r->window_label, window) == 0) { return r; }
+    }
+    return NULL;
+}
+
+/* Add / Update / Already added, decided from the draft and existing rules. */
+static void refresh_add_button(int card) {
+    GtkWidget *button = g_add_button[card];
+    if (!button) { return; }
+    const char *provider = NULL, *window = NULL;
+    const br_rule *existing = existing_rule(card, &provider, &window);
+    double value = g_draft_value[card];
+    char text[96];
+
+    if (g_provider_count == 0) {
+        g_snprintf(text, sizeof(text), "No providers detected");
+    } else if (!existing) {
+        g_snprintf(text, sizeof(text), "%s", card == BR_RULE_MILESTONE ? "Add Milestone"
+            : card == BR_RULE_BURN ? "Add Burn-Rate Alert" : "Add Cost Alert");
+    } else if (card == BR_RULE_MILESTONE && existing->step == value) {
+        g_snprintf(text, sizeof(text), "Already added");
+    } else if (card == BR_RULE_COST) {
+        g_snprintf(text, sizeof(text), "Update to ≥ $%.2f/day", value);
+    } else if (card == BR_RULE_BURN) {
+        g_snprintf(text, sizeof(text), "Update to ↓%.0f%% / %d min", value,
+                   g_draft_window[card] < 15 ? 15 : g_draft_window[card]);
+    } else {
+        g_snprintf(text, sizeof(text), "Update to every %.0f%%", value);
+    }
+    gtk_label_set_text(GTK_LABEL(button), text);
+    gtk_widget_set_sensitive(button,
+                             g_provider_count > 0
+                             && !(card == BR_RULE_MILESTONE && existing
+                                  && existing->step == value)
+                             && !(card == BR_RULE_COST && value <= 0));
+}
+
+static void update_burn_summary(void) {
+    if (!g_burn_summary) { return; }
+    char text[64];
+    int minutes = g_draft_window[BR_RULE_BURN];
+    if (minutes < 15) { minutes = 15; }
+    minutes = (minutes / 15) * 15;
+    g_snprintf(text, sizeof(text), "%.0f%% within %d min", g_draft_value[BR_RULE_BURN], minutes);
+    gtk_label_set_text(GTK_LABEL(g_burn_summary), text);
+}
+
+static GtkWidget *rule_bullet(int kind, const br_rule *rule) {
+    const char *glyph = kind == BR_RULE_BURN ? "▲"
+        : kind == BR_RULE_COST ? "$" : "●";
+    double r = rule->rgb[0], g = rule->rgb[1], b = rule->rgb[2];
+    if (kind == BR_RULE_BURN) { r = 0.95; g = 0.55; b = 0.15; }
+    if (kind == BR_RULE_COST) { r = 0.20; g = 0.68; b = 0.44; }
+    return scaled_label(glyph, 1.15, TRUE, r, g, b);
+}
+
+static GtkWidget *build_rule_row(const br_rule *rule, int index) {
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    g_object_set_data(G_OBJECT(row), "rule-index", GINT_TO_POINTER(index));
+    gtk_box_append(GTK_BOX(row), rule_bullet(rule->kind, rule));
+
+    GtkWidget *names = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_box_append(GTK_BOX(names),
+                   scaled_label(rule->provider ? rule->provider : "", 1.0, TRUE, -1, -1, -1));
+    if (rule->kind != BR_RULE_COST) {
+        gtk_box_append(GTK_BOX(names), caption(rule->window_label ? rule->window_label : ""));
+    }
+    gtk_box_append(GTK_BOX(row), names);
+
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(spacer, TRUE);
     gtk_box_append(GTK_BOX(row), spacer);
-    GtkWidget *remove = gtk_button_new_with_label("Remove");
+
+    /* The value is a read-only chip; it is edited in the form below, as on
+     * macOS, so a rule is only ever changed in one place. */
+    GtkWidget *chip = gtk_frame_new(rule->chip ? rule->chip : "");
+    gtk_widget_set_size_request(chip, 160, -1);
+    gtk_box_append(GTK_BOX(row), chip);
+
+    GtkWidget *remove = gtk_button_new_with_label("✕");
+    gtk_widget_set_tooltip_text(remove, "Remove this rule");
     g_signal_connect(remove, "clicked", G_CALLBACK(on_rule_deleted), row);
     gtk_box_append(GTK_BOX(row), remove);
     return row;
 }
 
-static GtkWidget *rule_section(const char *footnote, int kind) {
+static GtkWidget *rule_section(const char *footnote, int kind, const char *empty_copy) {
     GtkWidget *frame = card(NULL);
     GtkWidget *box = card_body(frame);
     gtk_box_append(GTK_BOX(box), caption(footnote));
+
     gboolean any = FALSE;
     for (int i = 0; i < g_settings.rule_count; i++) {
         if (g_settings.rules[i].kind == kind) {
@@ -1185,54 +1459,123 @@ static GtkWidget *rule_section(const char *footnote, int kind) {
         }
     }
     if (!any) {
-        gtk_box_append(GTK_BOX(box), caption("No rules."));
+        gtk_box_append(GTK_BOX(box),
+                       scaled_label(empty_copy, 0.9, FALSE, 0.45, 0.45, 0.45));
     }
-    GtkWidget *add = gtk_button_new_with_label("Add rule");
-    g_object_set_data(G_OBJECT(add), "rule-kind", GINT_TO_POINTER(kind));
-    g_signal_connect(add, "clicked", G_CALLBACK(on_rule_added), NULL);
-    gtk_widget_set_halign(add, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(box), add);
+    if (any) {
+        gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    }
+
+    gtk_box_append(GTK_BOX(box), provider_picker(kind));
+    if (kind != BR_RULE_COST) {
+        gtk_box_append(GTK_BOX(box), window_picker(kind));
+    }
+    if (kind == BR_RULE_MILESTONE) {
+        /* Presets, as macOS: it deliberately offers only these four steps. */
+        static const char *const presets[] = {"5", "10", "20", "25", NULL};
+        int active = 1;
+        for (int i = 0; i < 4; i++) {
+            if (atoi(presets[i]) == (int)g_draft_value[kind]) { active = i; }
+        }
+        g_draft_value[kind] = atoi(presets[active]);
+        GtkWidget *seg = build_segment(presets, 4, active, G_CALLBACK(on_segment_toggled));
+        GtkWidget *child = gtk_widget_get_first_child(seg);
+        while (child) {
+            g_object_set_data(G_OBJECT(child), "draft-card", GINT_TO_POINTER(kind));
+            child = gtk_widget_get_next_sibling(child);
+        }
+        gtk_box_append(GTK_BOX(box), labelled("Notify every", seg));
+    } else if (kind == BR_RULE_BURN) {
+        GtkWidget *drop = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 5, 95, 1);
+        gtk_range_set_value(GTK_RANGE(drop), g_draft_value[kind]);
+        gtk_scale_set_draw_value(GTK_SCALE(drop), FALSE);
+        g_object_set_data(G_OBJECT(drop), "draft-card", GINT_TO_POINTER(kind));
+        g_signal_connect(drop, "value-changed", G_CALLBACK(on_draft_value), NULL);
+        gtk_widget_set_hexpand(drop, TRUE);
+        gtk_box_append(GTK_BOX(box), labelled("Drop", drop));
+
+        GtkWidget *mins = gtk_spin_button_new_with_range(15, 240, 15);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(mins), g_draft_window[kind] < 15
+                                  ? 30 : g_draft_window[kind]);
+        g_object_set_data(G_OBJECT(mins), "draft-card", GINT_TO_POINTER(kind + 100));
+        g_signal_connect(mins, "value-changed", G_CALLBACK(on_draft_value), NULL);
+        gtk_box_append(GTK_BOX(box), labelled("Trailing window", mins));
+        g_burn_summary = caption("");
+        gtk_widget_set_halign(g_burn_summary, GTK_ALIGN_END);
+        gtk_box_append(GTK_BOX(box), g_burn_summary);
+    } else {
+        GtkWidget *entry = gtk_entry_new();
+        gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "5.00");
+        gtk_widget_set_size_request(entry, 110, -1);
+        g_object_set_data(G_OBJECT(entry), "draft-card", GINT_TO_POINTER(kind));
+        g_signal_connect(entry, "changed", G_CALLBACK(on_draft_value), NULL);
+        gtk_box_append(GTK_BOX(box), labelled("Daily limit ($)", entry));
+    }
+
+    GtkWidget *add_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *gap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(gap, TRUE);
+    gtk_box_append(GTK_BOX(add_row), gap);
+    GtkWidget *button = gtk_button_new();
+    g_add_button[kind] = gtk_label_new("Add");
+    gtk_button_set_child(GTK_BUTTON(button), g_add_button[kind]);
+    g_object_set_data(G_OBJECT(button), "draft-card", GINT_TO_POINTER(kind));
+    g_signal_connect(button, "clicked", G_CALLBACK(on_draft_add), NULL);
+    gtk_box_append(GTK_BOX(add_row), button);
+    gtk_box_append(GTK_BOX(box), add_row);
     return frame;
 }
 
-static void rebuild_notifications(void) {
-    if (!g_notifications) {
-        return;
-    }
-    clear_box(g_notifications);
+static void refresh_add_button(int card);
+static void update_burn_summary(void);
 
-    /* macOS shows a "System permission" card. Linux has no permission API, so
-     * the equivalent question is whether alerts can be delivered at all. */
+static void rebuild_notifications(void) {
+    if (!g_notifications) { return; }
+    clear_box(g_notifications);
+    g_add_button[0] = g_add_button[1] = g_add_button[2] = NULL;
+    g_burn_summary = NULL;
+
+    /* macOS has no Linux equivalent of a notification permission, so the card
+     * says what is actually true rather than pretending to parity. */
     GtkWidget *perm = card("Desktop alerts");
     GtkWidget *perm_box = card_body(perm);
     gtk_box_append(GTK_BOX(perm_box), scaled_label(
-        g_settings.alerts_status ? g_settings.alerts_status : "Unknown", 0.95, FALSE,
-        -1, -1, -1));
+        g_settings.alerts_status ? g_settings.alerts_status : "Unknown", 0.95, FALSE, -1, -1, -1));
     gtk_box_append(GTK_BOX(perm_box), caption(
         g_settings.alerts_ok
             ? "BurnRate keeps polling and updating the menu either way."
             : "Install your distro's libnotify package to enable banners."));
+    gtk_box_append(GTK_BOX(perm_box), caption(
+        "Linux desktops have no per-app notification permission, so there is nothing to request."));
     gtk_box_append(GTK_BOX(g_notifications), perm);
+
+    /* Card order matches macOS: permission, milestones, resets, burn, cost. */
+    gtk_box_append(GTK_BOX(g_notifications), rule_section(
+        "Fires each time remaining drops past another increment (every 20%: 80, 60, 40, 20). One rule per plan window.",
+        BR_RULE_MILESTONE, "No milestones yet — get notified as usage runs low."));
 
     GtkWidget *resets = card("Window resets");
     GtkWidget *reset_box = card_body(resets);
+    gtk_box_append(GTK_BOX(reset_box), caption(
+        "Fires when a plan window rolls over and refills to 100% remaining."));
     GtkWidget *reset_toggle = gtk_check_button_new_with_label("Notify when a window resets");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(reset_toggle),
                                 g_settings.notify_on_reset ? TRUE : FALSE);
     g_signal_connect(reset_toggle, "toggled", G_CALLBACK(on_reset_toggled), NULL);
     gtk_box_append(GTK_BOX(reset_box), reset_toggle);
-    gtk_box_append(GTK_BOX(reset_box),
-                   caption("Fires when a quota window starts over and remaining jumps back up."));
     gtk_box_append(GTK_BOX(g_notifications), resets);
 
     gtk_box_append(GTK_BOX(g_notifications), rule_section(
-        "Fires each time remaining drops past another increment. One rule per plan window.",
-        BR_RULE_MILESTONE));
+        "Detect usage spikes: a fast % drop within a trailing window.",
+        BR_RULE_BURN, "No burn-rate alerts — get notified when usage accelerates."));
     gtk_box_append(GTK_BOX(g_notifications), rule_section(
-        "Fires when remaining falls sharply inside a trailing window.", BR_RULE_BURN));
-    gtk_box_append(GTK_BOX(g_notifications), rule_section(
-        "Fires once per day when local-log spend passes a limit.", BR_RULE_COST));
+        "Spend is estimated from local logs at list prices. Only OpenCode reports vendor cost today.",
+        BR_RULE_COST, "No cost alerts — get notified when daily spend crosses a limit."));
+
+    for (int card = 0; card < 3; card++) { refresh_add_button(card); }
+    update_burn_summary();
 }
+
 
 static void rebuild_widgets_pane(void) {
     if (!g_widgets_pane) {
@@ -1381,6 +1724,11 @@ static gboolean apply_settings(gpointer data) {
     rebuild_notifications();
     rebuild_widgets_pane();
     rebuild_about();
+    if (g_settings_dirty) {
+        for (int card = 0; card < 3; card++) { refresh_add_button(card); }
+        update_burn_summary();
+        g_settings_dirty = FALSE;
+    }
     g_syncing = FALSE;
     return G_SOURCE_REMOVE;
 }
