@@ -171,9 +171,38 @@ private func providerRGB(_ provider: String) -> (Double, Double, Double) {
     }
 }
 
+/// The symbolic icon installed by `make_linux_app.sh`. Panels recolour
+/// symbolic icons from the theme, which is what the macOS status item gets from
+/// its template image.
+private let trayIconName = "burnrate-symbolic"
+
 /// Matches the desktop file / package version. The Linux app is installed
 /// unpackaged, so there is no bundle to read an Info.plist from.
 private let appVersion = "0.8.0"
+
+/// The hicolor directory the app's icons were installed into, so the GTK icon
+/// theme can resolve `burnrate` without waiting for a cache rebuild. Returns
+/// nil when nothing is installed.
+private func installedIconDir() -> String? {
+    let relative = "icons/hicolor"
+    var roots: [URL] = []
+    if let xdg = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdg.isEmpty {
+        roots.append(URL(fileURLWithPath: xdg, isDirectory: true))
+    }
+    roots.append(FileManagerPaths().homeDirectory
+        .appendingPathComponent(".local/share"))
+    roots.append(URL(fileURLWithPath: "/usr/share", isDirectory: true))
+    roots.append(URL(fileURLWithPath: "/usr/local/share", isDirectory: true))
+    for root in roots {
+        let dir = root.appendingPathComponent(relative)
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            return dir.path
+        }
+    }
+    return nil
+}
 
 /// One provider's entry for one day, with the metric the user selected.
 private func metricValue(_ entry: ModelUsageEntry, cost: Bool) -> Double {
@@ -538,7 +567,9 @@ private func syncWidgetTrays(usage: [ProviderUsage]? = nil) {
     for provider in enabled {
         var tray = state.widgetTray(provider)
         if tray == nil {
-            let created = br_tray_add("utilities-system-monitor", provider, onTrayAction, nil)
+            let created = trayIconName.withCString {
+                br_tray_add($0, provider, onTrayAction, nil)
+            }
             if created >= 0 {
                 tray = created
                 state.setWidgetTray(created, for: provider)
@@ -673,12 +704,21 @@ private func presentWindow() {
 struct BurnRateLinuxMain {
     static func main() {
         // Tray is best-effort: without a session bus / watcher the app still runs.
-        let tray = br_tray_add("utilities-system-monitor", "BurnRate", onTrayAction, nil)
+        // A *symbolic* icon so the panel recolours it for light/dark — the Linux
+        // equivalent of the macOS template status image, rather than a generic
+        // theme icon that has nothing to do with the app.
+        let tray = trayIconName.withCString { br_tray_add($0, "BurnRate", onTrayAction, nil) }
         state.setMainTray(tray)
         if tray >= 0 {
             state.setActionStore(ActionStore(), for: tray)
         }
         syncWidgetTrays()
+        // The full-colour mark for the window, so the app does not fall back to
+        // the desktop environment's default icon.
+        let iconDir = installedIconDir()
+        "burnrate".withCString { name in
+            iconDir?.withCString { br_ui_set_icon(name, $0) } ?? br_ui_set_icon(name, nil)
+        }
         br_ui_run("BurnRate", onQuery, onRefresh, nil)
         br_tray_stop_all()
     }

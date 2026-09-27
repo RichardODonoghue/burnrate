@@ -92,8 +92,10 @@ static GMutex g_pending_lock;
 
 static GtkWidget *g_stack = NULL;
 static GtkWidget *g_list = NULL;
-static GtkWidget *g_range_dd = NULL;
-static GtkWidget *g_metric_dd = NULL;
+static GtkWidget *g_range_group = NULL;
+static GtkWidget *g_metric_group = NULL;
+static GtkWidget *g_label_group = NULL;
+static GtkWidget *g_trend_title = NULL;
 static GtkWidget *g_provider_dd = NULL;
 static GtkWidget *g_label_dd = NULL;
 static GtkWidget *g_cards = NULL;
@@ -118,6 +120,15 @@ static GtkWidget *g_table_grid = NULL;
 static double g_trend_hover_x = -1;
 static double g_daily_hover_x = -1;
 static double g_bars_hover_y = -1;
+
+/* Set while `apply_view` writes widget state programmatically.
+ *
+ * Without this the window livelocks: `set_dropdown` replaces the model, which
+ * resets the selection and emits `notify::selected`, whose handler raises a
+ * query, which schedules another `apply_view` — thousands of redraws a second
+ * and no user input ever processed. Declared up here because the segmented
+ * controls' handlers consult it too. */
+static gboolean g_syncing = FALSE;
 
 static const char *const PANE_NAMES[BR_PANE_COUNT] = {
     "usage", "notifications", "widgets", "about"
@@ -234,15 +245,101 @@ static void rebuild_legend(void) {
     gtk_widget_set_visible(g_legend, g_view.series_count > 0);
 }
 
-/* ---- pickers ------------------------------------------------------------- */
-
-/* Set while `apply_view` writes widget state programmatically.
+/* ---- segmented control ---------------------------------------------------
  *
- * Without this the window livelocks: `set_dropdown` replaces the model, which
- * resets the selection and emits `notify::selected`, whose handler raises a
- * query, which schedules another `apply_view` — thousands of redraws a second
- * and no user input ever processed. */
-static gboolean g_syncing = FALSE;
+ * GTK4 has no stock segmented control, and the macOS Metric/Range filters are
+ * segmented (`.pickerStyle(.segmented)`), so they are built from a row of
+ * linked toggle buttons here rather than approximating with a dropdown.
+ */
+
+static void add_segment_css(void) {
+    static gboolean done = FALSE;
+    if (done) {
+        return;
+    }
+    done = TRUE;
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(
+        provider,
+        ".br-segment > togglebutton { padding: 4px 12px; border-radius: 0;"
+        "  border: 1px solid alpha(currentColor, 0.25); margin: 0; }"
+        ".br-segment > togglebutton:first-child { border-top-left-radius: 6px;"
+        "  border-bottom-left-radius: 6px; }"
+        ".br-segment > togglebutton:last-child { border-top-right-radius: 6px;"
+        "  border-bottom-right-radius: 6px; }"
+        ".br-segment > togglebutton:checked { background-image: none;"
+        "  background-color: alpha(currentColor, 0.18); font-weight: bold; }");
+    gtk_style_context_add_provider_for_display(
+        gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+}
+
+static GtkWidget *build_segment(const char *const *items, int count, int active,
+                                GCallback changed) {
+    add_segment_css();
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(box, "br-segment");
+    for (int i = 0; i < count; i++) {
+        GtkWidget *button = gtk_toggle_button_new_with_label(items[i]);
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), i == active);
+        g_object_set_data(G_OBJECT(button), "segment-index", GINT_TO_POINTER(i));
+        g_signal_connect(button, "toggled", changed, box);
+        gtk_box_append(GTK_BOX(box), button);
+    }
+    return box;
+}
+
+/* Reads the active index out of a segment group. */
+static int segment_selected(GtkWidget *group) {
+    GtkWidget *child = gtk_widget_get_first_child(group);
+    while (child) {
+        if (gtk_widget_get_visible(child)
+            && gtk_widget_get_sensitive(child)
+            && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(child))) {
+            return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(child), "segment-index"));
+        }
+        child = gtk_widget_get_next_sibling(child);
+    }
+    return -1;
+}
+
+static void on_segment_toggled(GtkToggleButton *button, gpointer group) {
+    if (g_syncing) {
+        return;
+    }
+    int index = segment_selected(GTK_WIDGET(group));
+    if (index < 0) {
+        return;
+    }
+    /* A toggle group must never end up with nothing selected. */
+    if (!gtk_toggle_button_get_active(button)) {
+        gtk_toggle_button_set_active(button, TRUE);
+        return;
+    }
+    /* Enforce single selection: activating one clears the rest. */
+    GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(group));
+    while (child) {
+        if (child != GTK_WIDGET(button)
+            && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(child))) {
+            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(child), FALSE);
+        }
+        child = gtk_widget_get_next_sibling(child);
+    }
+    g_object_set_data(G_OBJECT(group), "segment-active", GINT_TO_POINTER(index));
+    if (group == g_metric_group) {
+        g_query.metric = index;
+    } else if (group == g_range_group) {
+        g_query.range = index;
+    } else if (group == g_label_group) {
+        g_query.trend_label = index;
+    } else {
+        return;
+    }
+    notify_query();
+}
+
+/* ---- pickers ------------------------------------------------------------- */
 
 static void set_dropdown(GtkWidget *dd, char **items, int count, int selected) {
     if (!dd || count <= 0) {
@@ -735,46 +832,63 @@ static GtkWidget *build_usage_pane(void) {
     gtk_widget_set_margin_start(outer, 12);
     gtk_widget_set_margin_end(outer, 12);
 
-    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    /* GtkDropDown takes NULL-terminated arrays, so no count. */
-    static const char *const ranges[] = {"24 hours", "7 days", "30 days", NULL};
-    static const char *const metrics[] = {"Tokens", "Cost", NULL};
-    static const char *const placeholder[] = {"All", NULL};
-    g_range_dd = gtk_drop_down_new_from_strings(ranges);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(g_range_dd), g_query.range);
-    g_signal_connect(g_range_dd, "notify::selected", G_CALLBACK(on_range_changed), NULL);
-    g_metric_dd = gtk_drop_down_new_from_strings(metrics);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(g_metric_dd), g_query.metric);
-    g_signal_connect(g_metric_dd, "notify::selected", G_CALLBACK(on_metric_changed), NULL);
-    g_provider_dd = gtk_drop_down_new_from_strings(placeholder);
-    g_label_dd = gtk_drop_down_new_from_strings(placeholder);
-    struct { const char *caption; GtkWidget **dd; } fields[] = {
-        {"Range", &g_range_dd}, {"Metric", &g_metric_dd},
-        {"Provider", &g_provider_dd}, {"Window", &g_label_dd},
-    };
-    for (unsigned i = 0; i < G_N_ELEMENTS(fields); i++) {
-        gtk_box_append(GTK_BOX(toolbar), gtk_label_new(fields[i].caption));
-        gtk_box_append(GTK_BOX(toolbar), *fields[i].dd);
-    }
+    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_top(toolbar, 10);
+    gtk_widget_set_margin_bottom(toolbar, 4);
+    /* Mirrors the macOS toolbar: title, then provider menu, then the segmented
+     * Metric and Range filters, then Refresh. */
+    GtkWidget *title = gtk_label_new("Usage Dashboard");
+    PangoAttrList *headline = pango_attr_list_new();
+    pango_attr_list_insert(headline, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+    pango_attr_list_insert(headline, pango_attr_scale_new(1.15));
+    gtk_label_set_attributes(GTK_LABEL(title), headline);
+    pango_attr_list_unref(headline);
+    gtk_box_append(GTK_BOX(toolbar), title);
+
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(spacer, TRUE);
     gtk_box_append(GTK_BOX(toolbar), spacer);
+
+    /* Provider stays a menu, as on macOS. */
+    static const char *const placeholder[] = {"All", NULL};
+    g_provider_dd = gtk_drop_down_new_from_strings(placeholder);
+    g_signal_connect(g_provider_dd, "notify::selected", G_CALLBACK(on_provider_changed), NULL);
+    gtk_box_append(GTK_BOX(toolbar), gtk_label_new("Provider"));
+    gtk_box_append(GTK_BOX(toolbar), g_provider_dd);
+
+    static const char *const metrics[] = {"Tokens", "Cost", NULL};
+    g_metric_group = build_segment(metrics, 2, g_query.metric, G_CALLBACK(on_segment_toggled));
+    gtk_box_append(GTK_BOX(toolbar), g_metric_group);
+
+    /* `ChartRange` raw values, as the macOS segmented picker shows them. The
+     * spelled-out "24 hours" is both a parity break and wide enough to push the
+     * toolbar past the window. */
+    static const char *const ranges[] = {"24h", "7d", "30d", NULL};
+    g_range_group = build_segment(ranges, 3, g_query.range, G_CALLBACK(on_segment_toggled));
+    gtk_box_append(GTK_BOX(toolbar), g_range_group);
+
     GtkWidget *refresh = gtk_button_new_with_label("Refresh");
     g_signal_connect(refresh, "clicked", G_CALLBACK(on_refresh_clicked), NULL);
     gtk_box_append(GTK_BOX(toolbar), refresh);
     gtk_box_append(GTK_BOX(outer), toolbar);
 
-    g_signal_connect(g_provider_dd, "notify::selected", G_CALLBACK(on_provider_changed), NULL);
+    g_label_dd = gtk_drop_down_new_from_strings(placeholder);
     g_signal_connect(g_label_dd, "notify::selected", G_CALLBACK(on_label_changed), NULL);
 
+    /* A wrapping label still reports its full text as its natural width, so a
+     * long diagnostic line inflates the pane's minimum and pushes the toolbar
+     * and charts off the right edge. Capping the wrap width keeps the content
+     * inside the window instead. */
     g_status = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(g_status), 0.0f);
     gtk_label_set_wrap(GTK_LABEL(g_status), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(g_status), 90);
     gtk_box_append(GTK_BOX(outer), g_status);
 
     g_diag = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(g_diag), 0.0f);
     gtk_label_set_wrap(GTK_LABEL(g_diag), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(g_diag), 90);
     gtk_box_append(GTK_BOX(outer), g_diag);
 
     g_cards = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -794,8 +908,27 @@ static GtkWidget *build_usage_pane(void) {
         gtk_widget_set_hexpand(area, TRUE);
         /* GTK4 has no "draw" signal — the draw func is set directly. */
         gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), charts[i].draw, NULL, NULL);
-        GtkWidget *frame = gtk_frame_new(charts[i].title);
-        gtk_frame_set_child(GTK_FRAME(frame), area);
+        GtkWidget *frame;
+        if (charts[i].area == &g_trend) {
+            /* macOS puts the heading and the segmented Window filter in the
+             * card header, not in the toolbar. */
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+            GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            g_trend_title = scaled_label(charts[i].title, 1.05, TRUE, -1, -1, -1);
+            gtk_box_append(GTK_BOX(header), g_trend_title);
+            GtkWidget *gap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+            gtk_widget_set_hexpand(gap, TRUE);
+            gtk_box_append(GTK_BOX(header), gap);
+            g_label_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+            gtk_box_append(GTK_BOX(header), g_label_group);
+            gtk_box_append(GTK_BOX(box), header);
+            gtk_box_append(GTK_BOX(box), area);
+            frame = gtk_frame_new(NULL);
+            gtk_frame_set_child(GTK_FRAME(frame), box);
+        } else {
+            frame = gtk_frame_new(charts[i].title);
+            gtk_frame_set_child(GTK_FRAME(frame), area);
+        }
         gtk_box_append(GTK_BOX(outer), frame);
         *charts[i].area = area;
         *charts[i].frame = frame;
@@ -821,8 +954,10 @@ static GtkWidget *build_usage_pane(void) {
     gtk_box_append(GTK_BOX(outer), g_empty);
 
     GtkWidget *scroller = gtk_scrolled_window_new();
+    /* Scroll horizontally as a safety net: a long model name or a wide chart
+     * legend must never be able to push content off the window. */
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), outer);
     return scroller;
 }
@@ -838,6 +973,32 @@ static GtkWidget *placeholder_pane(const char *message) {
 }
 
 /* ---- rendering ----------------------------------------------------------- */
+
+/* The Window filter's items come from the data, so it is rebuilt when they
+ * change rather than updated in place. */
+static void rebuild_window_segment(void) {
+    if (!g_label_group) {
+        return;
+    }
+    clear_box(g_label_group);
+    for (int i = 0; i < g_view.trend_label_count; i++) {
+        GtkWidget *button = gtk_toggle_button_new_with_label(
+            g_view.trend_labels[i] ? g_view.trend_labels[i] : "");
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), i == g_query.trend_label);
+        g_object_set_data(G_OBJECT(button), "segment-index", GINT_TO_POINTER(i));
+        g_signal_connect(button, "toggled", G_CALLBACK(on_segment_toggled), g_label_group);
+        gtk_box_append(GTK_BOX(g_label_group), button);
+    }
+    if (g_trend_title) {
+        const char *label = (g_query.trend_label >= 0
+                             && g_query.trend_label < g_view.trend_label_count
+                             && g_view.trend_labels[g_query.trend_label])
+            ? g_view.trend_labels[g_query.trend_label] : "";
+        char text[96];
+        g_snprintf(text, sizeof(text), "Remaining over time — %s", label);
+        gtk_label_set_text(GTK_LABEL(g_trend_title), text);
+    }
+}
 
 static gboolean apply_view(gpointer data) {
     (void)data;
@@ -860,7 +1021,7 @@ static gboolean apply_view(gpointer data) {
     rebuild_table();
     g_syncing = TRUE;
     set_dropdown(g_provider_dd, g_view.providers, g_view.provider_count, g_query.provider);
-    set_dropdown(g_label_dd, g_view.trend_labels, g_view.trend_label_count, g_query.trend_label);
+    rebuild_window_segment();
     g_syncing = FALSE;
 
     /* A new view invalidates whatever the pointer was pointing at. */
@@ -916,11 +1077,10 @@ static void on_activate(GtkApplication *app, gpointer data) {
     gtk_window_set_default_size(GTK_WINDOW(window), 1000, 700);
     g_window = window;
 
+    /* No header bar of our own: a GtkApplicationWindow already provides one
+     * with the window controls, and adding a second stacks a duplicate close
+     * button on top of it. The macOS toolbar title lives in the content. */
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    GtkWidget *header = gtk_header_bar_new();
-    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header), gtk_label_new("BurnRate"));
-    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(header), TRUE);
-    gtk_box_append(GTK_BOX(root), header);
 
     g_stack = gtk_stack_new();
     gtk_stack_add_named(GTK_STACK(g_stack), build_usage_pane(), PANE_NAMES[BR_PANE_USAGE]);
@@ -995,8 +1155,26 @@ void br_ui_present(br_view *view) {
     g_idle_add(apply_view, NULL);
 }
 
-void br_ui_show_pane(int pane) {
-    if (pane < 0 || pane >= BR_PANE_COUNT || !g_stack) {
+/// Points the window at a themed icon and makes sure the theme can find it.
+///
+/// GTK 4.14 has no texture-based window icon, and using the theme name has a
+/// side benefit: the window and the `.desktop` entry resolve the same `Icon=`
+/// name, so they can never disagree. The containing hicolor directory is added
+/// to the search path because a freshly installed icon is otherwise invisible
+/// until the icon cache is rebuilt.
+void br_ui_set_icon(const char *theme_name, const char *icon_dir) {
+    if (!g_window || !theme_name || !*theme_name) {
+        return;
+    }
+    GdkDisplay *display = gdk_display_get_default();
+    if (display && icon_dir && *icon_dir) {
+        GtkIconTheme *theme = gtk_icon_theme_get_for_display(display);
+        gtk_icon_theme_add_search_path(theme, icon_dir);
+    }
+    gtk_window_set_icon_name(GTK_WINDOW(g_window), theme_name);
+}
+
+void br_ui_show_pane(int pane) {    if (pane < 0 || pane >= BR_PANE_COUNT || !g_stack) {
         return;
     }
     GtkListBoxRow *row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_list), pane);

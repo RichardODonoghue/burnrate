@@ -4,6 +4,7 @@ Name=BurnRate
 GenericName=AI plan usage tracker
 Comment=Track AI plan subscription usage from the system tray
 Exec=BurnRate
+Icon=burnrate
 Terminal=false
 Categories=Utility;Monitor;
 Keywords=usage;tokens;claude;codex;opencode;

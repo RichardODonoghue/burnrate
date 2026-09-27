@@ -149,6 +149,11 @@ void br_ui_present(br_view *view);
 /// Brings the window forward on the given pane (menu actions).
 void br_ui_show_pane(int pane);
 
+/// Sets the window icon from a themed icon name, and registers `icon_dir` with
+/// the icon theme so a freshly installed icon resolves without a cache rebuild.
+/// Both arguments are ignored when absent.
+void br_ui_set_icon(const char *theme_name, const char *icon_dir);
+
 /// Requests the GTK application to quit.
 void br_ui_quit(void);
 

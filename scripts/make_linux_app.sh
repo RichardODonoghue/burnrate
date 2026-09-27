@@ -77,6 +77,15 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/bin"
 cp "$BINARY" "$STAGE/bin/BurnRate"
 cp Resources/burnrate.desktop "$STAGE/burnrate.desktop"
+# Icons: the full-colour mark for the window/desktop entry, and a symbolic one
+# for the tray so the panel can recolour it the way macOS recolours a template
+# image. Without these the app has no icon at all and the tray falls back to a
+# generic theme icon.
+ICONS="$STAGE/share/icons/hicolor"
+mkdir -p "$ICONS/256x256/apps" "$ICONS/512x512/apps" "$ICONS/scalable/apps"
+cp Resources/burnrate-256.png "$ICONS/256x256/apps/burnrate.png"
+cp Resources/burnrate-512.png "$ICONS/512x512/apps/burnrate.png"
+cp Resources/burnrate-symbolic.svg "$ICONS/scalable/apps/burnrate-symbolic.svg"
 copy_runtime "$STAGE/$LIBDIR"
 
 cat > "$STAGE/install.sh" <<'EOF'
@@ -88,6 +97,19 @@ install -Dm755 "$here/bin/BurnRate" "$prefix/bin/BurnRate"
 install -Dm644 "$here/burnrate.desktop" "$prefix/share/applications/burnrate.desktop"
 mkdir -p "$prefix/lib/BurnRate"
 cp -f "$here/lib/BurnRate/"*.so* "$prefix/lib/BurnRate/" 2>/dev/null || true
+
+# Icons: full-colour mark plus the symbolic tray icon. Both go in the user's
+# hicolor theme so the desktop entry resolves and the panel can recolour.
+for size in 256x256 512x512; do
+  if [ -f "$here/share/icons/hicolor/$size/apps/burnrate.png" ]; then
+    install -Dm644 "$here/share/icons/hicolor/$size/apps/burnrate.png" \
+      "$prefix/share/icons/hicolor/$size/apps/burnrate.png"
+  fi
+done
+if [ -f "$here/share/icons/hicolor/scalable/apps/burnrate-symbolic.svg" ]; then
+  install -Dm644 "$here/share/icons/hicolor/scalable/apps/burnrate-symbolic.svg" \
+    "$prefix/share/icons/hicolor/scalable/apps/burnrate-symbolic.svg"
+fi
 
 missing="$(ldd "$prefix/bin/BurnRate" 2>/dev/null | awk '/not found/{print $1}' | sort -u | tr '\n' ' ')"
 if [ -n "$missing" ]; then
@@ -114,6 +136,7 @@ if command -v dpkg-deb >/dev/null 2>&1; then
   mkdir -p "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/applications" "$PKG/usr/lib/BurnRate"
   cp "$BINARY" "$PKG/usr/bin/BurnRate"
   cp Resources/burnrate.desktop "$PKG/usr/share/applications/burnrate.desktop"
+  cp -r "$STAGE/share/icons" "$PKG/usr/share/icons"
   cp "$STAGE/$LIBDIR/"*.so* "$PKG/usr/lib/BurnRate/" 2>/dev/null || true
   cat > "$PKG/DEBIAN/control" <<EOF
 Package: burnrate
