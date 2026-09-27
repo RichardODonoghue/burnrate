@@ -12,6 +12,10 @@ char *br_dup(const char *s) {
     return g_strdup(s ? s : "");
 }
 
+void *br_alloc(size_t bytes) {
+    return g_malloc0(bytes);
+}
+
 /// Frees everything a view owns, but not the view itself — so it can be reused
 /// for a static instance as well as a heap one.
 static void view_clear(br_view *view) {
@@ -34,6 +38,12 @@ static void view_clear(br_view *view) {
     }
     g_free(view->bars);
     g_free(view->segments);
+    for (int i = 0; i < view->row_count; i++) {
+        for (int c = 0; c < view->rows[i].cell_count; c++) {
+            g_free(view->rows[i].cells[c]);
+        }
+    }
+    g_free(view->rows);
     for (int i = 0; i < view->provider_count; i++) {
         g_free(view->providers[i]);
     }
@@ -42,6 +52,14 @@ static void view_clear(br_view *view) {
         g_free(view->trend_labels[i]);
     }
     g_free(view->trend_labels);
+    for (int i = 0; i < view->x_label_count; i++) {
+        g_free(view->x_labels[i]);
+    }
+    g_free(view->x_labels);
+    for (int i = 0; i < view->day_label_count; i++) {
+        g_free(view->day_labels[i]);
+    }
+    g_free(view->day_labels);
     g_free(view->status);
     g_free(view->version);
     g_free(view->diagnostics);
@@ -88,8 +106,18 @@ static GtkWidget *g_bars = NULL;
 static GtkWidget *g_trend_frame = NULL;
 static GtkWidget *g_daily_frame = NULL;
 static GtkWidget *g_bars_frame = NULL;
+static GtkWidget *g_table_frame = NULL;
 static GtkWidget *g_status = NULL;
 static GtkWidget *g_diag = NULL;
+static GtkWidget *g_empty = NULL;
+static GtkWidget *g_table_grid = NULL;
+
+/* Hover state, in pixels. Resolved to a datum at draw time so a tooltip always
+ * describes the data currently on screen, and kept out of the query so moving
+ * the pointer never triggers a host round-trip. */
+static double g_trend_hover_x = -1;
+static double g_daily_hover_x = -1;
+static double g_bars_hover_y = -1;
 
 static const char *const PANE_NAMES[BR_PANE_COUNT] = {
     "usage", "notifications", "widgets", "about"
@@ -159,10 +187,12 @@ static GtkWidget *make_card(const br_card *card) {
 }
 
 static void clear_box(GtkWidget *box) {
+    /* `gtk_widget_unparent` rather than `gtk_box_remove`: this also empties the
+     * breakdown GtkGrid, and gtk_box_remove asserts on a non-Box container. */
     GtkWidget *child = gtk_widget_get_first_child(box);
     while (child) {
         GtkWidget *next = gtk_widget_get_next_sibling(child);
-        gtk_box_remove(GTK_BOX(box), child);
+        gtk_widget_unparent(child);
         child = next;
     }
 }
@@ -206,9 +236,38 @@ static void rebuild_legend(void) {
 
 /* ---- pickers ------------------------------------------------------------- */
 
+/* Set while `apply_view` writes widget state programmatically.
+ *
+ * Without this the window livelocks: `set_dropdown` replaces the model, which
+ * resets the selection and emits `notify::selected`, whose handler raises a
+ * query, which schedules another `apply_view` — thousands of redraws a second
+ * and no user input ever processed. */
+static gboolean g_syncing = FALSE;
+
 static void set_dropdown(GtkWidget *dd, char **items, int count, int selected) {
     if (!dd || count <= 0) {
         return;
+    }
+    /* Leave the model alone when the labels are unchanged, so the user's
+     * selection survives a poll and no spurious notify is emitted. */
+    GListModel *model = gtk_drop_down_get_model(GTK_DROP_DOWN(dd));
+    if (model && g_list_model_get_n_items(model) == (guint)count) {
+        gboolean same = TRUE;
+        for (int i = 0; i < count && same; i++) {
+            GtkStringObject *object = g_list_model_get_item(model, (guint)i);
+            same = g_strcmp0(object ? gtk_string_object_get_string(object) : NULL,
+                             items[i] ? items[i] : "") == 0;
+            if (object) {
+                g_object_unref(object);
+            }
+        }
+        if (same) {
+            if (selected >= 0 && selected < count
+                && (int)gtk_drop_down_get_selected(GTK_DROP_DOWN(dd)) != selected) {
+                gtk_drop_down_set_selected(GTK_DROP_DOWN(dd), (guint)selected);
+            }
+            return;
+        }
     }
     GtkStringList *list = gtk_string_list_new(NULL);
     for (int i = 0; i < count; i++) {
@@ -225,6 +284,9 @@ static void set_dropdown(GtkWidget *dd, char **items, int count, int selected) {
 #define DROPDOWN_HANDLER(name, field)                                          \
     static void name(GObject *obj, GParamSpec *pspec, gpointer data) {         \
         (void)pspec; (void)data;                                               \
+        if (g_syncing) {                                                       \
+            return;                                                           \
+        }                                                                      \
         g_query.field = (int)gtk_drop_down_get_selected(GTK_DROP_DOWN(obj));  \
         notify_query();                                                        \
     }
@@ -248,14 +310,78 @@ static void on_row_selected(GObject *obj, GParamSpec *pspec, gpointer data) {
 
 /* ---- chart drawing ------------------------------------------------------- */
 
-static void set_source_rgb(cairo_t *cr, double r, double g, double b, double alpha) {
-    cairo_set_source_rgba(cr, r, g, b, alpha);
-}
-
 #define PAD_L 46.0
 #define PAD_R 12.0
 #define PAD_T 10.0
 #define PAD_B 20.0
+
+static void set_source_rgb(cairo_t *cr, double r, double g, double b, double alpha) {
+    cairo_set_source_rgba(cr, r, g, b, alpha);
+}
+
+/* ---- in-canvas tooltip ---------------------------------------------------
+ *
+ * Drawn into the chart's own surface rather than a popover: a GtkPopover per
+ * pointer move would be both slower and harder to keep anchored than a rounded
+ * box painted at a clamped offset.
+ */
+
+static void draw_tooltip(cairo_t *cr, double surface_w, double anchor_x, double anchor_y,
+                         const char *title, const char *detail) {
+    if (!title || !*title) {
+        return;
+    }
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 12);
+    cairo_text_extents_t te;
+    cairo_text_extents(cr, title, &te);
+    double title_w = te.x_advance, title_h = 13;
+
+    double detail_w = 0, detail_h = 0;
+    if (detail && *detail) {
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 11);
+        cairo_text_extents(cr, detail, &te);
+        detail_w = te.x_advance;
+        detail_h = 14;
+    }
+    double box_w = MAX(title_w, detail_w) + 18;
+    double box_h = title_h + detail_h + 12;
+
+    /* Prefer above the anchor; flip below when there is no room. */
+    double bx = anchor_x - box_w / 2;
+    double by = anchor_y - box_h - 10;
+    if (by < 4) {
+        by = anchor_y + 14;
+    }
+    /* Clamp to the widget, not to `cairo_image_surface_get_width` — the draw
+     * context's target is not guaranteed to be an image surface, and that call
+     * returns 0 there, which would push the box clean off the canvas. */
+    if (bx < 2) bx = 2;
+    if (bx + box_w > surface_w - 2) bx = surface_w - box_w - 2;
+    if (by + box_h > PAD_T + 200) by = PAD_T + 200 - box_h;
+
+    cairo_save(cr);
+    cairo_set_source_rgba(cr, 0.10, 0.11, 0.13, 0.94);
+    cairo_new_path(cr);
+    cairo_arc(cr, bx + box_w - 6, by + box_h - 6, 6, 0, 2 * G_PI);
+    cairo_rectangle(cr, bx, by, box_w - 6, box_h - 6);
+    cairo_fill(cr);
+
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 12);
+    cairo_move_to(cr, bx + 9, by + 6 + title_h - 3);
+    cairo_show_text(cr, title);
+    if (detail && *detail) {
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 11);
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.78);
+        cairo_move_to(cr, bx + 9, by + 6 + title_h + detail_h - 4);
+        cairo_show_text(cr, detail);
+    }
+    cairo_restore(cr);
+}
 
 /* Horizontal gridlines with 0/25/50/75/100 % labels, shared by both column
  * charts so they read as one system. */
@@ -273,6 +399,58 @@ static void draw_percent_grid(cairo_t *cr, double w, double h) {
         g_snprintf(label, sizeof(label), "%d%%", g);
         cairo_set_source_rgb(cr, 0.45, 0.45, 0.45);
         cairo_move_to(cr, 4, y + 4);
+        cairo_show_text(cr, label);
+    }
+}
+
+/* Evenly spaced tick captions along the bottom axis. */
+static void draw_x_labels(cairo_t *cr, double w, double h) {
+    if (g_view.x_label_count <= 0) {
+        return;
+    }
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 10);
+    cairo_set_source_rgb(cr, 0.45, 0.45, 0.45);
+    cairo_text_extents_t te;
+    for (int i = 0; i < g_view.x_label_count; i++) {
+        const char *label = g_view.x_labels[i];
+        if (!label || !*label) {
+            continue;
+        }
+        cairo_text_extents(cr, label, &te);
+        double frac = (double)i / (double)(g_view.x_label_count - 1);
+        double x = PAD_L + w * frac - te.x_advance / 2;
+        double y = PAD_T + h + 14;
+        if (x < 2) x = 2;
+        if (x + te.x_advance > PAD_L + w) x = PAD_L + w - te.x_advance;
+        cairo_move_to(cr, x, y);
+        cairo_show_text(cr, label);
+    }
+}
+
+/* Column captions for the daily chart, one per day. */
+static void draw_day_labels(cairo_t *cr, double w, double h) {
+    if (g_view.day_count <= 0 || g_view.day_label_count <= 0) {
+        return;
+    }
+    double col = w / g_view.day_count;
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 9);
+    cairo_text_extents_t te;
+    for (int d = 0; d < g_view.day_count && d < g_view.day_label_count; d++) {
+        const char *label = g_view.day_labels[d];
+        if (!label || !*label) {
+            continue;
+        }
+        cairo_text_extents(cr, label, &te);
+        /* Too many days to caption legibly: label every other one. */
+        if (te.x_advance > col - 2 && (d % 2) == 1) {
+            continue;
+        }
+        cairo_set_source_rgb(cr, 0.45, 0.45, 0.45);
+        double x = PAD_L + d * col + (col - te.x_advance) / 2;
+        if (x < 2) x = 2;
+        cairo_move_to(cr, x, PAD_T + h + 13);
         cairo_show_text(cr, label);
     }
 }
@@ -310,6 +488,51 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_stroke(cr);
     }
     cairo_set_dash(cr, NULL, 0, 0);
+    draw_x_labels(cr, w, h);
+
+    /* Tooltip: the datum nearest the pointer, across all series. */
+    if (g_trend_hover_x >= PAD_L) {
+        int best_series = -1, best_index = -1;
+        double best_dx = 1e9;
+        for (int i = 0; i < g_view.series_count; i++) {
+            const br_series *s = &g_view.series[i];
+            for (int j = 0; j < s->count; j++) {
+                double px = PAD_L + w * CLAMP(s->pts[j].x, 0.0, 1.0);
+                double dx = fabs(px - g_trend_hover_x);
+                if (dx < best_dx) {
+                    best_dx = dx;
+                    best_series = i;
+                    best_index = j;
+                }
+            }
+        }
+        if (best_series >= 0 && best_dx < 24) {
+            const br_series *s = &g_view.series[best_series];
+            double px = PAD_L + w * CLAMP(s->pts[best_index].x, 0.0, 1.0);
+            double py = PAD_T + h * (1.0 - CLAMP(s->pts[best_index].y, 0.0, 100.0) / 100.0);
+            cairo_set_source_rgba(cr, s->rgb[0], s->rgb[1], s->rgb[2], 0.35);
+            cairo_set_line_width(cr, 1.0);
+            cairo_move_to(cr, px, PAD_T);
+            cairo_line_to(cr, px, PAD_T + h);
+            cairo_stroke(cr);
+            cairo_set_source_rgba(cr, s->rgb[0], s->rgb[1], s->rgb[2], 1.0);
+            cairo_arc(cr, px, py, 3.5, 0, 2 * G_PI);
+            cairo_fill(cr);
+            char title[64], detail[64];
+            g_snprintf(title, sizeof(title), "%s · %.0f%%",
+                       s->name ? s->name : "", s->pts[best_index].y);
+            const char *tick = "";
+            int slot = g_view.x_label_count > 1
+                           ? (int)(CLAMP(s->pts[best_index].x, 0, 1)
+                                    * (g_view.x_label_count - 1) + 0.5)
+                           : 0;
+            if (slot >= 0 && slot < g_view.x_label_count && g_view.x_labels[slot]) {
+                tick = g_view.x_labels[slot];
+            }
+            g_snprintf(detail, sizeof(detail), "%s", tick);
+            draw_tooltip(cr, width, px, py, title, detail);
+        }
+    }
 }
 
 static void draw_daily(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
@@ -353,6 +576,31 @@ static void draw_daily(GtkDrawingArea *area, cairo_t *cr, int width, int height,
                 cairo_fill(cr);
             }
         }
+        draw_day_labels(cr, w, h);
+
+        if (g_daily_hover_x >= PAD_L) {
+            int day = (int)((g_daily_hover_x - PAD_L) / col);
+            if (day >= 0 && day < g_view.day_count) {
+                /* Outline the hovered column, then total it for the caption. */
+                cairo_set_source_rgba(cr, 0, 0, 0, 0.25);
+                cairo_set_line_width(cr, 1.5);
+                cairo_rectangle(cr, PAD_L + day * col + 0.5, PAD_T + 0.5,
+                                MAX(col - 1, 1), h - 1);
+                cairo_stroke(cr);
+                double total = 0;
+                for (int i = 0; i < g_view.segment_count; i++) {
+                    if (g_view.segments[i].day == day) {
+                        total += g_view.segments[i].value;
+                    }
+                }
+                char title[64];
+                g_snprintf(title, sizeof(title), "%.0f", total);
+                const char *label = (day < g_view.day_label_count && g_view.day_labels[day])
+                                        ? g_view.day_labels[day] : "";
+                draw_tooltip(cr, width, PAD_L + day * col + col / 2, PAD_T + h / 2,
+                             title, label);
+            }
+        }
     }
     g_free(tops);
 }
@@ -375,14 +623,107 @@ static void draw_bars(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
         const br_bar *b = &g_view.bars[i];
         double cy = i * row_h;
         double bar_h = MIN(row_h - 6, 16);
+        int hovered = g_bars_hover_y >= cy && g_bars_hover_y < cy + row_h;
+        if (hovered) {
+            cairo_set_source_rgba(cr, 0, 0, 0, 0.06);
+            cairo_rectangle(cr, 0, cy, width, row_h);
+            cairo_fill(cr);
+        }
         cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
         cairo_move_to(cr, pad, cy + row_h / 2 + 4);
         cairo_show_text(cr, b->label ? b->label : "");
-        set_source_rgb(cr, b->rgb[0], b->rgb[1], b->rgb[2], 0.9);
+        set_source_rgb(cr, b->rgb[0], b->rgb[1], b->rgb[2], hovered ? 1.0 : 0.9);
         cairo_rectangle(cr, pad + label_w, cy + (row_h - bar_h) / 2,
                         bar_max * CLAMP(b->value, 0.0, 1.0), bar_h);
         cairo_fill(cr);
+        if (hovered) {
+            draw_tooltip(cr, width,
+                         MIN(pad + label_w + bar_max * CLAMP(b->value, 0, 1) / 2,
+                             (double)width - 90),
+                         cy + (row_h - bar_h) / 2,
+                         b->label ? b->label : "", NULL);
+        }
     }
+}
+
+/* ---- pointer tracking ---------------------------------------------------- */
+
+/* One controller per chart. Hover stays entirely on the C side: routing a
+ * pointer move through the query seam would mean a host round-trip per frame
+ * to redraw a box whose text C already has. */
+static gboolean on_trend_motion(GtkEventControllerMotion *c, double x, double y,
+                                gpointer data) {
+    (void)c; (void)y; (void)data;
+    g_trend_hover_x = x;
+    gtk_widget_queue_draw(g_trend);
+    return TRUE;
+}
+
+static gboolean on_daily_motion(GtkEventControllerMotion *c, double x, double y,
+                                gpointer data) {
+    (void)c; (void)y; (void)data;
+    g_daily_hover_x = x;
+    gtk_widget_queue_draw(g_daily);
+    return TRUE;
+}
+
+static gboolean on_bars_motion(GtkEventControllerMotion *c, double x, double y,
+                               gpointer data) {
+    (void)c; (void)x; (void)data;
+    g_bars_hover_y = y;
+    gtk_widget_queue_draw(g_bars);
+    return TRUE;
+}
+
+/* GTK4 has no `GtkEventControllerMotionFunc`; the "motion" signal is
+ * gboolean (*)(controller, x, y, user_data). */
+typedef gboolean (*br_motion_cb)(GtkEventControllerMotion *controller, double x,
+                                 double y, gpointer data);
+
+static void on_chart_leave(GtkEventControllerMotion *c, gpointer data) {
+    GtkWidget *area = GTK_WIDGET(data);
+    if (area == g_trend) g_trend_hover_x = -1;
+    if (area == g_daily) g_daily_hover_x = -1;
+    if (area == g_bars) g_bars_hover_y = -1;
+    (void)c;
+    gtk_widget_queue_draw(area);
+}
+
+static void track_hover(GtkWidget *area, br_motion_cb motion) {
+    GtkEventController *motion_ctl = gtk_event_controller_motion_new();
+    g_signal_connect(motion_ctl, "motion", G_CALLBACK(motion), NULL);
+    gtk_widget_add_controller(area, motion_ctl);
+    g_signal_connect(motion_ctl, "leave", G_CALLBACK(on_chart_leave), area);
+}
+
+/* ---- breakdown table ----------------------------------------------------- */
+
+static void rebuild_table(void) {
+    if (!g_table_grid) {
+        return;
+    }
+    clear_box(g_table_grid);
+    if (g_view.row_count <= 0) {
+        gtk_widget_set_visible(g_table_grid, FALSE);
+        return;
+    }
+    for (int r = 0; r < g_view.row_count; r++) {
+        for (int c = 0; c < g_view.rows[r].cell_count; c++) {
+            const char *text = g_view.rows[r].cells[c];
+            gboolean header = (r == 0);
+            GtkWidget *label = scaled_label(text ? text : "", header ? 0.8 : 1.0, header,
+                                            header ? 0.45 : -1, header ? 0.45 : -1,
+                                            header ? 0.45 : -1);
+            if (header) {
+                gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+            } else if (c > 0) {
+                gtk_label_set_xalign(GTK_LABEL(label), 1.0f);
+                gtk_widget_set_size_request(label, 110, -1);
+            }
+            gtk_grid_attach(GTK_GRID(g_table_grid), label, c, r, 1, 1);
+        }
+    }
+    gtk_widget_set_visible(g_table_grid, TRUE);
 }
 
 /* ---- panes --------------------------------------------------------------- */
@@ -459,6 +800,25 @@ static GtkWidget *build_usage_pane(void) {
         *charts[i].area = area;
         *charts[i].frame = frame;
     }
+    track_hover(g_trend, on_trend_motion);
+    track_hover(g_daily, on_daily_motion);
+    track_hover(g_bars, on_bars_motion);
+
+    g_table_grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(g_table_grid), 4);
+    gtk_grid_set_column_spacing(GTK_GRID(g_table_grid), 16);
+    GtkWidget *table_frame = gtk_frame_new("Per-model breakdown");
+    gtk_frame_set_child(GTK_FRAME(table_frame), g_table_grid);
+    gtk_widget_set_margin_top(table_frame, 4);
+    gtk_box_append(GTK_BOX(outer), table_frame);
+    g_table_frame = table_frame;
+
+    /* Loading/empty state, centred in place of the charts. */
+    g_empty = gtk_label_new("");
+    gtk_label_set_wrap(GTK_LABEL(g_empty), TRUE);
+    gtk_label_set_justify(GTK_LABEL(g_empty), GTK_JUSTIFY_CENTER);
+    gtk_widget_set_margin_top(g_empty, 48);
+    gtk_box_append(GTK_BOX(outer), g_empty);
 
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller),
@@ -497,8 +857,14 @@ static gboolean apply_view(gpointer data) {
 
     rebuild_cards();
     rebuild_legend();
+    rebuild_table();
+    g_syncing = TRUE;
     set_dropdown(g_provider_dd, g_view.providers, g_view.provider_count, g_query.provider);
     set_dropdown(g_label_dd, g_view.trend_labels, g_view.trend_label_count, g_query.trend_label);
+    g_syncing = FALSE;
+
+    /* A new view invalidates whatever the pointer was pointing at. */
+    g_trend_hover_x = g_daily_hover_x = g_bars_hover_y = -1;
 
     if (g_status) {
         gtk_label_set_text(GTK_LABEL(g_status), g_view.status ? g_view.status : "");
@@ -507,6 +873,12 @@ static gboolean apply_view(gpointer data) {
     if (g_diag) {
         gtk_label_set_text(GTK_LABEL(g_diag), g_view.diagnostics ? g_view.diagnostics : "");
         gtk_widget_set_visible(g_diag, g_view.diagnostics && *g_view.diagnostics);
+    }
+    gboolean any_chart = g_view.series_count > 0 || g_view.segment_count > 0
+                         || g_view.bar_count > 0;
+    if (g_empty) {
+        gtk_label_set_text(GTK_LABEL(g_empty), g_view.status ? g_view.status : "");
+        gtk_widget_set_visible(g_empty, !any_chart);
     }
     if (g_legend) gtk_widget_set_visible(g_legend, g_view.series_count > 0);
     if (g_trend) {
@@ -520,6 +892,9 @@ static gboolean apply_view(gpointer data) {
     if (g_bars) {
         gtk_widget_set_visible(g_bars_frame, g_view.bar_count > 0);
         gtk_widget_queue_draw(g_bars);
+    }
+    if (g_table_frame) {
+        gtk_widget_set_visible(g_table_frame, g_view.row_count > 1);
     }
     return G_SOURCE_REMOVE;
 }

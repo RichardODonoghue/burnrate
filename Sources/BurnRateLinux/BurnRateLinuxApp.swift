@@ -243,7 +243,7 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
         value: br_dup(costTotal > 0 ? String(format: "$%.2f", costTotal) : "—"),
         detail: br_dup("list-price estimate")))
     if !cards.isEmpty {
-        let buffer = UnsafeMutablePointer<br_card>.allocate(capacity: cards.count)
+        let buffer = alloc(br_card.self, cards.count)
         for (index, card) in cards.enumerated() { buffer[index] = card }
         view.pointee.cards = buffer
         view.pointee.card_count = Int32(cards.count)
@@ -265,10 +265,10 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
         samples: history.snapshot(), label: label,
         providerFilter: providerFilter, cutoff: cutoff)
     if !series.isEmpty {
-        let buffer = UnsafeMutablePointer<br_series>.allocate(capacity: series.count)
+        let buffer = alloc(br_series.self, series.count)
         for (index, item) in series.enumerated() {
             let color = providerRGB(item.provider)
-            let points = UnsafeMutablePointer<br_xy>.allocate(capacity: item.samples.count)
+            let points = alloc(br_xy.self, item.samples.count)
             for (j, sample) in item.samples.enumerated() {
                 points[j] = br_xy(
                     x: max(0, min(1, sample.date.timeIntervalSince(cutoff) / span)),
@@ -280,6 +280,11 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
         }
         view.pointee.series = buffer
         view.pointee.series_count = Int32(series.count)
+
+        // x-axis ticks, formatted here so the C layer needs no date code.
+        let ticks = TrendChartData.trendTickDates(cutoff: cutoff, now: now)
+        view.pointee.x_labels = dupCStrings(ticks.map { TrendChartData.trendTickLabel($0) })
+        view.pointee.x_label_count = Int32(ticks.count)
     }
 
     // ---- daily + ranking ---------------------------------------------------
@@ -296,17 +301,21 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
                     rgb: (color.0, color.1, color.2)))
             }
         }
-        let buffer = UnsafeMutablePointer<br_seg>.allocate(capacity: segments.count)
+        let buffer = alloc(br_seg.self, segments.count)
         for (index, segment) in segments.enumerated() { buffer[index] = segment }
         view.pointee.segments = buffer
         view.pointee.segment_count = Int32(segments.count)
         view.pointee.day_count = Int32(daily.count)
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = range == .today ? "HH:mm" : "d MMM"
+        view.pointee.day_labels = dupCStrings(daily.map { dayFormatter.string(from: $0.day) })
+        view.pointee.day_label_count = Int32(daily.count)
     }
 
     let ranked = Array(rawTotals.prefix(8))
     if !ranked.isEmpty {
         let peak = ranked.map { metricValue($0, cost: cost) }.max() ?? 1
-        let buffer = UnsafeMutablePointer<br_bar>.allocate(capacity: ranked.count)
+        let buffer = alloc(br_bar.self, ranked.count)
         for (index, entry) in ranked.enumerated() {
             let color = modelColor(entry.displayName)
             let value = metricValue(entry, cost: cost)
@@ -319,6 +328,25 @@ private func buildView(_ query: br_query, snapshot: DashboardSnapshot?) -> Unsaf
         }
         view.pointee.bars = buffer
         view.pointee.bar_count = Int32(ranked.count)
+    }
+
+    // ---- per-model breakdown table ----------------------------------------
+    if !rawTotals.isEmpty {
+        var rows: [br_row] = []
+        rows.append(br_row(cells: rowCells(["Model", "Tokens", "Requests", "Cost"]),
+                           cell_count: 4))
+        for entry in rawTotals.prefix(20) {
+            rows.append(br_row(cells: rowCells([
+                entry.displayName,
+                TokenFormat.format(entry.totalTokens),
+                "\(entry.requests)",
+                entry.cost > 0 ? String(format: "$%.2f", entry.cost) : "—",
+            ]), cell_count: 4))
+        }
+        let buffer = alloc(br_row.self, rows.count)
+        for (index, row) in rows.enumerated() { buffer[index] = row }
+        view.pointee.rows = buffer
+        view.pointee.row_count = Int32(rows.count)
     }
 
     // ---- status + diagnostics ---------------------------------------------
@@ -365,12 +393,33 @@ private func modelColor(_ name: String) -> (Double, Double, Double) {
     return palette[Int(hash % UInt64(palette.count))]
 }
 
+/// Allocator for the view-model arrays the GTK layer will free.
+///
+/// Goes through `br_alloc` (GLib, zeroed) rather than Swift's `allocate`, so
+/// the matching `g_free` in `view_clear` uses the same allocator — and so an
+/// unset field is nil rather than uninitialised memory.
+private func alloc<T>(_ type: T.Type, _ count: Int) -> UnsafeMutablePointer<T> {
+    UnsafeMutablePointer<T>(br_alloc(MemoryLayout<T>.stride * count)
+        .assumingMemoryBound(to: T.self))
+}
+
 /// C-owned copies of a string array, for a view the GTK layer will free.
 private func dupCStrings(_ items: [String]) -> UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>? {
     guard !items.isEmpty else { return nil }
-    let buffer = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: items.count)
+    let buffer = alloc(UnsafeMutablePointer<CChar>?.self, items.count)
     for (index, item) in items.enumerated() { buffer[index] = br_dup(item) }
     return buffer
+}
+
+/// The same, for a row's fixed five-cell array, which C imports as a tuple.
+private func rowCells(_ items: [String]) -> (UnsafeMutablePointer<CChar>?,
+                                            UnsafeMutablePointer<CChar>?,
+                                            UnsafeMutablePointer<CChar>?,
+                                            UnsafeMutablePointer<CChar>?,
+                                            UnsafeMutablePointer<CChar>?) {
+    var cells: [UnsafeMutablePointer<CChar>?] = items.map { br_dup($0) }
+    while cells.count < 5 { cells.append(nil) }
+    return (cells[0], cells[1], cells[2], cells[3], cells[4])
 }
 
 /// Opens the GitHub releases page in the desktop browser (Linux has no in-app

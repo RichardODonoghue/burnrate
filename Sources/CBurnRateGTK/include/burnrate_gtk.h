@@ -82,6 +82,12 @@ typedef struct {
     double rgb[3];
 } br_seg;
 
+/// One row of the per-model breakdown table. Unused trailing cells are NULL.
+typedef struct {
+    char *cells[5];
+    int cell_count;
+} br_row;
+
 typedef struct {
     br_card *cards;
     int card_count;
@@ -99,6 +105,15 @@ typedef struct {
     /// Window labels (Rolling/Weekly/…) available for the trend chart.
     char **trend_labels;
     int trend_label_count;
+    /// Formatted tick labels along the trend chart's x-axis, oldest first.
+    char **x_labels;
+    int x_label_count;
+    /// Formatted column labels for the daily chart, oldest first.
+    char **day_labels;
+    int day_label_count;
+    /// Per-model breakdown rows, already formatted for display.
+    br_row *rows;
+    int row_count;
     /// When set, the charts are replaced by this message (loading/empty state).
     char *status;
     /// Shown in the About pane.
@@ -113,6 +128,14 @@ br_view *br_view_new(void);
 void br_view_free(br_view *view);
 /// strdup for C-owned strings in a view (GLib's allocator).
 char *br_dup(const char *s);
+/// Allocator for the view-model arrays the host fills.
+///
+/// Must be used rather than the host's own allocator: the matching frees live
+/// in `view_clear`, so allocating and freeing through different allocators is
+/// undefined even when both happen to end at malloc today. Zeroed, so a field
+/// the host does not set is nil rather than garbage that `view_clear` would
+/// later walk.
+void *br_alloc(size_t bytes);
 
 /* ---- Application --------------------------------------------------------- */
 
