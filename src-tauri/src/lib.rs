@@ -11,6 +11,7 @@
 //!     built once and its items' text is rewritten every poll;
 //!   - the items must each have a menu, or the icon does not appear at all.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -208,6 +209,9 @@ struct DailyBar {
     day: i64,
     total: f64,
     bars: Vec<Bar>,
+    /// Today, or yesterday if the day has not finished: drawn faded, because a
+    /// part-day beside complete days reads as a cliff.
+    partial: bool,
 }
 
 /// The full state the frontend renders from, in one payload.
@@ -599,36 +603,45 @@ fn snapshot(
         .map(|result| result.model_daily.clone())
         .unwrap_or_default();
     let daily_start = now - range.span_seconds();
-    let mut daily: Vec<DailyBar> = daily_all
-        .iter()
-        .filter(|day| day.day >= daily_start)
-        .filter(|day| {
-            provider_filter
-                .as_deref()
-                .map(|filter| day.entries.iter().any(|entry| entry.provider == filter))
-                .unwrap_or(true)
-        })
-        .map(|day| {
-            let bars: Vec<Bar> = day
-                .entries
-                .iter()
-                .filter(|entry| {
-                    provider_filter
-                        .as_deref()
-                        .map(|filter| entry.provider == filter)
-                        .unwrap_or(true)
-                })
-                .map(|entry| bar_for(entry, metric))
-                .collect();
-            let total = bars.iter().map(|bar| bar.value).sum();
-            DailyBar {
-                day: day.day,
-                total,
-                bars,
-            }
-        })
-        .collect();
-    daily.sort_by_key(|day| day.day);
+    let today_start = burnrate_core::usage::start_of_day(now, offset);
+    // A slot per calendar day in the range, up to and including today.
+    //
+    // The first version emitted only the days that had data. That made the axis
+    // index-based, so a day with no samples silently closed up and looked
+    // identical to a day that was fully spent, and the last slot was whatever
+    // partial day the poll happened to land in. Both read as artifacting on the
+    // right-hand end of the chart. Days are calendar slots now, gaps are gaps,
+    // and today is flagged so the renderer can fade it.
+    let by_day: HashMap<i64, &DailyModelUsage> =
+        daily_all.iter().map(|day| (day.day, day)).collect();
+    let first_day = burnrate_core::usage::start_of_day(daily_start, offset);
+    let mut daily: Vec<DailyBar> = Vec::new();
+    let mut cursor = first_day;
+    while cursor <= today_start {
+        let bars: Vec<Bar> = by_day
+            .get(&cursor)
+            .map(|day| {
+                day.entries
+                    .iter()
+                    .filter(|entry| {
+                        provider_filter
+                            .as_deref()
+                            .map(|filter| entry.provider == filter)
+                            .unwrap_or(true)
+                    })
+                    .map(|entry| bar_for(entry, metric))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let total = bars.iter().map(|bar| bar.value).sum();
+        daily.push(DailyBar {
+            day: cursor,
+            total,
+            bars,
+            partial: cursor == today_start,
+        });
+        cursor += 86_400;
+    }
     let daily_max = daily.iter().map(|day| day.total).fold(0.0_f64, f64::max);
     let daily_ticks = daily_ticks(0.0, daily_max);
 
@@ -658,7 +671,6 @@ fn snapshot(
         })
         .collect();
 
-    let today_start = burnrate_core::usage::start_of_day(now, offset);
     let today_entries: Vec<&ModelUsageEntry> = daily_all
         .iter()
         .find(|day| day.day == today_start)
