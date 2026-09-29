@@ -26,9 +26,15 @@ apt-get install -y -qq --no-install-recommends \
   ca-certificates curl file libssl-dev libxdo-dev \
   xvfb xauth dbus-x11 haskell-status-notifier-item-utils libglib2.0-bin >/dev/null
 
+# Build into a container-local target dir, never the mounted one. Sharing a
+# target/ between the host (macOS) and the container (Linux) corrupts the
+# proc-macro artifacts, and the build then fails with E0463 for every
+# dependency of tauri-build and gtk.
+export CARGO_TARGET_DIR=/tmp/tauri-target
+
 echo "== build =="
 cargo build --workspace 2>&1 | tail -3
 
 echo "== tray =="
-dbus-run-session -- bash scripts/tauri-smoke-inner.sh /work
+dbus-run-session -- bash scripts/tauri-smoke-inner.sh /work "$CARGO_TARGET_DIR/debug/burnrate-desktop"
 '

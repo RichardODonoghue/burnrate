@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
@@ -207,7 +207,11 @@ fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<(Menu<R>, 
     let charts = MenuItem::with_id(app, ID_CHARTS, "Charts…", true, None::<&str>)?;
     let update = MenuItem::with_id(app, ID_UPDATE, "Check for Updates…", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
-    let quit = PredefinedMenuItem::quit(app, Some("Quit"))?;
+    // A plain item, not PredefinedMenuItem::quit: on Linux the predefined Quit
+    // reports itself disabled through DBusMenu, so the row is greyed out and
+    // never dispatches — the app becomes unquittable from its own menu. The
+    // Swift build used a plain NSMenuItem with an action, and so does this.
+    let quit = MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)?;
     let items = vec![
         (ID_STATUS, status.clone()),
         (ID_DASHBOARD, dashboard.clone()),
@@ -709,8 +713,20 @@ fn poll_once(app: &AppHandle<Wry>) {
         poller.poll(&settings)
     };
     let notifications = result.notifications.clone();
+    let providers = result.usage.len();
+    let missing = result.missing.len();
     *state.last.lock().expect("result lock") = Some(result);
     render_tray(app).ok();
+    eprintln!(
+        "burnrate: poll #{providers} providers, {missing} unexplained, \
+         {} widget(s), {} notification(s)",
+        app.state::<Mutex<TrayHandles<Wry>>>()
+            .lock()
+            .expect("tray lock")
+            .widgets
+            .len(),
+        notifications.len()
+    );
     if !notifications.is_empty() {
         deliver(app, &notifications);
     }

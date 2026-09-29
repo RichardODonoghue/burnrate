@@ -14,8 +14,13 @@ use serde::{Deserialize, Serialize};
 use crate::alerts::{AlertDefaults, BurnAlert, CostAlert, Milestone};
 
 /// The read-only settings surface the alert notifier needs.
+///
+/// Field names are camelCase on disk. This is not cosmetic: the Swift build
+/// wrote camelCase into its UserDefaults blobs, and a snake_case reader silently
+/// loads *defaults* from a perfectly valid file — which is exactly how the first
+/// widget settings written by hand appeared to be ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// Milestone rules, always coalesced to one per provider+window on load.
     pub milestones: Vec<Milestone>,
@@ -197,6 +202,41 @@ mod tests {
         assert_eq!(settings.burn_alerts.len(), 1);
         assert!(settings.notify_on_reset);
         assert!(settings.widget_providers.is_empty());
+    }
+
+    /// The on-disk keys are camelCase, so a file written by hand (or by the
+    /// Swift build) is actually read. A round-trip test cannot catch this — it
+    /// writes and reads the same shape — so the keys are asserted directly.
+    #[test]
+    fn writes_camel_case_keys() {
+        let settings = Settings {
+            widget_providers: vec!["Claude".into()],
+            poll_interval_seconds: 120,
+            includes_charts: true,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"widgetProviders\""), "got {json}");
+        assert!(json.contains("\"pollIntervalSeconds\""), "got {json}");
+        assert!(json.contains("\"includesCharts\""), "got {json}");
+        assert!(
+            !json.contains("widget_providers"),
+            "snake_case leaked: {json}"
+        );
+
+        // And a hand-written camelCase file loads.
+        let parsed: Settings = serde_json::from_str(
+            r#"{"widgetProviders":["Codex"],"pollIntervalSeconds":90,
+                "includesCharts":true,"notifyOnReset":false,
+                "milestones":[{"provider":"Claude","windowLabel":"Weekly","step":10}],
+                "burnAlerts":[],"costAlerts":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.widget_providers, vec!["Codex".to_string()]);
+        assert_eq!(parsed.poll_interval_seconds, 90);
+        assert!(parsed.includes_charts);
+        assert!(!parsed.notify_on_reset);
+        assert_eq!(parsed.milestones[0].window_label, "Weekly");
     }
 
     /// Round trips through disk, which is what makes settings survive a quit.

@@ -30,6 +30,16 @@ Windows would not boot. Tauri gives one UI codebase, a real tray library and
   - `TrayIconBuilder::title` lands in the `XAyatanaLabel` property, not `Title`.
   - WebKitGTK in a container needs `WEBKIT_DISABLE_COMPOSITING_MODE=1` and
     `WEBKIT_DISABLE_DMABUF_RENDERER=1`; `scripts/tauri-smoke.sh` sets them.
+  - **`scripts/tauri-smoke.sh` must build into a container-local
+    `CARGO_TARGET_DIR`.** A `target/` shared between the host (macOS) and the
+    container (Linux) corrupts the proc-macro artifacts and the build dies with
+    `E0463: can't find crate` for every dependency of `tauri-build` and `gtk`.
+  - **Do not use `PredefinedMenuItem::quit`.** On Linux it reports itself
+    disabled through DBusMenu, so the row is greyed out and never dispatches —
+    the app cannot be quit from its own menu. Use a plain `MenuItem`.
+  - Tray ids are `"tray-icon tray app <id>"` with non-alphanumerics replaced by
+    `_`, so a widget for "Claude" is at
+    `/org/ayatana/NotificationItem/tray_icon_tray_app_widget_Claude`.
 - Commands: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy
   --workspace --all-targets -- -D warnings`, `cargo fmt --all`, and
   `scripts/tauri-smoke.sh` (Docker; the Gate 0 tray check).
