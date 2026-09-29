@@ -7,6 +7,12 @@ import Darwin
 import Glibc
 #endif
 
+// Serialized on purpose: these tests mutate the process environment, and Swift
+// Testing runs tests in parallel by default. Without `.serialized`,
+// dataDirectoryHonoursXDG can set XDG_DATA_HOME while
+// dataDirectoryFallsBackToLocalShare is mid-assertion, which intermittently
+// fails the fallback test (it did, on CI).
+@Suite(.serialized)
 struct PlatformPathsTests {
     @Test func dataDirectoryFallsBackToLocalShare() {
         #if !os(Windows)

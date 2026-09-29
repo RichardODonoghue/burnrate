@@ -33,9 +33,11 @@ Windows would not boot. Tauri gives one UI codebase, a real tray library and
 - Commands: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy
   --workspace --all-targets -- -D warnings`, `cargo fmt --all`, and
   `scripts/tauri-smoke.sh` (Docker; the Gate 0 tray check).
-- Icons are generated, not hand-drawn: `python3 scripts/make_icons.py`
-  (needs Pillow; writes `src-tauri/icons/`, including `tray.rgba`, which the
-  Rust side embeds because Tauri's `Image` takes raw RGBA).
+- Icons are generated from one source of truth, never hand-drawn:
+  `cargo run -p icon-gen` renders the G2 flame+dial geometry in
+  `burnrate_core::dial` into `src-tauri/icons/` (PNG set, `.icns`, `.ico`,
+  `tray.png`, and `tray.rgba`, which the runtime embeds because Tauri takes raw
+  RGBA). Change the mark in `dial.rs`, re-run, and every platform follows.
 - CI for this work is `.github/workflows/tauri.yml` (core/build matrix/tray
   smoke), triggered only for `rewrite/tauri` and PRs targeting it.
 

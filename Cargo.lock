@@ -1394,6 +1394,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "icon-gen"
+version = "1.0.0"
+dependencies = [
+ "burnrate-core",
+ "png 0.17.16",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
