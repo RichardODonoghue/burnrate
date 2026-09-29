@@ -12,8 +12,10 @@ Windows would not boot. Tauri gives one UI codebase, a real tray library and
   `rewrite/tauri`; `main` keeps the working Swift app until parity is proven.
   Cutover = one PR from `rewrite/tauri` into `main`.
 - Layout: `crates/burnrate-core/` (pure Rust, no Tauri/UI deps, all logic and
-  tests), `src-tauri/` (tray, windows, commands, settings), `ui/dist/`
-  (frontend, hand-written for now — Vite comes with the dashboard).
+  tests), `src-tauri/` (tray, windows, commands, settings), `ui/app/`
+  (frontend, hand-written for now — Vite comes with the dashboard and will emit
+  into `ui/app/`; note the repo ignores any directory named `dist`, so the
+  frontend path deliberately is not called `dist`).
 - The Swift `BurnRateCore` tests (111) are the parity spec: port them 1:1 and
   tick them off in `PARITY.md`. Do not "improve" behaviour while porting.
 - Linux specifics that cost us time once, recorded so they are not re-learned:

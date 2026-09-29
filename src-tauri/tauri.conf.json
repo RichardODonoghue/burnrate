@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "com.burnrate.desktop",
   "build": {
-    "frontendDist": "../ui/dist"
+    "frontendDist": "../ui/app"
   },
   "app": {
     "windows": [
