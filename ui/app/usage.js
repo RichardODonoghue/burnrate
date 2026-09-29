@@ -77,6 +77,18 @@ function projector({ width, height, pad, xDomain, yDomain }) {
   };
 }
 
+/**
+ * Rough advance width of a label at the chart's 10px tick size.
+ *
+ * Axis padding is measured from the longest label, and the only way to know how
+ * wide a string will be before the browser lays it out is to estimate. It is used
+ * for spacing only — never to decide whether a value fits inside the plot, which
+ * is why a small error here is harmless.
+ */
+function textWidth(text) {
+  return text.length * 6.2;
+}
+
 /** Middle truncation, as the Swift legend's `.truncationMode(.middle)`. */
 function middleTruncate(text, limit) {
   if (text.length <= limit) return text;
@@ -179,7 +191,16 @@ function decimate(points, budget = 600) {
 
 function trendSvg(dashboard, width) {
   const height = 180;
-  const pad = { top: 6, right: 46, bottom: 24, left: 10 };
+  // The Y labels sit outside the plot on the right, so the padding has to fit the
+  // widest of them. Cost labels ("$0.858455") are far wider than "100%", and a
+  // fixed padding let them run off the SVG in cost mode.
+  const yLabels = dashboard.yTicks.map((value) => `${Math.round(value)}%`);
+  const pad = {
+    top: 6,
+    right: 8 + textWidth(yLabels.reduce((a, b) => (a.length >= b.length ? a : b), "")),
+    bottom: 24,
+    left: 10,
+  };
   const map = projector({
     width,
     height,
@@ -190,11 +211,11 @@ function trendSvg(dashboard, width) {
 
   const grid = dashboard.yTicks
     .map(
-      (value) =>
+      (value, index) =>
         `<line class="grid" x1="${map.left}" y1="${map.y(value).toFixed(1)}"
            x2="${map.right.toFixed(1)}" y2="${map.y(value).toFixed(1)}"/>
-         <text class="tick end" x="${(map.right + 6).toFixed(1)}"
-           y="${(map.y(value) + 3.5).toFixed(1)}">${Math.round(value)}%</text>`
+         <text class="tick" x="${(map.right + 6).toFixed(1)}"
+           y="${(map.y(value) + 3.5).toFixed(1)}">${E(yLabels[index])}</text>`
     )
     .join("");
 
@@ -214,7 +235,7 @@ function trendSvg(dashboard, width) {
         const label = E(tick.label);
         // 6.2px per character at this font size, plus breathing room, and the
         // first and last labels must not run past the plot.
-        const half = (label.length * 6.2) / 2;
+        const half = textWidth(label) / 2;
         if (x - half < map.left || x + half > map.right) return line;
         if (x - half < lastRight + 8) return line;
         lastRight = x + half;
@@ -263,7 +284,13 @@ function trendSvg(dashboard, width) {
 
 function dailySvg(dashboard, width) {
   const height = 220;
-  const pad = { top: 6, right: 54, bottom: 24, left: 10 };
+  const yLabels = (dashboard.dailyYLabels ?? []).map((label) => String(label));
+  const pad = {
+    top: 6,
+    right: 8 + textWidth(yLabels.reduce((a, b) => (a.length >= b.length ? a : b), "")),
+    bottom: 24,
+    left: 10,
+  };
   const top = Math.max(dashboard.dailyMaximum ?? 0, 1);
   const map = projector({
     width,
@@ -278,10 +305,8 @@ function dailySvg(dashboard, width) {
       (value, index) =>
         `<line class="grid" x1="${map.left}" y1="${map.y(value).toFixed(1)}"
            x2="${map.right.toFixed(1)}" y2="${map.y(value).toFixed(1)}"/>
-         <text class="tick end" x="${(map.right + 6).toFixed(1)}"
-           y="${(map.y(value) + 3.5).toFixed(1)}">${E(
-          dashboard.dailyYLabels?.[index] ?? ""
-        )}</text>`
+         <text class="tick" x="${(map.right + 6).toFixed(1)}"
+           y="${(map.y(value) + 3.5).toFixed(1)}">${E(yLabels[index] ?? "")}</text>`
     )
     .join("");
 

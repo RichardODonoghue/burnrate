@@ -512,8 +512,9 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
   font-family: var(--font);
   font-variant-numeric: tabular-nums;
 }
+/* X labels centre on their tick; Y labels are plain `start`, so they sit
+   outside the plot to the right of it rather than inside it. */
 .chart .tick.mid { text-anchor: middle; }
-.chart .tick.end { text-anchor: end; }
 
 /* The selected-time rule, as the Swift chart's RuleMark. */
 .chart .rule { stroke: var(--fg-muted); stroke-width: 1; opacity: 0.45; }
