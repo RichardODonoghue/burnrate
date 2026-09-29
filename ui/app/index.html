@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BurnRate</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #12141a;
+        --fg: #eef2f8;
+        --muted: #96a0b4;
+        --accent: #ff9540;
+        --line: #262b36;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f7f8fa;
+          --fg: #16181d;
+          --muted: #5c6472;
+          --line: #e2e5ea;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+          sans-serif;
+      }
+      main {
+        padding: 28px 32px;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        letter-spacing: -0.01em;
+      }
+      p.sub {
+        margin: 0 0 24px;
+        color: var(--muted);
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 16px 18px;
+        max-width: 520px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .row:last-child {
+        border-bottom: 0;
+      }
+      .label {
+        color: var(--muted);
+      }
+      .value {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .ok {
+        color: var(--accent);
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>BurnRate</h1>
+      <p class="sub">Tray spike — menu, widgets and live menu updates.</p>
+      <div class="card" id="card">
+        <div class="row">
+          <span class="label">Tray registration</span>
+          <span class="value ok" id="tray">checking…</span>
+        </div>
+        <div class="row">
+          <span class="label">Ticker (menu text mutation)</span>
+          <span class="value" id="tick">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Core crate</span>
+          <span class="value" id="core">—</span>
+        </div>
+      </div>
+      <p class="sub" style="margin-top: 20px">
+        Full dashboard and charts land in later PRs. Source of truth for this
+        spike: <code>scripts/tauri-smoke.sh</code>.
+      </p>
+    </main>
+    <script src="./spike.js"></script>
+  </body>
+</html>

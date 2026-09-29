@@ -1,5 +1,44 @@
 # AGENTS.md
 
+## Tauri rewrite (branch `rewrite/tauri`) — read this first on that branch
+
+The Swift app is being **rewritten in Rust + Tauri v2** because cross-platform
+Swift packaging failed in practice: the Windows download was 250 MB of bundled
+Swift runtime, the hand-rolled Linux GTK4 tray was ugly and fragile, and
+Windows would not boot. Tauri gives one UI codebase, a real tray library and
+~6 MB artifacts.
+
+- **Integration branch is `rewrite/tauri`, not `main`.** Every PR targets
+  `rewrite/tauri`; `main` keeps the working Swift app until parity is proven.
+  Cutover = one PR from `rewrite/tauri` into `main`.
+- Layout: `crates/burnrate-core/` (pure Rust, no Tauri/UI deps, all logic and
+  tests), `src-tauri/` (tray, windows, commands, settings), `ui/app/`
+  (frontend, hand-written for now — Vite comes with the dashboard and will emit
+  into `ui/app/`; note the repo ignores any directory named `dist`, so the
+  frontend path deliberately is not called `dist`).
+- The Swift `BurnRateCore` tests (111) are the parity spec: port them 1:1 and
+  tick them off in `PARITY.md`. Do not "improve" behaviour while porting.
+- Linux specifics that cost us time once, recorded so they are not re-learned:
+  - Tauri reaches the tray through **libayatana-appindicator**, so items live
+    at `/org/ayatana/NotificationItem/<id with non-alnum → _>` and the menu at
+    `<item>/Menu` (`com.canonical.dbusmenu`). There is **no**
+    `/StatusNotifierItem` object, unlike the old hand-rolled tray.
+  - A watcher reports items by **unique bus name** (`:1.2`), not by the
+    `org.kde.StatusNotifierItem-<pid>-<n>` well-known name the old tray used.
+  - A tray menu, once set, **cannot be replaced** — only edited. The real menu
+    is therefore built once and its items' text is rewritten every poll.
+  - `TrayIconBuilder::title` lands in the `XAyatanaLabel` property, not `Title`.
+  - WebKitGTK in a container needs `WEBKIT_DISABLE_COMPOSITING_MODE=1` and
+    `WEBKIT_DISABLE_DMABUF_RENDERER=1`; `scripts/tauri-smoke.sh` sets them.
+- Commands: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy
+  --workspace --all-targets -- -D warnings`, `cargo fmt --all`, and
+  `scripts/tauri-smoke.sh` (Docker; the Gate 0 tray check).
+- Icons are generated, not hand-drawn: `python3 scripts/make_icons.py`
+  (needs Pillow; writes `src-tauri/icons/`, including `tray.rgba`, which the
+  Rust side embeds because Tauri's `Image` takes raw RGBA).
+- CI for this work is `.github/workflows/tauri.yml` (core/build matrix/tray
+  smoke), triggered only for `rewrite/tauri` and PRs targeting it.
+
 ## Contributing — PRs only (mandatory)
 
 All changes from now on must go through a pull request. Do not commit or push

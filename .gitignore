@@ -7,3 +7,8 @@ build/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Rust / Tauri rewrite (branch: rewrite/tauri)
+/target/
+/src-tauri/target/
+/src-tauri/gen/

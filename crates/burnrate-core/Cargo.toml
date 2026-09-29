@@ -1,0 +1,14 @@
+[package]
+name = "burnrate-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Platform-independent BurnRate logic: parsing, quota APIs, alerts, charts"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
