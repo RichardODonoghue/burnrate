@@ -124,7 +124,8 @@ impl UsageSample {
 }
 
 /// Aggregated usage for one plan window (Rolling / Weekly / Monthly).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
     pub id: String,
     pub label: String,
@@ -172,7 +173,8 @@ impl UsageWindow {
 }
 
 /// Latest usage for one provider.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderUsage {
     pub provider_name: String,
     /// Vendor plan tier when known (e.g. "Team 5x", "Max 20x", "Go").

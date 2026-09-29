@@ -11,8 +11,10 @@
       {
         "label": "main",
         "title": "BurnRate",
-        "width": 860,
-        "height": 600,
+        "minWidth": 780,
+        "minHeight": 520,
+        "width": 1000,
+        "height": 700,
         "resizable": true,
         "visible": true
       }

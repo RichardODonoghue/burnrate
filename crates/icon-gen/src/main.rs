@@ -68,16 +68,7 @@ fn write(path: &Path, bytes: impl AsRef<[u8]>) {
 }
 
 fn encode_png(canvas: &Canvas) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut buffer, canvas.size, canvas.size);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().expect("png header");
-        writer.write_image_data(&canvas.pixels).expect("png pixels");
-        writer.finish().expect("png finish");
-    }
-    buffer
+    canvas.to_png()
 }
 
 /// macOS `.icns`: an 'icns' magic, total length, then `type + length + PNG`
