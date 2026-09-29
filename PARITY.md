@@ -5,7 +5,7 @@ one Swift `@Test`; the Rust side gets a `#[test]` with the same name and the
 same behaviour. Port faithfully — if a test looks wrong, fix it in a separate
 change after parity, never while porting.
 
-Status: **92 / 112 ported.** `burnrate-core` now holds the usage model, formatting,
+Status: **102 / 112 ported.** `burnrate-core` now holds the usage model, formatting,
 the icon spec and G2 mark geometry, tray menu models, settings, platform seams, the
 local log parsers, both quota APIs with throttling, per-model aggregation, pricing,
 the chart series, the milestone/burn/cost notifier and the poll loop. What is left is
@@ -102,22 +102,22 @@ updater.
 ## TrendSeries (20)
 
 - [ ] `cutoffIsTrailingWindow`
-- [ ] `tickStyleFollowsVisibleSpanNotSelectedRange`
-- [ ] `hourlyStrideWidensWithSpan`
+- [x] `tickStyleFollowsVisibleSpanNotSelectedRange`
+- [x] `hourlyStrideWidensWithSpan`
 - [x] `xDomainShrinksToAvailableData`
 - [x] `xDomainFallsBackToFullRangeWhenEmpty`
-- [ ] `tickDatesAreMidnightsAndNoonsInSpan`
-- [ ] `tooltipPicksNearestPointPerSeries`
+- [x] `tickDatesAreMidnightsAndNoonsInSpan`
+- [x] `tooltipPicksNearestPointPerSeries`
 - [x] `nearestPointBinarySearchesSortedSamples`
-- [ ] `todayRangeDropsOlderPoints`
-- [ ] `weekRangeKeepsDaysButDropsOlderWeeks`
-- [ ] `allOutOfRangeYieldsNoSeries`
+- [x] `todayRangeDropsOlderPoints`
+- [x] `weekRangeKeepsDaysButDropsOlderWeeks`
+- [x] `allOutOfRangeYieldsNoSeries`
 - [x] `scopedWeeklyFoldsIntoWeeklyGraph`
 - [x] `providerFilterAppliesWithinRange`
 - [x] `emptySeriesUsesFullDomain`
-- [ ] `narrowRangePadsAndTightensDomain`
-- [ ] `domainClampsTo0And100`
-- [ ] `flatSeriesGetsAWindow`
+- [x] `narrowRangePadsAndTightensDomain`
+- [x] `domainClampsTo0And100`
+- [x] `flatSeriesGetsAWindow`
 - [x] `yTicksStayInsideDomain`
 - [x] `dayBucketMatchesOnlySameDay`
 - [x] `rollingCardHonorsProviderFilter`
@@ -162,30 +162,17 @@ updater.
 - [x] `querySamplesUsesInjectedSQLiteRunner`
 - [x] `fileManagerPathsAppendsAppName`
 
-## Still open (20)
+## Still open
 
-Grouped, because the raw list does not say which are one feature:
-
-- **Window-reset alerting (7)** — `noWindowsNeverDue`, `futureResetNotDue`,
-  `resetPassedAfterLastFetchIsDue`, `fetchedSinceResetNotDue`,
-  `missingResetsAtNeverDue`, `anyDueWindowForcesRefresh`, `cutoffIsTrailingWindow`.
-  The Swift build has a reset-notification path distinct from the milestone
-  path; this port currently notifies on a jump in remaining, not on a reset
-  deadline. Not equivalent yet.
-- **Chart axis/tick domain (7)** — `tickStyleFollowsVisibleSpanNotSelectedRange`,
-  `hourlyStrideWidensWithSpan`, `tickDatesAreMidnightsAndNoonsInSpan`,
-  `todayRangeDropsOlderPoints`, `weekRangeKeepsDaysButDropsOlderWeeks`,
-  `allOutOfRangeYieldsNoSeries`, `narrowRangePadsAndTightensDomain`,
-  `domainClampsTo0And100`, `flatSeriesGetsAWindow`. The series exist and draw;
-  the Swift build's tick *style* rules do not.
-- **Chart tooltip picking (1)** — `tooltipPicksNearestPointPerSeries`. The Rust
-  `nearest_point` exists and is tested; the Swift test additionally asserts
-  per-series picking, which the frontend does in a loop.
-- **Claude account fingerprint (2)** — `claudeAccountFingerprintUsesAccountAndOrg`,
-  `tokenHashFallbackDiffersPerToken`. The notifier resets on fingerprint change,
-  but nothing produces a fingerprint yet, so a plan switch is not detected.
-- **`rusqlite`** — a checklist line, not a test: the bundled-SQLite swap is done
-  and covered by `sqlite_queries_return_tab_separated_rows`.
+- **Window-reset alerting (7 tests)** — the Swift build notifies on a reset
+  *deadline*; this port notifies on a jump in remaining. Different mechanism, not
+  equivalent. A user who sits on a window until it expires gets no alert here.
+- **Claude account fingerprint (2)** — the notifier resets its history on a
+  fingerprint change, but nothing produces a fingerprint, so a plan switch is not
+  detected and the first poll on a new plan can fire a burst of milestones.
+- **Daily/ranking token-axis format** — `axisLabel` and the daily/ranking
+  windowing are implemented in the frontend rather than ported as tested core
+  functions, so they have no parity tests of their own.
 
 ## Icon and asset parity (macOS is the reference)
 
