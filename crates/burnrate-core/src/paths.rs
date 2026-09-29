@@ -37,7 +37,10 @@ impl AppPaths {
 
     /// For tests: an explicit layout.
     pub fn with_layout(home: impl Into<PathBuf>, app_support: impl Into<PathBuf>) -> Self {
-        Self { home: home.into(), app_support: app_support.into() }
+        Self {
+            home: home.into(),
+            app_support: app_support.into(),
+        }
     }
 
     pub fn home_directory(&self) -> &Path {
@@ -127,19 +130,16 @@ impl Default for KeychainCredentialReader {
 
 impl KeychainCredentialReader {
     pub fn new(binary: impl Into<PathBuf>) -> Self {
-        Self { binary: binary.into() }
+        Self {
+            binary: binary.into(),
+        }
     }
 }
 
 impl CredentialReading for KeychainCredentialReader {
     fn generic_password(&self, service: &str) -> Option<Vec<u8>> {
         let output = std::process::Command::new(&self.binary)
-            .args([
-                "find-generic-password",
-                "-s",
-                service,
-                "-w",
-            ])
+            .args(["find-generic-password", "-s", service, "-w"])
             .output()
             .ok()?;
         if !output.status.success() {
@@ -154,7 +154,10 @@ impl CredentialReading for KeychainCredentialReader {
 #[derive(Debug, thiserror::Error)]
 pub enum SqliteError {
     #[error("cannot open {path}: {source}")]
-    Open { path: String, source: rusqlite::Error },
+    Open {
+        path: String,
+        source: rusqlite::Error,
+    },
     #[error("query failed: {0}")]
     Query(#[from] rusqlite::Error),
 }
@@ -241,7 +244,10 @@ mod tests {
     fn app_directory_is_under_application_support() {
         let home = temp_home("appdir");
         let paths = AppPaths::with_layout(&home, home.join("Library/Application Support"));
-        assert_eq!(paths.app_directory(), home.join("Library/Application Support/BurnRate"));
+        assert_eq!(
+            paths.app_directory(),
+            home.join("Library/Application Support/BurnRate")
+        );
         assert_eq!(
             paths.settings_file(),
             home.join("Library/Application Support/BurnRate/settings.json")
@@ -291,7 +297,9 @@ mod tests {
     fn sqlite_reports_a_missing_database() {
         let home = temp_home("sqlite");
         let missing = home.join("nope.db");
-        let error = SqliteReader::new().query(&missing, "SELECT 1;").unwrap_err();
+        let error = SqliteReader::new()
+            .query(&missing, "SELECT 1;")
+            .unwrap_err();
         assert!(error.to_string().contains("cannot open"));
     }
 
@@ -310,7 +318,9 @@ mod tests {
                 .execute("INSERT INTO t VALUES ('x', 7, 1.5), (NULL, 2, 0.5);", [])
                 .unwrap();
         }
-        let output = SqliteReader::new().query(&path, "SELECT a, b, c FROM t;").unwrap();
+        let output = SqliteReader::new()
+            .query(&path, "SELECT a, b, c FROM t;")
+            .unwrap();
         assert_eq!(output, "x\t7\t1.5\n\t2\t0.5\n");
     }
 }

@@ -24,12 +24,14 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
 use burnrate_core::dial;
 use burnrate_core::icon::StatusIcon;
-use burnrate_core::menu::{
-    StatusMenuAction, StatusMenuBuilder, StatusMenuEntry, StatusMenuModel,
-};
+use burnrate_core::menu::{StatusMenuAction, StatusMenuBuilder, StatusMenuEntry, StatusMenuModel};
 use burnrate_core::model::ProviderUsage;
 use burnrate_core::paths::AppPaths;
+use burnrate_core::poller::{PollResult, Poller};
 use burnrate_core::settings::Settings;
+use burnrate_core::usage::{
+    ChartData, ChartRange, DailyModelUsage, ModelUsageEntry, RemainingSnapshot, TrendSeries,
+};
 
 /// Menu item ids. Fixed strings, because a Linux tray menu cannot be replaced
 /// once set — rows are reused and only their text changes.
@@ -42,20 +44,28 @@ const ID_QUIT: &str = "quit";
 /// Widget rows are per provider, so their ids are built as `widget-<provider>`.
 const ID_WIDGET_PREFIX: &str = "widget-";
 
-/// Shared state: settings, the latest usage snapshot, and the poll counter.
-#[derive(Default)]
+/// Shared state: settings, the poller, and the last result.
 struct AppState {
     settings: Mutex<Settings>,
-    usage: Mutex<Vec<ProviderUsage>>,
-    missing: Mutex<Vec<String>>,
-    tick: AtomicU64,
-    last_poll_unix: AtomicU64,
+    poller: Mutex<Poller>,
+    last: Mutex<Option<PollResult>>,
+    /// Set while a notification is being delivered, so a burst cannot stack.
+    notified: AtomicU64,
     core_version: String,
 }
 
 impl AppState {
     fn settings(&self) -> Settings {
         self.settings.lock().expect("settings lock").clone()
+    }
+
+    fn usage(&self) -> Vec<ProviderUsage> {
+        self.last
+            .lock()
+            .expect("result lock")
+            .as_ref()
+            .map(|result| result.usage.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -92,6 +102,41 @@ pub enum AppPane {
     About,
 }
 
+/// One provider's remaining-% line, pre-scaled for the chart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SeriesPoint {
+    x: i64,
+    y: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Series {
+    provider: String,
+    /// Model-scoped windows (Claude's "Fable") draw faded.
+    scoped: bool,
+    points: Vec<SeriesPoint>,
+}
+
+/// Everything the Usage pane draws, in one payload so the frontend does no
+/// arithmetic: the Swift build did its own charting maths, and two
+/// implementations of the same axes is how charts drift apart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Dashboard {
+    range: ChartRange,
+    window_label: String,
+    provider_filter: Option<String>,
+    series: Vec<Series>,
+    /// Per-model ranking, largest first.
+    ranking: Vec<ModelUsageEntry>,
+    /// Daily stacked usage, oldest first.
+    daily: Vec<DailyModelUsage>,
+    y_domain: Option<(f64, f64)>,
+    x_domain: Option<(i64, i64)>,
+}
+
 /// The full state the frontend renders from, in one payload.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,8 +150,10 @@ struct Snapshot {
     app_version: String,
     core_version: String,
     last_poll_unix: u64,
-    tick: u64,
+    poll_count: u64,
     platforms: PlatformInfo,
+    dashboard: Dashboard,
+    spend_today: std::collections::HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -128,7 +175,10 @@ fn platform_info() -> PlatformInfo {
             vec!["libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"],
         )
     };
-    PlatformInfo { os, runtime_dependencies: deps }
+    PlatformInfo {
+        os,
+        runtime_dependencies: deps,
+    }
 }
 
 fn now_unix() -> u64 {
@@ -148,13 +198,15 @@ fn widget_id(provider: &str) -> String {
     format!("{ID_WIDGET_PREFIX}{provider}")
 }
 
-fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<(Menu<R>, Vec<(&'static str, MenuItem<R>)>)> {
+/// A menu item paired with the id the event handler dispatches on.
+type Row<R> = (&'static str, MenuItem<R>);
+
+fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<(Menu<R>, Vec<Row<R>>)> {
     let status = MenuItem::with_id(app, ID_STATUS, "Starting…", false, None::<&str>)?;
     let dashboard = MenuItem::with_id(app, ID_DASHBOARD, "Usage Dashboard…", true, None::<&str>)?;
     let charts = MenuItem::with_id(app, ID_CHARTS, "Charts…", true, None::<&str>)?;
     let update = MenuItem::with_id(app, ID_UPDATE, "Check for Updates…", true, None::<&str>)?;
-    let settings_item =
-        MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("Quit"))?;
     let items = vec![
         (ID_STATUS, status.clone()),
@@ -203,20 +255,17 @@ fn install_trays(app: &AppHandle<Wry>) -> tauri::Result<TrayHandles<Wry>> {
     })
 }
 
-fn install_widget(
-    app: &AppHandle<Wry>,
-    provider: &str,
-) -> tauri::Result<WidgetHandles<Wry>> {
+fn install_widget(app: &AppHandle<Wry>, provider: &str) -> tauri::Result<WidgetHandles<Wry>> {
     let status = MenuItem::with_id(
         app,
-        &format!("{ID_WIDGET_PREFIX}{provider}-status"),
+        format!("{ID_WIDGET_PREFIX}{provider}-status"),
         provider,
         false,
         None::<&str>,
     )?;
     let remove = MenuItem::with_id(
         app,
-        &format!("{ID_WIDGET_PREFIX}{provider}-remove"),
+        format!("{ID_WIDGET_PREFIX}{provider}-remove"),
         "Remove widget",
         true,
         None::<&str>,
@@ -233,7 +282,11 @@ fn install_widget(
         .tooltip(provider)
         .menu(&menu)
         .build(app)?;
-    Ok(WidgetHandles { provider: provider.to_string(), icon, status })
+    Ok(WidgetHandles {
+        provider: provider.to_string(),
+        icon,
+        status,
+    })
 }
 
 /// Renders one poll's worth of state onto the tray, in place.
@@ -243,24 +296,21 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let mut handles = tray_state.lock().expect("tray lock");
 
     let settings = app_state.settings();
-    let usage = app_state.usage.lock().expect("usage lock").clone();
+    let usage = app_state.usage();
     let remaining = StatusMenuBuilder::worst_rolling_remaining(&usage);
     let now = now_unix() as i64;
 
     // The icon carries the severity, so it is redrawn on every poll.
-    handles
-        .main
-        .set_icon(Some(tray_image(remaining, 22)))
-        .ok();
+    handles.main.set_icon(Some(tray_image(remaining, 22))).ok();
 
-    let model = StatusMenuBuilder::main_menu(
-        &usage,
-        None,
-        false,
-        settings.includes_charts,
-        now,
+    let model = StatusMenuBuilder::main_menu(&usage, None, false, settings.includes_charts, now);
+    write_menu(
+        &model,
+        &handles.status,
+        &handles.dashboard,
+        &handles.charts,
+        &handles.update,
     );
-    write_menu(&model, &handles.status, &handles.dashboard, &handles.charts, &handles.update);
 
     // Widgets: add the ones the settings ask for, drop the rest.
     for provider in &settings.widget_providers {
@@ -320,7 +370,13 @@ fn write_menu(
 
 fn menu_has_charts_row(model: &StatusMenuModel) -> bool {
     model.entries.iter().any(|entry| {
-        matches!(entry, StatusMenuEntry::Action { action: StatusMenuAction::OpenCharts, .. })
+        matches!(
+            entry,
+            StatusMenuEntry::Action {
+                action: StatusMenuAction::OpenCharts,
+                ..
+            }
+        )
     })
 }
 
@@ -348,12 +404,51 @@ fn menu_summary(model: &StatusMenuModel) -> String {
 
 // MARK: - Commands
 
+/// Everything the window renders, in one call.
 #[tauri::command]
-fn snapshot(app: AppHandle<Wry>, pane: Option<AppPane>) -> Snapshot {
+fn snapshot(
+    app: AppHandle<Wry>,
+    pane: Option<AppPane>,
+    range: Option<String>,
+    window_label: Option<String>,
+    provider_filter: Option<String>,
+) -> Snapshot {
     let state = app.state::<Arc<AppState>>();
-    let usage = state.usage.lock().expect("usage lock").clone();
-    let missing = state.missing.lock().expect("missing lock").clone();
+    let last = state.last.lock().expect("result lock").clone();
+    let usage = last
+        .as_ref()
+        .map(|result| result.usage.clone())
+        .unwrap_or_default();
+    let missing = last
+        .as_ref()
+        .map(|result| result.missing.clone())
+        .unwrap_or_default();
     let remaining = StatusMenuBuilder::worst_rolling_remaining(&usage);
+    let poller = state.poller.lock().expect("poller lock");
+
+    let range = match range.as_deref() {
+        Some("week") => ChartRange::Week,
+        Some("month") => ChartRange::Month,
+        _ => ChartRange::Day,
+    };
+    let window_label = window_label.unwrap_or_else(|| "Rolling".to_string());
+    let snapshots: Vec<RemainingSnapshot> = poller.snapshots().to_vec();
+    let series: Vec<TrendSeries> =
+        ChartData::trend_series(&snapshots, &window_label, provider_filter.as_deref());
+    let y_domain = ChartData::y_domain(&series);
+    let x_domain = series
+        .iter()
+        .flat_map(|line| line.points.iter())
+        .map(|(at, _)| *at)
+        .min()
+        .zip(
+            series
+                .iter()
+                .flat_map(|line| line.points.iter())
+                .map(|(at, _)| *at)
+                .max(),
+        );
+
     Snapshot {
         pane: pane.unwrap_or(AppPane::Usage),
         settings: state.settings(),
@@ -362,9 +457,40 @@ fn snapshot(app: AppHandle<Wry>, pane: Option<AppPane>) -> Snapshot {
         remaining,
         app_version: app.package_info().version.to_string(),
         core_version: state.core_version.clone(),
-        last_poll_unix: state.last_poll_unix.load(Ordering::Relaxed),
-        tick: state.tick.load(Ordering::Relaxed),
+        last_poll_unix: last.as_ref().map(|result| result.at as u64).unwrap_or(0),
+        poll_count: poller.poll_count(),
         platforms: platform_info(),
+        dashboard: Dashboard {
+            range,
+            window_label,
+            provider_filter: provider_filter.clone(),
+            series: series
+                .into_iter()
+                .map(|line| Series {
+                    provider: line.provider,
+                    scoped: line.scoped,
+                    points: line
+                        .points
+                        .into_iter()
+                        .map(|(x, y)| SeriesPoint { x, y })
+                        .collect(),
+                })
+                .collect(),
+            ranking: last
+                .as_ref()
+                .map(|result| result.model_totals.clone())
+                .unwrap_or_default(),
+            daily: last
+                .as_ref()
+                .map(|result| result.model_daily.clone())
+                .unwrap_or_default(),
+            y_domain,
+            x_domain,
+        },
+        spend_today: last
+            .as_ref()
+            .map(|result| result.spend_today.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -373,9 +499,12 @@ fn save_settings(app: AppHandle<Wry>, settings: Settings) -> Result<Settings, St
     let state = app.state::<Arc<AppState>>();
     let settings = settings.normalised();
     let paths = AppPaths::detect();
-    paths
-        .ensure_app_directory()
-        .map_err(|error| format!("could not create {}: {error}", paths.app_directory().display()))?;
+    paths.ensure_app_directory().map_err(|error| {
+        format!(
+            "could not create {}: {error}",
+            paths.app_directory().display()
+        )
+    })?;
     settings
         .save(&paths.settings_file())
         .map_err(|error| format!("could not save settings: {error}"))?;
@@ -390,6 +519,31 @@ fn save_settings(app: AppHandle<Wry>, settings: Settings) -> Result<Settings, St
 #[tauri::command]
 fn app_icon_data_url(edge: Option<u32>) -> String {
     dial::app_icon(edge.unwrap_or(128)).to_data_url()
+}
+
+/// Delivers a test banner and reports whether the platform accepted it. Used to
+/// confirm notification permission, which is otherwise invisible until a real
+/// milestone fires.
+#[tauri::command]
+fn send_test_notification(app: AppHandle<Wry>) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title("BurnRate test")
+        .body("If you can read this, notifications are working.")
+        .show()
+        .map_err(|error| error.to_string())
+}
+
+/// Forces an immediate poll, skipping the throttle — the tray's Refresh.
+#[tauri::command]
+fn refresh_now(app: AppHandle<Wry>) {
+    {
+        let state = app.state::<Arc<AppState>>();
+        let mut poller = state.poller.lock().expect("poller lock");
+        poller.invalidate_caches();
+    }
+    poll_once(&app);
 }
 
 #[tauri::command]
@@ -454,7 +608,12 @@ fn upsert_burn_alert(
     minutes: i64,
 ) -> Result<Settings, String> {
     let mut settings = app.state::<Arc<AppState>>().settings();
-    settings.upsert_burn_alert(BurnAlert::new(&provider, &window_label, percent_drop, minutes));
+    settings.upsert_burn_alert(BurnAlert::new(
+        &provider,
+        &window_label,
+        percent_drop,
+        minutes,
+    ));
     save_settings(app, settings)
 }
 
@@ -476,9 +635,13 @@ fn upsert_cost_alert(
     daily_limit_usd: f64,
 ) -> Result<Settings, String> {
     let mut settings = app.state::<Arc<AppState>>().settings();
-    settings.cost_alerts.retain(|alert| alert.provider != provider);
+    settings
+        .cost_alerts
+        .retain(|alert| alert.provider != provider);
     if daily_limit_usd > 0.0 {
-        settings.cost_alerts.push(CostAlert::new(&provider, daily_limit_usd));
+        settings
+            .cost_alerts
+            .push(CostAlert::new(&provider, daily_limit_usd));
     }
     save_settings(app, settings)
 }
@@ -508,7 +671,7 @@ fn set_notify_on_reset(app: AppHandle<Wry>, enabled: bool) -> Result<Settings, S
 #[tauri::command]
 fn known_providers(app: AppHandle<Wry>) -> Vec<String> {
     let state = app.state::<Arc<AppState>>();
-    let usage = state.usage.lock().expect("usage lock");
+    let usage = state.usage();
     let mut names: Vec<String> = usage.iter().map(|u| u.provider_name.clone()).collect();
     for alert in &state.settings().milestones {
         if !names.contains(&alert.provider) {
@@ -536,11 +699,57 @@ fn open_window(app: AppHandle<Wry>, pane: Option<AppPane>) {
     }
 }
 
+/// Runs one poll on the UI thread, stores the result, redraws the tray and
+/// delivers any notifications the notifier decided on.
+fn poll_once(app: &AppHandle<Wry>) {
+    let state = app.state::<Arc<AppState>>();
+    let settings = state.settings();
+    let result = {
+        let mut poller = state.poller.lock().expect("poller lock");
+        poller.poll(&settings)
+    };
+    let notifications = result.notifications.clone();
+    *state.last.lock().expect("result lock") = Some(result);
+    render_tray(app).ok();
+    if !notifications.is_empty() {
+        deliver(app, &notifications);
+    }
+}
+
+/// Delivers notifications natively. The plugin is a no-op where the platform
+/// refuses permission, so a failure is logged rather than fatal: usage figures
+/// matter more than banners.
+fn deliver(app: &AppHandle<Wry>, notifications: &[burnrate_core::notifier::Notification]) {
+    use tauri_plugin_notification::NotificationExt;
+    for notification in notifications {
+        let delivered = app
+            .notification()
+            .builder()
+            .title(&notification.title)
+            .body(&notification.body)
+            .show();
+        if let Err(error) = delivered {
+            eprintln!(
+                "burnrate: notification failed ({error}): {}",
+                notification.title
+            );
+        }
+    }
+    let state = app.state::<Arc<AppState>>();
+    state
+        .notified
+        .fetch_add(notifications.len() as u64, Ordering::Relaxed);
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(Arc::new(AppState {
+            settings: Mutex::new(Settings::default()),
+            poller: Mutex::new(Poller::new()),
+            last: Mutex::new(None),
+            notified: AtomicU64::new(0),
             core_version: burnrate_core::VERSION.to_string(),
-            ..AppState::default()
         }))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -553,35 +762,92 @@ pub fn run() {
 
             // Settings from disk, or defaults; a bad file must not stop launch.
             let paths = AppPaths::detect();
-            match Settings::load(&paths.settings_file()) {
+            let settings_path = paths.settings_file();
+            let existed = settings_path.exists();
+            match Settings::load(&settings_path) {
                 Ok(settings) => {
-                    eprintln!("burnrate: settings from {}", paths.settings_file().display());
-                    *handle.state::<Arc<AppState>>().settings.lock().expect("lock") = settings;
+                    eprintln!(
+                        "burnrate: settings {}",
+                        if existed {
+                            format!("loaded from {}", settings_path.display())
+                        } else {
+                            format!("not found at {}, using defaults", settings_path.display())
+                        }
+                    );
+                    *handle
+                        .state::<Arc<AppState>>()
+                        .settings
+                        .lock()
+                        .expect("lock") = settings;
                 }
                 Err(error) => {
+                    // A corrupt file must not stop launch, but it must be
+                    // visible: silently replacing someone's settings is worse
+                    // than starting with none.
                     eprintln!(
-                        "burnrate: using default settings ({paths:?}: {error})"
+                        "burnrate: settings unreadable ({}): {error}",
+                        settings_path.display()
                     );
                 }
             }
 
+            // Kick off pricing in the background: cost is a nicety and must not
+            // delay the first usage figures.
             {
                 let state = handle.state::<Arc<AppState>>().inner().clone();
+                std::thread::spawn(move || {
+                    let mut poller = state.poller.lock().expect("poller lock");
+                    poller.load_pricing_cache();
+                    poller.refresh_pricing(&burnrate_core::providers::UreqClient::default());
+                });
+            }
+
+            // Notification permission is asked for once, on first launch. A
+            // refusal is not fatal: usage figures matter more than banners.
+            {
+                let ask = handle.clone();
+                let runner = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(3));
+                    let _ = runner.run_on_main_thread(move || {
+                        use tauri_plugin_notification::NotificationExt;
+                        let handle = ask.clone();
+                        // `show` is what triggers the macOS permission prompt,
+                        // so its result is the only way to tell "delivered" from
+                        // "the platform refused".
+                        match handle
+                            .notification()
+                            .builder()
+                            .title("BurnRate")
+                            .body("Notifications are on. Milestones, resets, burn rate and daily spend appear here.")
+                            .show()
+                        {
+                            Ok(()) => eprintln!("burnrate: welcome notification accepted"),
+                            Err(error) => eprintln!("burnrate: welcome notification refused: {error}"),
+                        }
+                    });
+                });
+            }
+
+            // First poll immediately, so the window is never empty on open.
+            poll_once(&handle);
+
+            // The poll loop. Interval comes from settings, re-read every tick
+            // so changing it takes effect without a restart.
+            {
                 let ticker = handle.clone();
                 std::thread::spawn(move || loop {
-                    // Until the providers land, this is the shell's heartbeat:
-                    // it drives the menu text and the icon, so both mechanisms
-                    // are exercised end to end.
-                    let seconds = state.settings().poll_interval_seconds.max(5);
-                    std::thread::sleep(Duration::from_secs(seconds.min(5)));
-                    let tick = state.tick.fetch_add(1, Ordering::Relaxed) + 1;
-                    state.last_poll_unix.store(now_unix(), Ordering::Relaxed);
+                    let interval = ticker
+                        .state::<Arc<AppState>>()
+                        .settings()
+                        .poll_interval_seconds
+                        .clamp(30, 3600);
+                    std::thread::sleep(Duration::from_secs(interval));
                     let inner = ticker.clone();
                     let runner = ticker.clone();
                     let _ = runner.run_on_main_thread(move || {
-                        render_tray(&inner).ok();
+                        poll_once(&inner);
                     });
-                    let _ = tick;
                 });
             }
 
@@ -598,10 +864,8 @@ pub fn run() {
                 ID_DASHBOARD => open_window(app.clone(), Some(AppPane::Usage)),
                 ID_CHARTS => open_window(app.clone(), Some(AppPane::Usage)),
                 ID_SETTINGS => open_window(app.clone(), Some(AppPane::Notifications)),
-                ID_UPDATE => {
-                    // Opens the releases page, as the Swift build's updater does.
-                    let _ = open_window(app.clone(), Some(AppPane::About));
-                }
+                // The About pane carries the update affordance, as in Swift.
+                ID_UPDATE => open_window(app.clone(), Some(AppPane::About)),
                 other if other.starts_with(ID_WIDGET_PREFIX) => {
                     if let Some(provider) = other
                         .strip_prefix(ID_WIDGET_PREFIX)
@@ -617,6 +881,8 @@ pub fn run() {
             snapshot,
             save_settings,
             settings_file_path,
+            send_test_notification,
+            refresh_now,
             app_icon_data_url,
             icon_states,
             upsert_milestone,

@@ -58,7 +58,8 @@ impl Settings {
 
     /// Insert or replace the rule for a provider+window — duplicates impossible.
     pub fn upsert_milestone(&mut self, milestone: Milestone) {
-        self.milestones.retain(|existing| existing.key() != milestone.key());
+        self.milestones
+            .retain(|existing| existing.key() != milestone.key());
         self.milestones.push(milestone);
         self.milestones = Milestone::coalesce(&self.milestones);
     }
@@ -69,7 +70,8 @@ impl Settings {
     }
 
     pub fn upsert_burn_alert(&mut self, alert: BurnAlert) {
-        self.burn_alerts.retain(|existing| existing.key() != alert.key());
+        self.burn_alerts
+            .retain(|existing| existing.key() != alert.key());
         self.burn_alerts.push(alert);
     }
 
@@ -181,8 +183,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("burnrate-settings-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("burnrate-settings-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -202,9 +204,11 @@ mod tests {
     fn saves_and_loads() {
         let dir = temp_dir("roundtrip");
         let path = dir.join("settings.json");
-        let mut settings = Settings::default();
-        settings.widget_providers = vec!["Claude".into()];
-        settings.poll_interval_seconds = 60;
+        let settings = Settings {
+            widget_providers: vec!["Claude".into()],
+            poll_interval_seconds: 60,
+            ..Settings::default()
+        };
         settings.save(&path).unwrap();
 
         let loaded = Settings::load(&path).unwrap();
@@ -226,7 +230,10 @@ mod tests {
         let dir = temp_dir("corrupt");
         let path = dir.join("settings.json");
         std::fs::write(&path, "{ not json").unwrap();
-        assert!(matches!(Settings::load(&path), Err(SettingsError::Parse(_))));
+        assert!(matches!(
+            Settings::load(&path),
+            Err(SettingsError::Parse(_))
+        ));
     }
 
     /// A rule for a window is replaced, never duplicated.
@@ -293,7 +300,9 @@ mod tests {
         let settings = Settings::from_swift_defaults(
             Some(r#"[{"provider":"Claude","windowLabel":"Weekly","step":20}]"#),
             Some(r#"["Codex"]"#),
-            Some(r#"[{"provider":"Claude","windowLabel":"Rolling","percentDrop":15,"minutes":30}]"#),
+            Some(
+                r#"[{"provider":"Claude","windowLabel":"Rolling","percentDrop":15,"minutes":30}]"#,
+            ),
             Some("[]"),
             Some(false),
         );
@@ -320,6 +329,9 @@ mod tests {
     /// Charts is on by default off macOS, matching the Swift `includesCharts`.
     #[test]
     fn charts_default_follows_the_platform() {
-        assert_eq!(Settings::default().includes_charts, cfg!(not(target_os = "macos")));
+        assert_eq!(
+            Settings::default().includes_charts,
+            cfg!(not(target_os = "macos"))
+        );
     }
 }

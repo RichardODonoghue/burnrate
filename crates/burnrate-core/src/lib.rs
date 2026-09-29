@@ -11,8 +11,13 @@ pub mod formatting;
 pub mod icon;
 pub mod menu;
 pub mod model;
+pub mod notifier;
 pub mod paths;
+pub mod poller;
+pub mod providers;
 pub mod settings;
+pub mod sources;
+pub mod usage;
 
 /// Crate version, surfaced in the UI so the app can report which core it runs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

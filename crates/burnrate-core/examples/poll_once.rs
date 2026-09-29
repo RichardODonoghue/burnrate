@@ -1,0 +1,88 @@
+//! Prints what a poll actually finds on this machine.
+//!
+//!     cargo run -p burnrate-core --example poll_once
+//!
+//! The unit tests use fixtures; this uses the real `~/.claude`, `~/.codex` and
+//! OpenCode database, which is the only way to catch a schema that has drifted
+//! since the Swift build was written.
+
+use burnrate_core::poller::Poller;
+use burnrate_core::settings::Settings;
+use burnrate_core::usage::{ChartData, ModelUsageAggregator};
+
+fn main() {
+    let mut poller = Poller::new();
+    poller.load_pricing_cache();
+    let settings = Settings {
+        poll_interval_seconds: 60,
+        ..Settings::default()
+    };
+
+    let result = poller.poll(&settings);
+
+    println!("=== providers ===");
+    if result.usage.is_empty() {
+        println!("  (none)");
+    }
+    for provider in &result.usage {
+        let plan = provider.plan.clone().unwrap_or_else(|| "—".into());
+        println!("  {} [{plan}]", provider.provider_name);
+        for window in &provider.windows {
+            let percent = window
+                .percent_remaining
+                .map(|value| format!("{value:.1}%"))
+                .unwrap_or_else(|| "--".into());
+            println!(
+                "    {:<8} {percent:>8}  {} tokens",
+                window.label, window.tokens_used
+            );
+        }
+    }
+
+    println!("\n=== not detected ===");
+    if result.missing.is_empty() {
+        println!("  (nothing missing)");
+    }
+    for line in &result.missing {
+        println!("  {line}");
+    }
+
+    println!("\n=== models (top 8) ===");
+    let totals = ModelUsageAggregator::totals(&result.batches);
+    if totals.is_empty() {
+        println!("  (none)");
+    }
+    for entry in totals.iter().take(8) {
+        println!(
+            "  {:<34} {:>12} tokens  {} req",
+            entry.display_name(),
+            entry.total_tokens(),
+            entry.requests
+        );
+    }
+
+    println!("\n=== spend today (USD) ===");
+    if result.spend_today.is_empty() {
+        println!("  (none reported)");
+    }
+    for (provider, amount) in &result.spend_today {
+        println!("  {provider}: ${amount:.2}");
+    }
+
+    println!("\n=== chart history ===");
+    println!("  snapshots: {}", result.snapshots.len());
+    for label in ["Rolling", "Weekly", "Monthly"] {
+        let series = ChartData::trend_series(&result.snapshots, label, None);
+        if series.is_empty() {
+            continue;
+        }
+        let domain = ChartData::y_domain(&series);
+        println!("  {label}: {} series, y-domain {:?}", series.len(), domain);
+    }
+
+    println!("  sample batches: {}", result.batches.len());
+    for (provider, samples) in &result.batches {
+        println!("    {provider}: {} samples", samples.len());
+    }
+    println!("\n  notifications raised: {}", result.notifications.len());
+}

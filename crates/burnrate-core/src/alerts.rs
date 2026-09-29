@@ -45,7 +45,11 @@ impl<'de> Deserialize<'de> for Milestone {
                 None => 20.0,
             },
         };
-        Ok(Milestone { provider: wire.provider, window_label: wire.window_label, step })
+        Ok(Milestone {
+            provider: wire.provider,
+            window_label: wire.window_label,
+            step,
+        })
     }
 }
 
