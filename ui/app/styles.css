@@ -461,10 +461,9 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 }
 
 .toolbar .grow { flex: 1; }
-.toolbar strong { font-size: 14px; letter-spacing: -0.01em; }
-.toolbar label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
-.toolbar select { width: auto; min-width: 96px; }
-.toolbar .action { padding: 3px 9px; }
+.toolbar-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.toolbar select.popup { width: auto; min-width: 150px; }
+.toolbar .action.icon { padding: 4px 9px; font-size: 13px; line-height: 1; }
 
 .cards {
   display: grid;
@@ -474,15 +473,6 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 }
 
 @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
-
-.split {
-  display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
 
 .figure {
   display: flex;
@@ -508,9 +498,9 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 
 .chart-frame { position: relative; }
 
+/* Width and height are set as attributes from the measured pixel width, so the
+   chart is never scaled — a scaled SVG stretches its axis text non-uniformly. */
 .chart {
-  width: 100%;
-  height: auto;
   display: block;
   overflow: visible;
 }
@@ -522,61 +512,113 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
   font-family: var(--font);
   font-variant-numeric: tabular-nums;
 }
-.chart .tick.x { text-anchor: middle; }
-.chart .bar { transition: opacity 0.1s; }
-.chart .day:hover .bar { opacity: 0.75; }
-.chart .probe { fill: transparent; stroke: none; }
+.chart .tick.mid { text-anchor: middle; }
+.chart .tick.end { text-anchor: end; }
+
+/* The selected-time rule, as the Swift chart's RuleMark. */
+.chart .rule { stroke: var(--fg-muted); stroke-width: 1; opacity: 0.45; }
+
+.chart .day > rect { transition: opacity 0.1s; }
+.chart .day:hover > rect { opacity: 0.7; }
+
+.chart .rank-name {
+  font-size: 11px;
+  fill: var(--fg);
+  font-family: var(--font);
+}
+.chart .rank-value {
+  font-size: 10.5px;
+  fill: var(--fg-muted);
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.chart .rank > rect { transition: opacity 0.1s; }
+.chart .rank:hover > rect { opacity: 0.75; }
 
 .tooltip {
   position: absolute;
   top: 8px;
-  background: var(--fg);
-  color: var(--bg);
-  border-radius: 7px;
+  transform: translateX(8px);
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  color: var(--fg);
+  border-radius: 8px;
   padding: 7px 10px;
   font-size: 11.5px;
   pointer-events: none;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   z-index: 2;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.3);
 }
 
-.tooltip .dot { margin-right: 5px; }
-.tooltip .hint { color: color-mix(in srgb, var(--bg) 72%, transparent); margin-top: 2px; }
+/* The ranking tooltip hangs off the chart's right edge, so it shifts inward. */
+#ranking-tip { transform: translateX(calc(-100% - 10px)); }
 
-.legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11.5px; color: var(--fg-muted); }
-.legend.wrap { flex-wrap: wrap; gap: 6px 14px; }
+.tooltip .tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  margin-bottom: 4px;
+}
+.tooltip .tip-head strong { color: var(--fg); font-size: 11.5px; }
+.tooltip .tip-head.sub { margin: 0 0 5px; }
+.tooltip .tip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.5;
+}
+.tooltip .tip-row.sub { color: var(--fg-muted); }
+.tooltip .tip-row .value { font-weight: 600; }
+.tooltip .tip-row.sub .value { font-weight: 400; }
+.tooltip .tip-total {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.5;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+.tooltip .dot { width: 7px; height: 7px; flex: none; }
+
+.legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11.5px; color: var(--fg-muted); flex-wrap: wrap; }
 .legend .key { display: inline-flex; align-items: center; gap: 5px; }
 .legend .dot { width: 8px; height: 8px; }
 
-.chart-controls { margin-bottom: 10px; }
-.chart-controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
-
-/* ---------- ranking ---------- */
-
-.rank-row {
+/* The daily chart's own wrapping legend. Adaptive columns with a fixed maximum,
+   as `ModelsView.modelLegend` — the automatic one overflowed the card on long
+   model names. */
+.model-legend {
   display: grid;
-  grid-template-columns: minmax(80px, 1.2fr) 2.2fr auto;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 0;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 220px));
+  gap: 6px 10px;
+  margin-top: 12px;
+  font-size: 10.5px;
+  color: var(--fg-muted);
 }
-
-.rank-name {
-  display: flex;
+.model-legend .key {
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.model-legend .dot { width: 8px; height: 8px; flex: none; }
 
-.rank-name .dot { width: 7px; height: 7px; flex: none; }
-.rank-track { height: 10px; border-radius: 5px; background: color-mix(in srgb, var(--fg) 10%, transparent); overflow: hidden; }
-.rank-fill { display: block; height: 100%; border-radius: 5px; }
-.rank-value { font-size: 11.5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The Monthly-window note, the Swift `Label(…, systemImage: "info.circle")`. */
+.hint.note { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; }
+.hint.note .glyph { font-size: 12px; }
+
+.empty-glyph { display: block; font-size: 26px; margin-bottom: 8px; opacity: 0.55; }
+
+.chart-controls { margin-bottom: 10px; }
+.chart-controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
 
 /* ---------- breakdown table ---------- */
 
@@ -606,5 +648,11 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
   white-space: nowrap;
 }
 .tr .td.model .dot { width: 7px; height: 7px; flex: none; }
-.tr .td .provider { color: var(--fg-muted); font-size: 10.5px; }
+.tr .td.model .model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tr .td.model .provider { color: var(--fg-muted); font-size: 10.5px; flex: none; }
 .tr .td.strong { font-weight: 600; }

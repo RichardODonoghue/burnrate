@@ -17,9 +17,9 @@
 //!   - Y ticks are at multiples of 10, falling back to 5 when that would leave
 //!     fewer than three lines.
 //!
-//! Still to port: the daily/ranking chart windows and the token-axis label
-//! format (see `PARITY.md`).
+//! Still to port: the daily/ranking chart windows (see `PARITY.md`).
 
+use crate::formatting::TokenFormat;
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -782,6 +782,65 @@ pub fn colour_for_model(model: &str) -> (u8, u8, u8) {
     PALETTE[(hash % PALETTE.len() as u64) as usize]
 }
 
+/// A compact axis label, ported from `ModelsView.axisLabel(_:metric:)`.
+///
+/// ```text
+/// metric == .cost
+///     ? (abs(value) < 1000 ? String(format: "$%g", value)
+///                          : "$" + TokenFormat.format(Int(value)))
+///     : TokenFormat.format(Int(value))
+/// ```
+///
+/// Tokens shorten through `TokenFormat` (1.2m). Costs below $1000 go through
+/// `%g`, which is not the same as printing the number: `%g` keeps six
+/// significant digits and drops trailing zeros, so `0.1 + 0.2` labels as
+/// `$0.3` rather than `$0.30000000000000004`. `format!("{value}")` in Rust
+/// prints the shortest *round-tripping* form, so it agrees on most values and
+/// disagrees exactly where a float artefact appears — which is the case the
+/// user sees on a cost axis.
+pub fn axis_label(value: f64, metric: Metric) -> String {
+    match metric {
+        Metric::Cost if value.abs() < 1000.0 => format!("${}", percent_g(value)),
+        Metric::Cost => format!("${}", TokenFormat::format(value as i64)),
+        Metric::Tokens => TokenFormat::format(value as i64),
+    }
+}
+
+/// C's `%g` at the default precision of six significant digits.
+///
+/// `%g` picks fixed or exponent notation by the decimal exponent: fixed while
+/// `-4 <= exp < 6`, exponent otherwise, and drops trailing zeros either way.
+fn percent_g(value: f64) -> String {
+    if !value.is_finite() {
+        return format!("{value}");
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let exponent = value.abs().log10().floor() as i32;
+    if !(-4..6).contains(&exponent) {
+        // Exponent form. `%.5e` gives the mantissa at precision 6, then the
+        // exponent is normalised to the minimum two digits `%g` prints.
+        let formatted = format!("{value:.5e}");
+        let (mantissa, power) = formatted.split_once('e').expect("%e has an exponent");
+        let mantissa = trim_trailing_zeros(mantissa);
+        let power: i32 = power.parse().expect("%e exponent is an integer");
+        let sign = if power < 0 { "-" } else { "+" };
+        return format!("{mantissa}e{sign}{:02}", power.abs());
+    }
+    // Fixed form: precision is the remaining significant digits.
+    let decimals = (5 - exponent).max(0) as usize;
+    trim_trailing_zeros(&format!("{value:.decimals$}"))
+}
+
+/// Drops trailing zeros after a decimal point: "1.50000" → "1.5", "10.00" → "10".
+fn trim_trailing_zeros(text: &str) -> String {
+    if !text.contains('.') {
+        return text.to_string();
+    }
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// The metric value for an entry, which is what the bar length encodes.
 pub fn metric_value(metric: Metric, total_tokens: i64, cost: f64) -> f64 {
     match metric {
@@ -816,5 +875,36 @@ mod palette_tests {
     fn metric_value_selects_the_channel() {
         assert_eq!(metric_value(Metric::Tokens, 1234, 9.99), 1234.0);
         assert_eq!(metric_value(Metric::Cost, 1234, 9.99), 9.99);
+    }
+
+    /// Axis labels go through `TokenFormat` for tokens and `%g` for small costs.
+    #[test]
+    fn axis_labels_match_the_swift_format() {
+        assert_eq!(axis_label(0.0, Metric::Tokens), "0");
+        assert_eq!(axis_label(850.0, Metric::Tokens), "850");
+        assert_eq!(axis_label(1_200_000.0, Metric::Tokens), "1.2m");
+        assert_eq!(axis_label(3_652_595_073.0, Metric::Tokens), "3.65b");
+        // Cost under $1000 is `%g`, not a rounded integer: `$13` would lose the
+        // cents the label is there to show.
+        assert_eq!(axis_label(12.5, Metric::Cost), "$12.5");
+        assert_eq!(axis_label(0.05, Metric::Cost), "$0.05");
+        assert_eq!(axis_label(999.9, Metric::Cost), "$999.9");
+        assert_eq!(axis_label(0.0, Metric::Cost), "$0");
+        // $1000 and up shortens like tokens, with the dollar sign kept.
+        assert_eq!(axis_label(1500.0, Metric::Cost), "$1.5k");
+        assert_eq!(axis_label(2_400_000.0, Metric::Cost), "$2.4m");
+    }
+
+    /// `%g` keeps six significant digits and drops the rest, which is what stops
+    /// a summed cost from labelling as `$0.30000000000000004`.
+    #[test]
+    fn percent_g_is_not_plain_float_printing() {
+        assert_eq!(percent_g(0.1 + 0.2), "0.3");
+        assert_eq!(percent_g(1.0 / 3.0), "0.333333");
+        assert_eq!(percent_g(0.0), "0");
+        assert_eq!(percent_g(-4.25), "-4.25");
+        assert_eq!(percent_g(123_456.0), "123456");
+        // Below 1e-4 `%g` switches to exponent notation.
+        assert_eq!(percent_g(0.00001), "1e-05");
     }
 }
