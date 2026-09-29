@@ -6,6 +6,7 @@
 //! are the parity spec (see `PARITY.md`).
 
 pub mod alerts;
+pub mod charts;
 pub mod dial;
 pub mod formatting;
 pub mod icon;

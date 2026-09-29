@@ -42,6 +42,10 @@ pub struct PollResult {
     /// frontend: the window gets `model_totals` and `model_daily` instead.
     #[serde(skip)]
     pub batches: Vec<(String, Vec<crate::model::UsageSample>)>,
+    /// Flat remaining-% samples for the trend chart, accumulated across polls.
+    /// This is the Swift build's `remainingHistory`, and it is the only history
+    /// the trend chart needs.
+    pub remaining_history: Vec<crate::charts::RemainingSample>,
 }
 
 pub struct Poller {
@@ -53,6 +57,8 @@ pub struct Poller {
     notifier: MilestoneNotifier,
     pricing: Mutex<PricingTable>,
     snapshots: Vec<RemainingSnapshot>,
+    /// Flat samples, mirrored from `snapshots` for the chart API.
+    remaining_history: Vec<crate::charts::RemainingSample>,
     /// 7 days of minute-resolution history is plenty for a month of charts.
     history_limit: usize,
     last_local_poll: Option<Instant>,
@@ -81,6 +87,7 @@ impl Poller {
             notifier: MilestoneNotifier::new(),
             pricing: Mutex::new(PricingTable::default()),
             snapshots: Vec::new(),
+            remaining_history: Vec::new(),
             history_limit: 7 * 24 * 60,
             last_local_poll: None,
             // The Claude log parse is expensive the first time; after that the
@@ -218,9 +225,22 @@ impl Poller {
                 .collect(),
         };
         if !snapshot.values.is_empty() {
+            for (provider, label, percent) in &snapshot.values {
+                self.remaining_history.push(crate::charts::RemainingSample {
+                    provider: provider.clone(),
+                    label: label.clone(),
+                    date: now,
+                    remaining: *percent,
+                });
+            }
             self.snapshots.push(snapshot.clone());
         }
-        // Retention: seven days of minute-resolution history.
+        // Retention: seven days of history. The flat list is trimmed by date
+        // rather than by count, because a five-minute poll over seven days is
+        // ~2000 entries and a burst of polls must not shorten the window.
+        let history_cutoff = now - 7 * 86_400;
+        self.remaining_history
+            .retain(|sample| sample.date >= history_cutoff);
         if self.snapshots.len() > self.history_limit {
             let excess = self.snapshots.len() - self.history_limit;
             self.snapshots.drain(0..excess);
@@ -253,7 +273,13 @@ impl Poller {
             notifications,
             at: now,
             batches,
+            remaining_history: self.remaining_history.clone(),
         }
+    }
+
+    /// The flat remaining-% history the trend chart reads.
+    pub fn remaining_history(&self) -> &[crate::charts::RemainingSample] {
+        &self.remaining_history
     }
 
     /// Trend series for a window label.
@@ -268,6 +294,7 @@ impl Poller {
     /// Drops the persisted chart history — a "Reset history" affordance.
     pub fn clear_history(&mut self) {
         self.snapshots.clear();
+        self.remaining_history.clear();
     }
 
     /// Forces the next poll to go out immediately, skipping the throttle — used
