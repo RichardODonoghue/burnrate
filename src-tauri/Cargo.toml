@@ -1,0 +1,21 @@
+[package]
+name = "burnrate-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "BurnRate — AI plan usage in the menu bar"
+default-run = "burnrate-desktop"
+
+[lib]
+name = "burnrate_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+burnrate-core = { path = "../crates/burnrate-core" }
