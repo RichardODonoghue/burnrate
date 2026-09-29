@@ -8,6 +8,16 @@
 
 const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 
+// The Usage pane lives in usage.js: it is the largest view and the one that has
+// to match the Swift build section for section. Loaded as a classic script so
+// it shares this file's scope without a bundler.
+// usage.js is a classic script, not a module, so it registers its renderer here
+// and is handed its helpers in `refresh()`. Deliberately nothing else: an
+// `Object.assign` at the top of this file referencing `esc` or `tokenCount`
+// would be a temporal-dead-zone error (they are `const`, declared below) and
+// would take the whole script — and the whole window — down with it.
+window.BurnRate = window.BurnRate || {};
+
 const PANES = [
   { id: "usage", title: "Usage", glyph: "◐" },
   { id: "notifications", title: "Notifications", glyph: "◔" },
@@ -33,10 +43,11 @@ let state = {
   settingsPath: "",
   busy: false,
   // Chart controls, sent with every snapshot so the payload matches the view.
-  range: "day",
-  windowLabel: "Rolling",
+  // Labels are the Swift build's: 24h / 7d / 30d, defaulting to 7d.
+  range: "7d",
+  metric: "tokens",
+  windowLabel: null,
   providerFilter: null,
-  hover: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -116,21 +127,29 @@ function toast(message) {
 }
 
 async function refresh() {
-  const [snapshot, providers, iconStates, settingsPath] = await Promise.all([
+  const [snapshot, providers, iconStates, settingsPath, modelColours] = await Promise.all([
     invoke("snapshot", {
       pane: state.pane,
       range: state.range,
-      windowLabel: state.windowLabel,
+      metric: state.metric,
+      windowLabel: state.windowLabel ?? undefined,
       providerFilter: state.providerFilter,
     }),
     invoke("known_providers"),
     invoke("icon_states"),
     invoke("settings_file_path"),
+    invoke("model_colours"),
   ]);
   state.snapshot = snapshot;
   state.providers = providers;
   state.iconStates = iconStates;
   state.settingsPath = settingsPath;
+  window.BurnRate.configure({
+    providerColours: PROVIDER_COLOURS,
+    modelColours,
+    tokenCount,
+    esc,
+  });
   render();
 }
 
@@ -191,316 +210,60 @@ function render() {
     content.innerHTML = `<div class="empty">Loading…</div>`;
     return;
   }
+  const toolbar = `
+    <div class="toolbar">
+      <strong>Usage Dashboard</strong>
+      <span class="grow"></span>
+      <label>Provider
+        <select id="provider-select">
+          <option value="" ${state.providerFilter ? "" : "selected"}>All providers</option>
+          ${(state.snapshot?.dashboard?.providerNames ?? [])
+            .map(
+              (name) =>
+                `<option value="${esc(name)}" ${
+                  state.providerFilter === name ? "selected" : ""
+                }>${esc(name)}</option>`
+            )
+            .join("")}
+        </select>
+      </label>
+      <label>Metric
+        <select id="metric-select">
+          <option value="tokens" ${state.metric === "tokens" ? "selected" : ""}>Tokens</option>
+          <option value="cost" ${state.metric === "cost" ? "selected" : ""}>Cost</option>
+        </select>
+      </label>
+      <label>Range
+        <select id="range-select">
+          ${["24h", "7d", "30d"]
+            .map(
+              (label) =>
+                `<option value="${label}" ${
+                  state.range === label ? "selected" : ""
+                }>${label}</option>`
+            )
+            .join("")}
+        </select>
+      </label>
+      <button class="action" id="toolbar-refresh" title="Refresh">↻</button>
+    </div>`;
   const renderers = {
-    usage: renderUsage,
+    usage: window.BurnRate.renderUsage,
     notifications: renderNotifications,
     widgets: renderWidgets,
     about: renderAbout,
   };
-  content.innerHTML = renderers[state.pane]();
+  const renderer = renderers[state.pane];
+  if (typeof renderer !== "function") {
+    content.innerHTML = `<div class="empty">Pane "${state.pane}" failed to load.</div>`;
+    return;
+  }
+  // The Usage pane is the only one with a toolbar above it, as in the Swift build.
+  content.innerHTML = (state.pane === "usage" ? toolbar : "") + renderer(state.snapshot);
+  if (state.pane === "usage") {
+    wireUsageCharts();
+  }
   wireContent();
-}
-
-/** The trend chart: one polyline per provider over the selected window. */
-function trendChart(dashboard) {
-  const { series, yDomain, xDomain } = dashboard;
-  if (!series.length || !series.some((line) => line.points.length > 1)) {
-    return `<div class="empty">
-      <strong>Not enough history yet.</strong>
-      <p class="hint">Remaining usage is sampled once per poll. Two polls in the
-      selected window will draw the trend.</p>
-    </div>`;
-  }
-  const W = 100;
-  const H = 42;
-  const [yLow, yHigh] = yDomain ?? [0, 100];
-  const ySpan = Math.max(1, yHigh - yLow);
-  const [xLow, xHigh] = xDomain ?? [0, 1];
-  const xSpan = Math.max(1, xHigh - xLow);
-  // Inset so a line at 0% or 100% is not drawn on the frame.
-  const px = (x) => 2 + ((x - xLow) / xSpan) * (W - 4);
-  const py = (y) => H - 2 - ((y - yLow) / ySpan) * (H - 4);
-
-  const lines = series
-    .map((line) => {
-      const colour = PROVIDER_COLOURS[line.provider] ?? "var(--accent)";
-      const points = line.points
-        .map((point) => `${px(point.x).toFixed(2)},${py(point.y).toFixed(2)}`)
-        .join(" ");
-      const opacity = line.scoped ? 0.5 : 1;
-      const dots = line.points
-        .map(
-          (point) =>
-            `<circle class="pt" data-x="${point.x}" data-y="${point.y}"
-               cx="${px(point.x).toFixed(2)}" cy="${py(point.y).toFixed(2)}" r="0.9"
-               fill="${colour}" opacity="${opacity}"/>`
-        )
-        .join("");
-      return `<polyline points="${points}" fill="none" stroke="${colour}"
-                stroke-width="0.5" opacity="${opacity}" vector-effect="non-scaling-stroke"/>
-              ${dots}`;
-    })
-    .join("");
-
-  const grid = [0, 25, 50, 75, 100]
-    .filter((value) => value >= yLow && value <= yHigh)
-    .map(
-      (value) =>
-        `<line x1="0" y1="${py(value).toFixed(2)}" x2="${W}" y2="${py(value).toFixed(2)}"
-           stroke="var(--line)" stroke-width="0.15" vector-effect="non-scaling-stroke"/>
-         <text class="tick" x="0.5" y="${(py(value) + 1.2).toFixed(2)}">${value}%</text>`
-    )
-    .join("");
-
-  return `<div class="chart-wrap">
-    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
-         id="trend" role="img" aria-label="Remaining usage over time">
-      ${grid}
-      ${lines}
-    </svg>
-    <div class="tooltip" id="trend-tip" hidden></div>
-  </div>
-  <div class="legend">
-    ${series
-      .map(
-        (line) =>
-          `<span><i class="dot" style="background:${
-            PROVIDER_COLOURS[line.provider] ?? "var(--accent)"
-          }"></i>${esc(line.provider)}${line.scoped ? " (scoped)" : ""}</span>`
-      )
-      .join("")}
-    <span class="hint" style="margin-left:auto">${esc(dashboard.windowLabel)} · last ${
-      Math.round((xDomain[1] - xDomain[0]) / 60) || 0
-    } min of history</span>
-  </div>`;
-}
-
-/** Top models by tokens, as horizontal bars. */
-function rankingChart(entries) {
-  if (!entries.length) {
-    return `<p class="hint">No per-model usage yet.</p>`;
-  }
-  const top = entries.slice(0, 10);
-  const max = Math.max(...top.map((entry) => entry.tokens ? entry.tokens.input + entry.tokens.output + entry.tokens.cacheRead + entry.tokens.cacheWrite + entry.tokens.reasoning : 0), 1);
-  return top
-    .map((entry) => {
-      const tokens =
-        (entry.tokens?.input ?? 0) +
-        (entry.tokens?.output ?? 0) +
-        (entry.tokens?.cacheRead ?? 0) +
-        (entry.tokens?.cacheWrite ?? 0) +
-        (entry.tokens?.reasoning ?? 0);
-      const pct = (tokens / max) * 100;
-      const cost = entry.cost ? ` · $${entry.cost.toFixed(2)}` : "";
-      return `<div class="bar-row">
-        <span class="bar-name" title="${esc(entry.displayName)}">${esc(entry.displayName ?? entry.model)}</span>
-        <span class="bar-track"><span class="bar-fill" style="width:${pct.toFixed(1)}%"></span></span>
-        <span class="bar-value">${tokenCount(tokens)}${esc(cost)}</span>
-      </div>`;
-    })
-    .join("");
-}
-
-/** Daily usage, stacked by model. */
-function dailyChart(daily) {
-  if (!daily.length) {
-    return `<p class="hint">No daily history yet.</p>`;
-  }
-  const W = 100;
-  const H = 26;
-  const models = [];
-  for (const day of daily) {
-    for (const entry of day.entries ?? []) {
-      const name = entry.displayName ?? entry.model;
-      if (!models.includes(name)) models.push(name);
-    }
-  }
-  const totals = daily.map((day) =>
-    (day.entries ?? []).reduce(
-      (sum, entry) =>
-        sum +
-        (entry.tokens?.input ?? 0) +
-        (entry.tokens?.output ?? 0) +
-        (entry.tokens?.cacheRead ?? 0) +
-        (entry.tokens?.cacheWrite ?? 0) +
-        (entry.tokens?.reasoning ?? 0),
-      0
-    )
-  );
-  const max = Math.max(...totals, 1);
-  const barWidth = W / daily.length;
-
-  const bars = daily
-    .map((day, index) => {
-      const total = totals[index] || 1;
-      let offset = 0;
-      const stack = (day.entries ?? [])
-        .map((entry) => {
-          const tokens =
-            (entry.tokens?.input ?? 0) +
-            (entry.tokens?.output ?? 0) +
-            (entry.tokens?.cacheRead ?? 0) +
-            (entry.tokens?.cacheWrite ?? 0) +
-            (entry.tokens?.reasoning ?? 0);
-          const height = (tokens / max) * (H - 2);
-          offset += tokens;
-          const colour = PROVIDER_COLOURS[entry.provider] ?? "var(--accent)";
-          const name = entry.displayName ?? entry.model;
-          const index2 = models.indexOf(name);
-          const hue = (index2 * 47) % 360;
-          const shade = index2 === -1 ? colour : `oklch(62% 0.14 ${hue})`;
-          return `<rect x="${(index * barWidth + 0.15).toFixed(2)}"
-            y="${(H - 1 - (offset / total) * (H - 2) + (1 - tokens / total) * (H - 2)).toFixed(2)}"
-            width="${(barWidth - 0.3).toFixed(2)}" height="${Math.max(0.4, height).toFixed(2)}"
-            fill="${shade}"><title>${esc(name)}: ${tokenCount(tokens)}</title></rect>`;
-        })
-        .join("");
-      const day0 = new Date(day.day * 1000);
-      return `<g>${stack}<title>${day0.toLocaleDateString()}: ${tokenCount(totals[index])}</title></g>`;
-    })
-    .join("");
-
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
-             role="img" aria-label="Daily usage by model">${bars}</svg>
-    <div class="legend">
-      <span class="hint">${daily.length} day${daily.length === 1 ? "" : "s"} · peak ${
-        tokenCount(max)
-      } tokens</span>
-    </div>`;
-}
-
-function renderUsage() {
-  const { usage, missing, settings, dashboard } = state.snapshot;
-  const parts = [`<h1>Usage</h1>
-    <p class="sub">Plan windows for each detected provider, and the icon severity they drive.</p>`];
-
-  if (!usage.length) {
-    parts.push(`<div class="empty">
-      <strong>No providers found.</strong>
-      <p class="hint">The list under “Not detected” says exactly what was looked for.</p>
-    </div>`);
-  }
-
-  // --- charts ---
-  parts.push(`<div class="card">
-    <h2>Remaining over time</h2>
-    <div class="chart-controls">
-      <select id="range-select">
-        ${["day:Today", "week:7 days", "month:30 days"]
-          .map((pair) => {
-            const [value, label] = pair.split(":");
-            return `<option value="${value}" ${
-              state.range === value ? "selected" : ""
-            }>${label}</option>`;
-          })
-          .join("")}
-      </select>
-      <select id="window-select">
-        ${["Rolling", "Weekly", "Monthly"]
-          .map(
-            (label) =>
-              `<option ${state.windowLabel === label ? "selected" : ""}>${label}</option>`
-          )
-          .join("")}
-      </select>
-      <select id="provider-select">
-        <option value="" ${state.providerFilter ? "" : "selected"}>All providers</option>
-        ${(dashboard.series ?? []).map(
-          (line) =>
-            `<option value="${esc(line.provider)}" ${
-              state.providerFilter === line.provider ? "selected" : ""
-            }>${esc(line.provider)}</option>`
-        ).join("")}
-      </select>
-    </div>
-    ${trendChart(dashboard)}
-  </div>`);
-
-  parts.push(`<div class="grid-2">
-    <div class="card">
-      <h2>Models by tokens</h2>
-      ${rankingChart(dashboard.ranking ?? [])}
-    </div>
-    <div class="card">
-      <h2>Daily usage</h2>
-      ${dailyChart(dashboard.daily ?? [])}
-    </div>
-  </div>`);
-
-  for (const provider of usage) {
-    const colour = PROVIDER_COLOURS[provider.providerName] ?? "var(--accent)";
-    const rows = (provider.windows ?? [])
-      .map((window) => {
-        const percent = window.percentRemaining;
-        const reset = relativeTime(window.resetsAt);
-        return `<div class="window">
-          <div class="head">
-            <span>${esc(window.label)}</span>
-            <span>
-              <strong style="color:${severityColour(percent)}">${fmtPercent(percent)}</strong>
-              ${reset ? `<span class="reset"> · resets ${reset}</span>` : ""}
-            </span>
-          </div>
-          <div class="meter">
-            <span style="width:${percent == null ? 0 : Math.max(0, Math.min(100, percent))}%;background:${severityColour(percent)}"></span>
-          </div>
-          <div class="reset">${tokenCount(window.tokensUsed ?? 0)} tokens</div>
-        </div>`;
-      })
-      .join("");
-    parts.push(`<div class="card">
-      <div class="provider-head">
-        <span class="dot" style="background:${colour}"></span>
-        ${esc(provider.providerName)}
-        ${provider.plan ? `<span class="pill">${esc(provider.plan)}</span>` : ""}
-      </div>
-      ${rows || `<p class="hint">No quota windows reported.</p>`}
-    </div>`);
-  }
-
-  if (missing.length) {
-    parts.push(`<div class="card">
-      <h2>Not detected</h2>
-      ${missing.map((line) => `<div class="row"><span class="grow missing">${esc(line)}</span></div>`).join("")}
-    </div>`);
-  }
-
-  const spend = state.snapshot.spendToday ?? {};
-  if (Object.keys(spend).length) {
-    parts.push(`<div class="card">
-      <h2>Spent today</h2>
-      ${Object.entries(spend)
-        .map(
-          ([provider, amount]) =>
-            `<div class="row">
-              <span class="dot" style="background:${
-                PROVIDER_COLOURS[provider] ?? "var(--accent)"
-              }"></span>
-              <span class="grow">${esc(provider)}</span>
-              <span class="value">$${amount.toFixed(2)}</span>
-            </div>`
-        )
-        .join("")}
-    </div>`);
-  }
-
-  parts.push(`<div class="card">
-    <h2>Polling</h2>
-    <div class="row">
-      <span class="grow label">Interval</span>
-      <input type="number" id="poll-interval" min="30" max="3600" step="30"
-             value="${settings.pollIntervalSeconds}" />
-      <span class="label">seconds</span>
-      <button class="action" id="poll-save">Save</button>
-    </div>
-    <p class="hint">Tick ${state.snapshot.tick} · last poll ${
-      state.snapshot.lastPollUnix
-        ? new Date(state.snapshot.lastPollUnix * 1000).toLocaleTimeString()
-        : "—"
-    }</p>
-  </div>`);
-
-  return parts.join("");
 }
 
 function renderNotifications() {
@@ -737,6 +500,55 @@ function wireContent() {
     }
   };
 
+  // Usage toolbar
+  const rangeSelect = el("range-select");
+  if (rangeSelect) {
+    rangeSelect.addEventListener("change", () => {
+      state.range = rangeSelect.value;
+      refresh();
+    });
+  }
+  const metricSelect = el("metric-select");
+  if (metricSelect) {
+    metricSelect.addEventListener("change", () => {
+      state.metric = metricSelect.value;
+      refresh();
+    });
+  }
+  const providerSelect = el("provider-select");
+  if (providerSelect) {
+    providerSelect.addEventListener("change", () => {
+      state.providerFilter = providerSelect.value || null;
+      refresh();
+    });
+  }
+  const windowSelect = el("window-select");
+  if (windowSelect) {
+    windowSelect.addEventListener("change", () => {
+      state.windowLabel = windowSelect.value;
+      refresh();
+    });
+  }
+  for (const id of ["toolbar-refresh", "poll-refresh"]) {
+    const button = el(id);
+    if (button) {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await invoke("refresh_now");
+          await refresh();
+          toast("Refreshed");
+        } catch (error) {
+          toast(String(error));
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+  }
+
+  wireUsageCharts();
+
   // About
   const testNotification = el("test-notification");
   if (testNotification) {
@@ -750,28 +562,7 @@ function wireContent() {
     });
   }
 
-  // Usage — chart controls re-fetch rather than mutate.
-  const rangeSelect = el("range-select");
-  if (rangeSelect) {
-    rangeSelect.addEventListener("change", () => {
-      state.range = rangeSelect.value;
-      refresh();
-    });
-  }
-  const windowSelect = el("window-select");
-  if (windowSelect) {
-    windowSelect.addEventListener("change", () => {
-      state.windowLabel = windowSelect.value;
-      refresh();
-    });
-  }
-  const providerSelect = el("provider-select");
-  if (providerSelect) {
-    providerSelect.addEventListener("change", () => {
-      state.providerFilter = providerSelect.value || null;
-      refresh();
-    });
-  }
+  // Usage — the toolbar's controls are wired below.
 
   // Hover tooltip on the trend chart: nearest point per series.
   const trend = el("trend");
@@ -937,6 +728,76 @@ function wireContent() {
       await mutate("save_settings", { settings }, "Tray menu updated");
     });
   }
+}
+
+/** Hover tooltips for the trend and daily charts. */
+function wireUsageCharts() {
+  const trend = el("trend");
+  const trendTip = el("trend-tip");
+  if (trend && trendTip) {
+    trend.addEventListener("mousemove", (event) => {
+      const target = event.target.closest(".probe");
+      if (!target) {
+        trendTip.hidden = true;
+        return;
+      }
+      const colour = PROVIDER_COLOURS[target.dataset.provider] ?? "var(--accent)";
+      const scoped = target.dataset.scoped === "1";
+      trendTip.innerHTML =
+        `<div><i class="dot" style="background:${colour};opacity:${scoped ? 0.55 : 1}"></i>` +
+        `${esc(target.dataset.series)} <strong>${Math.round(Number(target.dataset.y ?? 0))}%</strong></div>`;
+      trendTip.hidden = false;
+      const box = trend.getBoundingClientRect();
+      trendTip.style.left = `${Math.min(event.clientX - box.left + 10, box.width - 130)}px`;
+    });
+    trend.addEventListener("mouseleave", () => {
+      trendTip.hidden = true;
+    });
+  }
+
+  const daily = el("daily");
+  const dailyTip = el("daily-tip");
+  if (daily && dailyTip) {
+    daily.addEventListener("mousemove", (event) => {
+      const group = event.target.closest(".day");
+      if (!group) {
+        dailyTip.hidden = true;
+        return;
+      }
+      const day = dashboardDay(Number(group.dataset.day));
+      if (!day) {
+        dailyTip.hidden = true;
+        return;
+      }
+      const rows = day.bars
+        .map(
+          (bar) =>
+            `<div><i class="dot" style="background:${window.BurnRate.modelColours?.[bar.key] ??
+              "var(--accent)"}"></i>${esc(bar.label)} <strong>${esc(
+              axisValue(bar.value)
+            )}</strong></div>`
+        )
+        .join("");
+      dailyTip.innerHTML =
+        rows + `<div class="hint">${new Date(day.day * 1000).toLocaleDateString()}</div>`;
+      dailyTip.hidden = false;
+      const box = daily.getBoundingClientRect();
+      dailyTip.style.left = `${Math.min(Number(group.dataset.x) + 10, box.width - 150)}px`;
+    });
+    daily.addEventListener("mouseleave", () => {
+      dailyTip.hidden = true;
+    });
+  }
+}
+
+function dashboardDay(day) {
+  return state.snapshot?.dashboard?.daily?.find((entry) => entry.day === day);
+}
+
+function axisValue(value) {
+  return state.snapshot?.dashboard?.metric === "cost"
+    ? `$${value.toFixed(2)}`
+    : tokenCount(Math.round(value));
 }
 
 // ---------- boot ----------
