@@ -24,6 +24,14 @@ pub struct TokenUsage {
     pub reasoning: i64,
 }
 
+impl std::ops::Add for TokenUsage {
+    type Output = TokenUsage;
+
+    fn add(self, rhs: TokenUsage) -> TokenUsage {
+        TokenUsage::summed(self, rhs)
+    }
+}
+
 impl TokenUsage {
     pub const fn new(input: i64, output: i64, cache_read: i64, cache_write: i64) -> Self {
         Self {
@@ -53,6 +61,18 @@ impl TokenUsage {
 
     pub const fn zero() -> Self {
         Self::new(0, 0, 0, 0)
+    }
+
+    /// Channel-wise sum. Used everywhere usage is accumulated, so no caller
+    /// has to remember the five fields — or accidentally drop `reasoning`.
+    pub fn summed(a: TokenUsage, b: TokenUsage) -> Self {
+        Self {
+            input: a.input + b.input,
+            output: a.output + b.output,
+            cache_read: a.cache_read + b.cache_read,
+            cache_write: a.cache_write + b.cache_write,
+            reasoning: a.reasoning + b.reasoning,
+        }
     }
 
     /// Raw sum of every token channel, all cache traffic included.
@@ -121,10 +141,33 @@ impl UsageSample {
         self.source_tag = Some(tag.into());
         self
     }
+
+    /// Set only when the source actually recorded the field — the parsers see
+    /// every shape of missing key, and "absent" is not "empty".
+    pub fn maybe_request_id(mut self, id: Option<&str>) -> Self {
+        self.request_id = id.map(str::to_string);
+        self
+    }
+
+    pub fn maybe_model(mut self, model: Option<&str>) -> Self {
+        self.model = model.map(str::to_string);
+        self
+    }
+
+    pub fn maybe_cost(mut self, cost: Option<f64>) -> Self {
+        self.cost = cost;
+        self
+    }
+
+    pub fn maybe_source_tag(mut self, tag: Option<&str>) -> Self {
+        self.source_tag = tag.map(str::to_string);
+        self
+    }
 }
 
 /// Aggregated usage for one plan window (Rolling / Weekly / Monthly).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
     pub id: String,
     pub label: String,
@@ -172,7 +215,8 @@ impl UsageWindow {
 }
 
 /// Latest usage for one provider.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderUsage {
     pub provider_name: String,
     /// Vendor plan tier when known (e.g. "Team 5x", "Max 20x", "Go").

@@ -323,6 +323,55 @@ pub fn app_icon_at(edge: u32, remaining: Option<f64>) -> Canvas {
     canvas
 }
 
+impl Canvas {
+    /// PNG bytes, for the window and the bundler.
+    pub fn to_png(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut buffer, self.size, self.size);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("png header");
+            writer.write_image_data(&self.pixels).expect("png pixels");
+            writer.finish().expect("png finish");
+        }
+        buffer
+    }
+
+    /// `data:` URL, so the frontend can show the mark without a file path.
+    /// The icons live in `src-tauri/icons`, which is not under the served
+    /// `ui/app`, so a relative `<img src>` would 404 on every platform.
+    pub fn to_data_url(&self) -> String {
+        format!("data:image/png;base64,{}", base64_encode(&self.to_png()))
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let triple = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(ALPHABET[(triple >> 18) as usize & 63] as char);
+        out.push(ALPHABET[(triple >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(triple >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[triple as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 fn clear_oval(canvas: &mut Canvas, center: [f64; 2], radius: f64) {
     let r2 = radius * radius;
     for y in 0..canvas.size as i64 {

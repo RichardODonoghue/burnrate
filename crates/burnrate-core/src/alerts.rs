@@ -10,12 +10,47 @@ use serde::{Deserialize, Serialize};
 /// One notification rule: notify each time a provider window's remaining %
 /// drops past another `step` increment (e.g. step 10 fires at 90, 80, 70…
 /// remaining). One rule per provider+window.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Milestone {
     pub provider: String,
     pub window_label: String,
     /// Increment in percentage points (e.g. 10 = notify at 90/80/70… remaining).
     pub step: f64,
+}
+
+/// Wire shape, including the legacy fixed-threshold field the Swift build
+/// wrote before rules became increments.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MilestoneWire {
+    provider: String,
+    window_label: String,
+    #[serde(default)]
+    step: Option<f64>,
+    /// Legacy: a single fixed threshold, superseded by `step`.
+    #[serde(default)]
+    percent_remaining: Option<f64>,
+}
+
+impl<'de> Deserialize<'de> for Milestone {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = MilestoneWire::deserialize(deserializer)?;
+        let step = match wire.step {
+            Some(step) => step,
+            None => match wire.percent_remaining {
+                // Legacy fixed-threshold rule: keep its level covered by
+                // reusing the threshold as the increment.
+                Some(legacy) => legacy.round().clamp(1.0, 50.0),
+                None => 20.0,
+            },
+        };
+        Ok(Milestone {
+            provider: wire.provider,
+            window_label: wire.window_label,
+            step,
+        })
+    }
 }
 
 impl Milestone {
@@ -55,6 +90,7 @@ impl Milestone {
 /// One burn-rate alert: notify when a provider window's remaining % drops by at
 /// least `percent_drop` within a trailing `minutes` window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BurnAlert {
     pub provider: String,
     pub window_label: String,
@@ -82,6 +118,7 @@ impl BurnAlert {
 
 /// Alert when one provider's daily local-log spend (USD) exceeds the limit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CostAlert {
     pub provider: String,
     pub daily_limit_usd: f64,

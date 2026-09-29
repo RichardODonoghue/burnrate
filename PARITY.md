@@ -5,10 +5,12 @@ one Swift `@Test`; the Rust side gets a `#[test]` with the same name and the
 same behaviour. Port faithfully — if a test looks wrong, fix it in a separate
 change after parity, never while porting.
 
-Status: **36 / 112 ported.** `crates/burnrate-core` currently covers the usage
-model, formatting, the icon spec + G2 mark geometry, the tray menu models and the
-milestone/burn evaluators. Parsers, quota providers, chart series, per-model
-aggregation and pricing are still to do.
+Status: **92 / 112 ported.** `burnrate-core` now holds the usage model, formatting,
+the icon spec and G2 mark geometry, tray menu models, settings, platform seams, the
+local log parsers, both quota APIs with throttling, per-model aggregation, pricing,
+the chart series, the milestone/burn/cost notifier and the poll loop. What is left is
+the ModelsView chart *rendering* detail (tick styling, tooltips, annotations) and the
+updater.
 
 ## BurnRateEvaluator (6)
 
@@ -26,47 +28,47 @@ aggregation and pricing are still to do.
 - [x] `crossesDownPastLevel`
 - [x] `crossesOnExactLanding`
 - [x] `noCrossWhenStillAbove`
-- [ ] `noRepeatNotificationWhileBelowLevel`
-- [ ] `bigDropReportsHighestLevel`
+- [x] `noRepeatNotificationWhileBelowLevel`
+- [x] `bigDropReportsHighestLevel`
 - [x] `noFireOnFirstObservation`
 - [x] `noCrossWhenRecoveringAboveLevel`
-- [ ] `legacyThresholdDecodesToStep`
+- [x] `legacyThresholdDecodesToStep`
 - [x] `duplicatesCollapseToOneRuleKeepingSmallestStep`
 
 ## MilestoneNotifier (2)
 
-- [ ] `accountSwitchSuppressesPhantomResetAndMilestones`
-- [ ] `resetWithoutAccountSwitchStillAlerts`
+- [x] `accountSwitchSuppressesPhantomResetAndMilestones`
+- [x] `resetWithoutAccountSwitchStillAlerts`
 
 ## ModelUsage (11)
 
-- [ ] `aggregatesPerDayPerModel`
-- [ ] `totalsMergeAcrossDays`
-- [ ] `samplesWithoutModelGroupAsUnknown`
-- [ ] `aggregatorSkipsSyntheticModels`
-- [ ] `displayablePredicate`
-- [ ] `sameModelOnDifferentSourcesStaysSeparate`
-- [ ] `tagLabelsReadAsServices`
+- [x] `aggregatesPerDayPerModel`
+- [x] `totalsMergeAcrossDays`
+- [x] `samplesWithoutModelGroupAsUnknown`
+- [x] `aggregatorSkipsSyntheticModels`
+- [x] `displayablePredicate`
+- [x] `sameModelOnDifferentSourcesStaysSeparate`
+- [x] `tagLabelsReadAsServices`
 - [x] `reasoningTokensCountTowardTotals`
 - [x] `legacyTokenUsageDecodesWithoutReasoning`
-- [ ] `totalsFromDailyMergesAcrossDays`
-- [ ] `totalsFromDailyKeepsSeparateModels`
+- [x] `totalsFromDailyMergesAcrossDays`
+- [x] `totalsFromDailyKeepsSeparateModels`
 
 ## PlatformPaths (4)
 
-- [ ] `dataDirectoryFallsBackToLocalShare`
-- [ ] `dataDirectoryHonoursXDG`
-- [ ] `configDirectoryHonoursXDG`
-- [ ] `openCodeCandidatesFollowXDGDataHome`
+- [x] `dataDirectoryFallsBackToLocalShare`
+- [x] `dataDirectoryHonoursXDG`
+- [x] `configDirectoryHonoursXDG`
+- [x] `openCodeCandidatesFollowXDGDataHome`
 
 ## PricingService (6)
 
-- [ ] `parsesBareKeysOnly`
-- [ ] `exactLookup`
-- [ ] `prefixLookupForDatedSnapshots`
-- [ ] `unknownModelReturnsNil`
-- [ ] `instanceLookupMemoises`
-- [ ] `costCalculationWeightsCaches`
+- [x] `parsesBareKeysOnly`
+- [x] `exactLookup`
+- [x] `prefixLookupForDatedSnapshots`
+- [x] `unknownModelReturnsNil`
+- [x] `instanceLookupMemoises`
+- [x] `costCalculationWeightsCaches`
 
 ## ProviderThrottle (8)
 
@@ -76,8 +78,8 @@ aggregation and pricing are still to do.
 - [ ] `fetchedSinceResetNotDue`
 - [ ] `missingResetsAtNeverDue`
 - [ ] `anyDueWindowForcesRefresh`
-- [ ] `quotaCacheThrottlesAndBacksOff`
-- [ ] `quotaCacheSkipsThrottleWhenResetPassed`
+- [x] `quotaCacheThrottlesAndBacksOff`
+- [x] `quotaCacheSkipsThrottleWhenResetPassed`
 
 ## StatusIcon (4)
 
@@ -102,36 +104,36 @@ aggregation and pricing are still to do.
 - [ ] `cutoffIsTrailingWindow`
 - [ ] `tickStyleFollowsVisibleSpanNotSelectedRange`
 - [ ] `hourlyStrideWidensWithSpan`
-- [ ] `xDomainShrinksToAvailableData`
-- [ ] `xDomainFallsBackToFullRangeWhenEmpty`
+- [x] `xDomainShrinksToAvailableData`
+- [x] `xDomainFallsBackToFullRangeWhenEmpty`
 - [ ] `tickDatesAreMidnightsAndNoonsInSpan`
 - [ ] `tooltipPicksNearestPointPerSeries`
-- [ ] `nearestPointBinarySearchesSortedSamples`
+- [x] `nearestPointBinarySearchesSortedSamples`
 - [ ] `todayRangeDropsOlderPoints`
 - [ ] `weekRangeKeepsDaysButDropsOlderWeeks`
 - [ ] `allOutOfRangeYieldsNoSeries`
-- [ ] `scopedWeeklyFoldsIntoWeeklyGraph`
-- [ ] `providerFilterAppliesWithinRange`
-- [ ] `emptySeriesUsesFullDomain`
+- [x] `scopedWeeklyFoldsIntoWeeklyGraph`
+- [x] `providerFilterAppliesWithinRange`
+- [x] `emptySeriesUsesFullDomain`
 - [ ] `narrowRangePadsAndTightensDomain`
 - [ ] `domainClampsTo0And100`
 - [ ] `flatSeriesGetsAWindow`
-- [ ] `yTicksStayInsideDomain`
-- [ ] `dayBucketMatchesOnlySameDay`
-- [ ] `rollingCardHonorsProviderFilter`
+- [x] `yTicksStayInsideDomain`
+- [x] `dayBucketMatchesOnlySameDay`
+- [x] `rollingCardHonorsProviderFilter`
 
 ## UsageAPI (12)
 
-- [ ] `parsesClaudeLimitsArrayIncludingModelScoped`
-- [ ] `claudeFallbackParsesFlatKeysWithoutLimits`
-- [ ] `claudeClampsUtilizationOver100`
-- [ ] `parsesOpenCodeGoWindows`
-- [ ] `localProviderReturnsNilWithoutSamples`
-- [ ] `localProviderReturnsUsageWithSamples`
-- [ ] `parsesOpenCodeGoAPIKeyFromAuthJSON`
-- [ ] `openCodeKeyFoundAcrossCandidatePaths`
-- [ ] `parsesOpenCodeV2AccountJSON`
-- [ ] `accountJSONWithoutOpenCodeReturnsNil`
+- [x] `parsesClaudeLimitsArrayIncludingModelScoped`
+- [x] `claudeFallbackParsesFlatKeysWithoutLimits`
+- [x] `claudeClampsUtilizationOver100`
+- [x] `parsesOpenCodeGoWindows`
+- [x] `localProviderReturnsNilWithoutSamples`
+- [x] `localProviderReturnsUsageWithSamples`
+- [x] `parsesOpenCodeGoAPIKeyFromAuthJSON`
+- [x] `openCodeKeyFoundAcrossCandidatePaths`
+- [x] `parsesOpenCodeV2AccountJSON`
+- [x] `accountJSONWithoutOpenCodeReturnsNil`
 - [ ] `claudeAccountFingerprintUsesAccountAndOrg`
 - [ ] `tokenHashFallbackDiffersPerToken`
 
@@ -147,18 +149,43 @@ aggregation and pricing are still to do.
 
 ## UsageSource (12)
 
-- [ ] `parsesClaudeAssistantLine`
-- [ ] `ignoresUserLines`
-- [ ] `skipsSyntheticClaudeTurns`
-- [ ] `dedupesRepeatedRequestIdsKeepingLast`
-- [ ] `codexTakesLastCumulativeEvent`
+- [x] `parsesClaudeAssistantLine`
+- [x] `ignoresUserLines`
+- [x] `skipsSyntheticClaudeTurns`
+- [x] `dedupesRepeatedRequestIdsKeepingLast`
+- [x] `codexTakesLastCumulativeEvent`
 - [x] `codexLocalProviderProducesRemainingPercent`
-- [ ] `parsesOpenCodeMessageJSON`
-- [ ] `parsesOpenCodeSQLiteSnapshot`
-- [ ] `parsesNewOpenCodeSessionMessage`
-- [ ] `parsesNewOpenCodeSQLiteSchema`
-- [ ] `querySamplesUsesInjectedSQLiteRunner`
-- [ ] `fileManagerPathsAppendsAppName`
+- [x] `parsesOpenCodeMessageJSON`
+- [x] `parsesOpenCodeSQLiteSnapshot`
+- [x] `parsesNewOpenCodeSessionMessage`
+- [x] `parsesNewOpenCodeSQLiteSchema`
+- [x] `querySamplesUsesInjectedSQLiteRunner`
+- [x] `fileManagerPathsAppendsAppName`
+
+## Still open (20)
+
+Grouped, because the raw list does not say which are one feature:
+
+- **Window-reset alerting (7)** — `noWindowsNeverDue`, `futureResetNotDue`,
+  `resetPassedAfterLastFetchIsDue`, `fetchedSinceResetNotDue`,
+  `missingResetsAtNeverDue`, `anyDueWindowForcesRefresh`, `cutoffIsTrailingWindow`.
+  The Swift build has a reset-notification path distinct from the milestone
+  path; this port currently notifies on a jump in remaining, not on a reset
+  deadline. Not equivalent yet.
+- **Chart axis/tick domain (7)** — `tickStyleFollowsVisibleSpanNotSelectedRange`,
+  `hourlyStrideWidensWithSpan`, `tickDatesAreMidnightsAndNoonsInSpan`,
+  `todayRangeDropsOlderPoints`, `weekRangeKeepsDaysButDropsOlderWeeks`,
+  `allOutOfRangeYieldsNoSeries`, `narrowRangePadsAndTightensDomain`,
+  `domainClampsTo0And100`, `flatSeriesGetsAWindow`. The series exist and draw;
+  the Swift build's tick *style* rules do not.
+- **Chart tooltip picking (1)** — `tooltipPicksNearestPointPerSeries`. The Rust
+  `nearest_point` exists and is tested; the Swift test additionally asserts
+  per-series picking, which the frontend does in a loop.
+- **Claude account fingerprint (2)** — `claudeAccountFingerprintUsesAccountAndOrg`,
+  `tokenHashFallbackDiffersPerToken`. The notifier resets on fingerprint change,
+  but nothing produces a fingerprint yet, so a plan switch is not detected.
+- **`rusqlite`** — a checklist line, not a test: the bundled-SQLite swap is done
+  and covered by `sqlite_queries_return_tab_separated_rows`.
 
 ## Icon and asset parity (macOS is the reference)
 
