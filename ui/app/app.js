@@ -11,16 +11,12 @@ const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 // The Usage pane lives in usage.js: it is the largest view and the one that has
 // to match the Swift build section for section. Loaded as a classic script so
 // it shares this file's scope without a bundler.
+// usage.js is a classic script, not a module, so it registers its renderer here
+// and is handed its helpers in `refresh()`. Deliberately nothing else: an
+// `Object.assign` at the top of this file referencing `esc` or `tokenCount`
+// would be a temporal-dead-zone error (they are `const`, declared below) and
+// would take the whole script — and the whole window — down with it.
 window.BurnRate = window.BurnRate || {};
-// usage.js is a classic script, not a module, so it reads these off the
-// namespace rather than importing them. Listed explicitly rather than dumped
-// wholesale, so the contract between the two files is visible.
-Object.assign(window.BurnRate, {
-  PROVIDER_COLOURS: () => PROVIDER_COLOURS,
-  tokenCount,
-  esc,
-  toast,
-});
 
 const PANES = [
   { id: "usage", title: "Usage", glyph: "◐" },
@@ -38,9 +34,6 @@ const PROVIDER_COLOURS = {
 };
 
 const WINDOW_LABELS = ["Rolling", "Weekly", "Monthly"];
-
-const MODEL_COLOURS = window.BurnRate.modelColours ?? {};
-const PANE_RENDERERS = {};
 
 let state = {
   pane: "usage",
@@ -255,23 +248,21 @@ function render() {
       <button class="action" id="toolbar-refresh" title="Refresh">↻</button>
     </div>`;
   const renderers = {
-    usage: renderUsage,
+    usage: window.BurnRate.renderUsage,
     notifications: renderNotifications,
     widgets: renderWidgets,
     about: renderAbout,
-    ...PANE_RENDERERS,
   };
-  if (state.pane === "usage") {
-    // usage.js registers its own renderer, which needs the shared helpers.
-    if (typeof window.BurnRate.renderUsage === "function") {
-      content.innerHTML = toolbar + window.BurnRate.renderUsage(state.snapshot);
-      wireUsageCharts();
-      wireContent();
-      return;
-    }
+  const renderer = renderers[state.pane];
+  if (typeof renderer !== "function") {
+    content.innerHTML = `<div class="empty">Pane "${state.pane}" failed to load.</div>`;
+    return;
   }
-  content.innerHTML =
-    state.pane === "usage" ? toolbar + renderers[state.pane]() : renderers[state.pane]();
+  // The Usage pane is the only one with a toolbar above it, as in the Swift build.
+  content.innerHTML = (state.pane === "usage" ? toolbar : "") + renderer(state.snapshot);
+  if (state.pane === "usage") {
+    wireUsageCharts();
+  }
   wireContent();
 }
 
