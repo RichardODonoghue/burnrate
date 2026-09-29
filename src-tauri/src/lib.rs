@@ -525,13 +525,10 @@ fn snapshot(
     let history = poller.remaining_history().to_vec();
     let cutoff = TrendChartData::trend_cutoff(range, now);
     // Claude's model-scoped weekly folds into Weekly, so the picker offers
-    // whichever canonical labels the history actually contains.
-    let mut window_labels: Vec<String> = history
-        .iter()
-        .map(|sample| TrendChartData::canonical_trend_label(&sample.label).to_string())
-        .collect();
-    window_labels.sort();
-    window_labels.dedup();
+    // whichever canonical labels the visible data actually contains, in
+    // canonical order (Rolling, Weekly, Monthly) — not alphabetical.
+    let window_labels: Vec<String> =
+        TrendChartData::trend_labels(&history, provider_filter.as_deref(), cutoff);
     let requested = window_label.unwrap_or_else(|| "Rolling".to_string());
     let window_label = if window_labels.contains(&requested) {
         requested

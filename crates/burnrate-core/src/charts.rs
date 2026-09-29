@@ -21,6 +21,7 @@
 //! format (see `PARITY.md`).
 
 use serde::Serialize;
+use std::collections::BTreeSet;
 
 /// Trailing time windows the dashboard can show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -108,6 +109,58 @@ impl TrendChartData {
     /// Trailing start of the visible span for the range filter.
     pub fn trend_cutoff(range: ChartRange, now: i64) -> i64 {
         now - range.span_seconds()
+    }
+
+    /// The window labels the picker offers, in canonical order.
+    ///
+    /// A port of `ModelsView.trendLabels(providerFilter:range:)`, which builds
+    /// the list from a `preferred` sequence and filters that — the order is
+    /// Rolling, Weekly, Monthly, *not* alphabetical. Sorting the labels gave
+    /// Monthly, Rolling, Weekly, which put the default selection in the middle
+    /// of the group and read as a mistake.
+    ///
+    /// Also scoped the way Swift scopes it: by the provider filter and the
+    /// range cutoff. Offering a window the visible data cannot fill is how the
+    /// picker ends up with an option that renders as an empty graph.
+    pub fn trend_labels(
+        samples: &[RemainingSample],
+        provider_filter: Option<&str>,
+        cutoff: i64,
+    ) -> Vec<String> {
+        const PREFERRED: [&str; 3] = ["Rolling", "Weekly", "Monthly"];
+        let present: BTreeSet<&str> = samples
+            .iter()
+            .filter(|sample| {
+                if sample.date < cutoff {
+                    return false;
+                }
+                match provider_filter {
+                    Some(filter) => sample.provider == filter,
+                    None => true,
+                }
+            })
+            .map(|sample| Self::canonical_trend_label(&sample.label))
+            .collect();
+        if present.is_empty() {
+            return PREFERRED.iter().map(|label| label.to_string()).collect();
+        }
+        let mut labels: Vec<String> = PREFERRED
+            .iter()
+            .filter(|label| present.contains(*label))
+            .map(|label| label.to_string())
+            .collect();
+        // Any label outside the preferred three, sorted — unreachable while
+        // `canonical_trend_label` folds unknowns into Weekly, kept so a new
+        // window type cannot silently vanish from the picker.
+        let mut extras: Vec<String> = present
+            .iter()
+            .filter(|label| !PREFERRED.contains(label))
+            .map(|label| label.to_string())
+            .collect();
+        extras.sort();
+        extras.dedup();
+        labels.extend(extras);
+        labels
     }
 
     /// Per-provider series for a window over the visible range, from the flat
@@ -526,6 +579,78 @@ mod tests {
             Some((200, 30.0))
         );
         assert_eq!(TrendChartData::nearest_point(&[], 5), None);
+    }
+
+    /// The picker's options come out in canonical order, not alphabetical.
+    #[test]
+    fn trend_labels_are_in_canonical_order_not_alphabetical() {
+        // All three present. Alphabetical would be Monthly, Rolling, Weekly.
+        let mut all = samples(2, "Claude", "Rolling", 80.0, -1.0);
+        all.extend(samples(2, "Claude", "Weekly", 40.0, -1.0));
+        all.extend(samples(2, "Claude", "Monthly", 90.0, -1.0));
+        assert_eq!(
+            TrendChartData::trend_labels(&all, None, NOW - DAY),
+            vec!["Rolling", "Weekly", "Monthly"]
+        );
+    }
+
+    #[test]
+    fn trend_labels_fold_scoped_windows_into_their_canonical_label() {
+        // Claude's Fable is a scoped Weekly: not its own option, and not a
+        // second "Weekly" either.
+        let all = samples(2, "Claude", "Fable", 40.0, -1.0);
+        assert_eq!(
+            TrendChartData::trend_labels(&all, None, NOW - DAY),
+            vec!["Weekly"]
+        );
+    }
+
+    #[test]
+    fn trend_labels_are_scoped_to_the_provider_filter() {
+        let mut all = samples(2, "Claude", "Rolling", 80.0, -1.0);
+        all.extend(samples(2, "Codex", "Monthly", 50.0, -1.0));
+        assert_eq!(
+            TrendChartData::trend_labels(&all, Some("Claude"), NOW - DAY),
+            vec!["Rolling"],
+            "a window only the filtered-out provider has is not offered"
+        );
+        assert_eq!(
+            TrendChartData::trend_labels(&all, Some("Codex"), NOW - DAY),
+            vec!["Monthly"]
+        );
+    }
+
+    #[test]
+    fn trend_labels_respect_the_range_cutoff() {
+        let mut all = samples(2, "Claude", "Rolling", 80.0, -1.0);
+        // Ten days old, so outside a 7-day range. Built by hand rather than via
+        // `samples`, whose step argument moves the *remaining* value, not the date.
+        all.push(RemainingSample {
+            provider: "Claude".to_string(),
+            label: "Monthly".to_string(),
+            date: NOW - 10 * DAY,
+            remaining: 90.0,
+        });
+        assert_eq!(
+            TrendChartData::trend_labels(&all, None, NOW - 7 * DAY),
+            vec!["Rolling"],
+            "a window whose only samples predate the range is not offered"
+        );
+        assert_eq!(
+            TrendChartData::trend_labels(&all, None, NOW - 30 * DAY),
+            vec!["Rolling", "Monthly"],
+            "the same sample is in range for 30d"
+        );
+    }
+
+    #[test]
+    fn trend_labels_offer_everything_when_there_is_no_history() {
+        // Nothing to plot yet: the Swift build offers the full set, so the
+        // picker is not empty and does not jump when the first sample lands.
+        assert_eq!(
+            TrendChartData::trend_labels(&[], None, NOW - DAY),
+            vec!["Rolling", "Weekly", "Monthly"]
+        );
     }
 
     /// Scoped weekly windows chart on the Weekly graph and are flagged.

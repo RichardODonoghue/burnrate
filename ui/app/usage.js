@@ -322,9 +322,20 @@ function modelColour(model) {
   return deps.modelColours?.[model] ?? "var(--accent)";
 }
 
-/** The Swift `Picker(…).pickerStyle(.segmented)`, as a button group. */
+/**
+ * The Swift `Picker(…).pickerStyle(.segmented)`, as a button group.
+ *
+ * The order comes from the snapshot, which builds it from the preferred sequence
+ * in `TrendChartData::trend_labels` — Rolling, Weekly, Monthly. It is not sorted
+ * here: sorting these labels alphabetically put Monthly first and left the
+ * default selection sitting in the middle of the group.
+ *
+ * Width is `max(options, 3) * 86` per the Swift view, so the control keeps its
+ * size as options come and go rather than reflowing on every poll.
+ */
 function segmented(id, options, selected) {
-  return `<div class="segmented" id="${id}" role="group">${options
+  const width = Math.max(options.length, 3) * 86;
+  return `<div class="segmented" id="${id}" role="group" style="width:${width}px">${options
     .map(
       (option) =>
         `<button type="button" data-value="${E(option)}"${
