@@ -246,8 +246,18 @@ impl Poller {
         let mut notifications = self.notifier.evaluate(&usage, settings, now, poll_interval);
 
         // --- models and cost --------------------------------------------------
-        let model_totals = ModelUsageAggregator::totals(&batches);
-        let fresh_daily = ModelUsageAggregator::daily(&batches, 30, now, &local_offset_at);
+        // The pricing table is needed to estimate cost for samples whose source
+        // reports none — Claude's logs never do — so it is held across all three
+        // aggregations and released before `self.model_history` is written.
+        let (model_totals, fresh_daily, spend_today) = {
+            let mut pricing = self.pricing.lock().expect("pricing lock");
+            let totals = ModelUsageAggregator::totals(&batches, &mut pricing);
+            let daily =
+                ModelUsageAggregator::daily(&batches, 30, now, &local_offset_at, &mut pricing);
+            let spend =
+                spend_since_start_of_day(&batches, now, local_utc_offset_seconds(), &mut pricing);
+            (totals, daily, spend)
+        };
         // Merged with the persisted history, so a day whose logs have rotated
         // away is still charted. Fresh wins wherever both have the day.
         self.model_history = crate::migration::prune_daily(
@@ -255,7 +265,6 @@ impl Poller {
             now,
         );
         let model_daily = self.model_history.clone();
-        let spend_today = spend_since_start_of_day(&batches, now, local_utc_offset_seconds());
         notifications.extend(self.notifier.evaluate_cost(
             start_of_day_local(now, local_utc_offset_seconds()),
             &spend_today,
@@ -474,6 +483,7 @@ fn spend_since_start_of_day(
     batches: &[(String, Vec<crate::model::UsageSample>)],
     now: i64,
     offset: i64,
+    pricing: &mut crate::usage::PricingTable,
 ) -> HashMap<String, f64> {
     let start = start_of_day_local(now, offset);
     let mut spend: HashMap<String, f64> = HashMap::new();
@@ -481,7 +491,9 @@ fn spend_since_start_of_day(
         let total: f64 = samples
             .iter()
             .filter(|sample| sample.timestamp >= start)
-            .map(|sample| sample.cost.unwrap_or(0.0))
+            // Estimated where the source reports none, as the spend figure in
+            // every Swift app does.
+            .map(|sample| crate::usage::sample_cost(sample, pricing))
             .sum();
         if total > 0.0 {
             spend.insert(provider.clone(), total);
@@ -591,7 +603,12 @@ mod tests {
                     .maybe_cost(Some(4.5)),
             ],
         )];
-        let spend = spend_since_start_of_day(&batches, now_unix(), 0);
+        let spend = spend_since_start_of_day(
+            &batches,
+            now_unix(),
+            0,
+            &mut crate::usage::PricingTable::default(),
+        );
         assert_eq!(spend.get("OpenCode Go"), Some(&4.5));
     }
 

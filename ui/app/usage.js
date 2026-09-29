@@ -198,13 +198,31 @@ function trendSvg(dashboard, width) {
     )
     .join("");
 
-  const xMarks = dashboard.xTicks
-    .map((tick) => {
-      const x = map.x(tick.at).toFixed(1);
-      return `<line class="grid" x1="${x}" y1="${pad.top}" x2="${x}" y2="${map.bottom.toFixed(1)}"/>
-              <text class="tick mid" x="${x}" y="${(height - 7).toFixed(1)}">${E(tick.label)}</text>`;
-    })
-    .join("");
+  // X gridlines for every tick, but only the labels that fit.
+  //
+  // Swift Charts thins axis labels that would collide; drawing all of them is
+  // what makes this axis a smear — a 30-day span produces 60 ticks (midnight and
+  // noon per day), which is one label every ~12px in a 700px plot. The lines
+  // stay, so the reader still sees the intervals.
+  const xMarks = (() => {
+    let lastRight = -Infinity;
+    return dashboard.xTicks
+      .map((tick) => {
+        const x = map.x(tick.at);
+        const line = `<line class="grid" x1="${x.toFixed(1)}" y1="${pad.top}"
+          x2="${x.toFixed(1)}" y2="${map.bottom.toFixed(1)}"/>`;
+        const label = E(tick.label);
+        // 6.2px per character at this font size, plus breathing room, and the
+        // first and last labels must not run past the plot.
+        const half = (label.length * 6.2) / 2;
+        if (x - half < map.left || x + half > map.right) return line;
+        if (x - half < lastRight + 8) return line;
+        lastRight = x + half;
+        return `${line}<text class="tick mid" x="${x.toFixed(1)}"
+          y="${(height - 7).toFixed(1)}">${label}</text>`;
+      })
+      .join("");
+  })();
 
   const lines = dashboard.series
     .map((line) => {
@@ -540,7 +558,7 @@ function renderUsage(snapshot) {
       ${trendLegend(dashboard)}`
     ),
     card(
-      `Daily usage by model (${dashboard.metric})`,
+      `Daily usage by model (${dashboard.metricLabel})`,
       `<div class="chart-frame" id="daily-frame">
         <div class="plot" id="daily-plot"></div>
         <div class="tooltip" id="daily-tip" hidden></div>
@@ -621,13 +639,13 @@ function wireUsage(snapshot) {
         })
         .filter(Boolean);
       if (!rows.length) {
-        tip.hidden = true;
+        trend.tip.hidden = true;
         return;
       }
       const stamp = rows.reduce((best, row) =>
         Math.abs(row.at - at) < Math.abs(best.at - at) ? row : best
       ).at;
-      tip.innerHTML =
+      trend.tip.innerHTML =
         `<div class="tip-head">${E(
           new Date(stamp * 1000).toLocaleString(undefined, {
             weekday: "short",
@@ -645,11 +663,11 @@ function wireUsage(snapshot) {
               )}</span><span class="value">${Math.round(row.remaining)}%</span></div>`
           )
           .join("");
-      tip.hidden = false;
+      trend.tip.hidden = false;
       const x = (rows.reduce((best, row) =>
         Math.abs(row.at - at) < Math.abs(best.at - at) ? row : best
       ).at - xLow) / (xHigh - xLow);
-      tip.style.left = `${x * box.width}px`;
+      trend.tip.style.left = `${x * box.width}px`;
       if (rule && svg) {
         rule.setAttribute("x1", String(x * box.width));
         rule.setAttribute("x2", String(x * box.width));
@@ -657,7 +675,7 @@ function wireUsage(snapshot) {
       }
     });
     trend.plot.addEventListener("mouseleave", () => {
-      tip.hidden = true;
+      trend.tip.hidden = true;
       rule?.setAttribute("visibility", "hidden");
     });
   }
