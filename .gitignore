@@ -7,3 +7,9 @@ build/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Rust build output, if the Tauri rewrite (branch: rewrite/tauri) has been built
+# in this working tree. On main this is belt-and-braces: without it a stray
+# `git add -A` tries to commit a 300 MB target/ and the push is rejected.
+/target/
+/src-tauri/target/
