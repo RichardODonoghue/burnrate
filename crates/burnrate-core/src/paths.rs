@@ -233,6 +233,12 @@ impl Default for SqliteReader {
 mod tests {
     use super::*;
 
+    /// `cargo test` runs tests in parallel threads, and the process environment
+    /// is process-global. Every test that touches an env var takes this lock
+    /// first — without it, `XDG_DATA_HOME` set by one test leaks into another
+    /// and the failure looks like a logic bug rather than a race.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn temp_home(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("burnrate-paths-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -254,28 +260,53 @@ mod tests {
         );
     }
 
-    /// macOS keeps OpenCode's data in ~/.local/share regardless of XDG vars.
+    /// macOS keeps OpenCode's data in ~/.local/share regardless of XDG vars;
+    /// elsewhere the XDG dir wins. Asserted per platform, because the whole
+    /// point of the test is the difference between them.
     #[test]
     fn macos_data_directory_ignores_xdg() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let home = temp_home("macos");
-        let paths = AppPaths::with_layout(&home, home.join("Library/Application Support"));
-        assert_eq!(paths.data_directory(), home.join(".local/share"));
-        assert_eq!(paths.config_directory(), home.join(".config"));
-    }
-
-    #[test]
-    fn xdg_data_home_is_honoured_on_unix() {
-        let home = temp_home("xdg");
-        // serialised: mutates process env
+        // Set it anyway: on macOS it must be ignored, elsewhere it must win.
         std::env::set_var("XDG_DATA_HOME", "/tmp/xdg-data-test");
+        let paths = AppPaths::with_layout(&home, home.join("Library/Application Support"));
         let expected = if cfg!(target_os = "macos") {
             home.join(".local/share")
         } else {
             PathBuf::from("/tmp/xdg-data-test")
         };
-        let paths = AppPaths::with_layout(&home, home.join(".config"));
         assert_eq!(paths.data_directory(), expected);
         std::env::remove_var("XDG_DATA_HOME");
+    }
+
+    #[test]
+    fn data_directory_falls_back_to_local_share() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::env::remove_var("XDG_DATA_HOME");
+        let home = temp_home("fallback");
+        let paths = AppPaths::with_layout(&home, home.join("config"));
+        assert_eq!(paths.data_directory(), home.join(".local/share"));
+    }
+
+    #[test]
+    fn config_directory_honours_xdg() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let home = temp_home("xdg-config");
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-config-test");
+        let paths = AppPaths::with_layout(&home, home.join("config"));
+        let expected = if cfg!(target_os = "macos") {
+            home.join(".config")
+        } else {
+            PathBuf::from("/tmp/xdg-config-test")
+        };
+        assert_eq!(paths.config_directory(), expected);
+        std::env::remove_var("XDG_CONFIG_HOME");
     }
 
     /// The Keychain reader misses cleanly when `security` is absent, rather
