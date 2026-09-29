@@ -5,76 +5,92 @@
 //! aggregation. Ported 1:1 from the Swift `BurnRateCore` target, whose 111 tests
 //! are the parity spec (see `PARITY.md`).
 
+pub mod alerts;
+pub mod dial;
+pub mod formatting;
+pub mod icon;
+pub mod menu;
+pub mod model;
+
 /// Crate version, surfaced in the UI so the app can report which core it runs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// One quota window (5-hour, weekly, monthly, …) for a single provider.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UsageWindow {
-    /// Display label, e.g. "5-hour", "Weekly", "Monthly".
-    pub label: String,
-    /// Percent *remaining* (0–100), when the provider reports percentages.
-    pub percent_remaining: Option<f64>,
-    /// Percent *used* (0–100), when the provider only reports usage.
-    pub percent_used: Option<f64>,
-    /// When this window resets, if known.
-    pub resets_at: Option<Timestamp>,
-    /// Plan capacity in tokens, for providers that only report local tokens.
-    pub capacity: Option<i64>,
-}
-
-/// Seconds since the Unix epoch. A real date/time type lands with the
-/// reset-relative-formatting port; kept dependency-light for now.
-pub type Timestamp = i64;
-
-impl UsageWindow {
-    /// Remaining percent, deriving it from `used` when necessary.
-    pub fn remaining(&self) -> Option<f64> {
-        self.percent_remaining
-            .or_else(|| self.percent_used.map(|used| 100.0 - used))
-    }
-}
-
-/// Percent remaining as the menu shows it: "42%" or "--" when unknown.
-pub fn format_remaining(window: &UsageWindow) -> String {
-    match window.remaining() {
-        Some(percent) => format!("{:.0}%", percent.clamp(0.0, 100.0)),
-        None => "--".to_string(),
-    }
+/// Fixed token capacities (weighted: cache read ×0.1, write ×1.25) for
+/// local-log providers, keyed "provider|windowLabel". Codex is the only
+/// provider measured from logs; the quota APIs report their own %.
+///
+/// Capacities are predetermined — there is no UI to edit them.
+pub fn plan_capacities_by_provider_window() -> std::collections::HashMap<String, i64> {
+    [
+        ("Codex|Rolling", 12_000_000),
+        ("Codex|Weekly", 120_000_000),
+        ("Codex|Monthly", 400_000_000),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value))
+    .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{TokenUsage, UsageSample, UsageWindow};
+    use std::collections::HashMap;
 
-    fn window(remaining: Option<f64>, used: Option<f64>) -> UsageWindow {
-        UsageWindow {
-            label: "Weekly".into(),
-            percent_remaining: remaining,
-            percent_used: used,
-            resets_at: None,
-            capacity: None,
-        }
+    #[test]
+    fn capacities_are_keyed_provider_pipe_window() {
+        let caps = plan_capacities_by_provider_window();
+        assert_eq!(caps.get("Codex|Rolling"), Some(&12_000_000));
+        assert_eq!(caps.get("Codex|Weekly"), Some(&120_000_000));
+        assert_eq!(caps.get("Codex|Monthly"), Some(&400_000_000));
+        // Only Codex is measured from local logs.
+        assert_eq!(caps.len(), 3);
+        assert!(!caps.keys().any(|key| key.starts_with("Claude")));
+    }
+
+    /// `codexLocalProviderProducesRemainingPercent` — the end-to-end shape a
+    /// local provider produces, which is why the capacities exist.
+    #[test]
+    fn codex_local_provider_produces_remaining_percent() {
+        let now = 1_700_000_000;
+        let samples = vec![UsageSample::new(
+            now - 60,
+            TokenUsage::new(1_000_000, 0, 0, 0),
+        )];
+        let windows = model::UsageComputation::windows(
+            &samples,
+            "Codex",
+            &plan_capacities_by_provider_window(),
+            now,
+        );
+        let rolling = windows.iter().find(|w| w.label == "Rolling").unwrap();
+        let percent = rolling.percent_remaining.expect("capacity configured");
+        // 1M of 12M weighted → ~91.7% remaining.
+        assert!((percent - 91.6).abs() < 0.2, "got {percent}");
     }
 
     #[test]
-    fn uses_remaining_when_present() {
-        assert_eq!(format_remaining(&window(Some(42.4), None)), "42%");
+    fn providers_without_capacities_report_tokens_only() {
+        let now = 1_700_000_000;
+        let samples = vec![UsageSample::new(now - 60, TokenUsage::new(1_000, 0, 0, 0))];
+        let windows = model::UsageComputation::windows(&samples, "Claude", &HashMap::new(), now);
+        assert!(windows.iter().all(|w| w.percent_remaining.is_none()));
+    }
+
+    /// The window id is "provider-label" so history can be keyed per window.
+    #[test]
+    fn window_ids_are_provider_scoped() {
+        let now = 1_700_000_000;
+        let windows = model::UsageComputation::windows(&[], "Codex", &HashMap::new(), now);
+        assert_eq!(windows[0].id, "Codex-Rolling");
+        assert_eq!(windows[1].id, "Codex-Weekly");
+        assert_eq!(windows[2].id, "Codex-Monthly");
     }
 
     #[test]
-    fn derives_remaining_from_used() {
-        assert_eq!(format_remaining(&window(None, Some(15.0))), "85%");
-    }
-
-    #[test]
-    fn unknown_percent_shows_dashes() {
-        assert_eq!(format_remaining(&window(None, None)), "--");
-    }
-
-    #[test]
-    fn clamps_out_of_range_values() {
-        assert_eq!(format_remaining(&window(Some(-3.0), None)), "0%");
-        assert_eq!(format_remaining(&window(Some(140.0), None)), "100%");
+    fn usage_window_defaults_to_no_id_until_set() {
+        let window = UsageWindow::new("Rolling", 10, Some(50.0), None);
+        assert_eq!(window.label, "Rolling");
+        assert_eq!(window.tokens_used, 10);
     }
 }

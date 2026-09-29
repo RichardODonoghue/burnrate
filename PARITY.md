@@ -5,32 +5,33 @@ one Swift `@Test`; the Rust side gets a `#[test]` with the same name and the
 same behaviour. Port faithfully — if a test looks wrong, fix it in a separate
 change after parity, never while porting.
 
-Status: **0 / 111 ported.** `crates/burnrate-core` currently holds only
-foundational tests (`format_remaining` percent formatting); everything below is
-still to do.
+Status: **36 / 112 ported.** `crates/burnrate-core` currently covers the usage
+model, formatting, the icon spec + G2 mark geometry, the tray menu models and the
+milestone/burn evaluators. Parsers, quota providers, chart series, per-model
+aggregation and pricing are still to do.
 
 ## BurnRateEvaluator (6)
 
-- [ ] `firesOnFastDrop`
-- [ ] `noFireOnSlowBurn`
-- [ ] `ignoresHistoryOlderThanWindow`
-- [ ] `noFireWithTooLittleHistory`
-- [ ] `noFireWhenRemainingIncreases`
-- [ ] `emptyHistoryNeverFires`
+- [x] `firesOnFastDrop`
+- [x] `noFireOnSlowBurn`
+- [x] `ignoresHistoryOlderThanWindow`
+- [x] `noFireWithTooLittleHistory`
+- [x] `noFireWhenRemainingIncreases`
+- [x] `emptyHistoryNeverFires`
 
 ## MilestoneEvaluator (11)
 
-- [ ] `gridForStep20`
-- [ ] `gridForStep10`
-- [ ] `crossesDownPastLevel`
-- [ ] `crossesOnExactLanding`
-- [ ] `noCrossWhenStillAbove`
+- [x] `gridForStep20`
+- [x] `gridForStep10`
+- [x] `crossesDownPastLevel`
+- [x] `crossesOnExactLanding`
+- [x] `noCrossWhenStillAbove`
 - [ ] `noRepeatNotificationWhileBelowLevel`
 - [ ] `bigDropReportsHighestLevel`
-- [ ] `noFireOnFirstObservation`
-- [ ] `noCrossWhenRecoveringAboveLevel`
+- [x] `noFireOnFirstObservation`
+- [x] `noCrossWhenRecoveringAboveLevel`
 - [ ] `legacyThresholdDecodesToStep`
-- [ ] `duplicatesCollapseToOneRuleKeepingSmallestStep`
+- [x] `duplicatesCollapseToOneRuleKeepingSmallestStep`
 
 ## MilestoneNotifier (2)
 
@@ -46,8 +47,8 @@ still to do.
 - [ ] `displayablePredicate`
 - [ ] `sameModelOnDifferentSourcesStaysSeparate`
 - [ ] `tagLabelsReadAsServices`
-- [ ] `reasoningTokensCountTowardTotals`
-- [ ] `legacyTokenUsageDecodesWithoutReasoning`
+- [x] `reasoningTokensCountTowardTotals`
+- [x] `legacyTokenUsageDecodesWithoutReasoning`
 - [ ] `totalsFromDailyMergesAcrossDays`
 - [ ] `totalsFromDailyKeepsSeparateModels`
 
@@ -80,21 +81,21 @@ still to do.
 
 ## StatusIcon (4)
 
-- [ ] `needleAngleRestPoseAndExtremes`
-- [ ] `tintHitsTheSeverityStops`
-- [ ] `tintInterpolatesBetweenStops`
-- [ ] `tintClampsOutOfRange`
+- [x] `needleAngleRestPoseAndExtremes`
+- [x] `tintHitsTheSeverityStops`
+- [x] `tintInterpolatesBetweenStops`
+- [x] `tintClampsOutOfRange`
 
 ## StatusMenu (8)
 
-- [ ] `mainMenuListsProvidersWindowsAndActions`
-- [ ] `chartsRowIsOptIn`
-- [ ] `availableUpdateReplacesCheckAndDisablesWhileBusy`
-- [ ] `missingPercentShowsDash`
-- [ ] `widgetTitlePrefersMonthlyThenFirstWindow`
-- [ ] `widgetMenuEndsWithRemoveAction`
-- [ ] `worstRollingRemainingIsMinimumAcrossProviders`
-- [ ] `relativeTimeBuckets`
+- [x] `mainMenuListsProvidersWindowsAndActions`
+- [x] `chartsRowIsOptIn`
+- [x] `availableUpdateReplacesCheckAndDisablesWhileBusy`
+- [x] `missingPercentShowsDash`
+- [x] `widgetTitlePrefersMonthlyThenFirstWindow`
+- [x] `widgetMenuEndsWithRemoveAction`
+- [x] `worstRollingRemainingIsMinimumAcrossProviders`
+- [x] `relativeTimeBuckets`
 
 ## TrendSeries (20)
 
@@ -136,13 +137,13 @@ still to do.
 
 ## UsageComputation (7)
 
-- [ ] `sumsOnlySamplesInsideWindow`
-- [ ] `weightedTokensDiscountCacheReads`
-- [ ] `percentUsesConfiguredCapacity`
-- [ ] `percentNilWithoutCapacity`
-- [ ] `codexRollingCapacityProducesPercent`
-- [ ] `percentClampsAtZero`
-- [ ] `tokensFormatting`
+- [x] `sumsOnlySamplesInsideWindow`
+- [x] `weightedTokensDiscountCacheReads`
+- [x] `percentUsesConfiguredCapacity`
+- [x] `percentNilWithoutCapacity`
+- [x] `codexRollingCapacityProducesPercent`
+- [x] `percentClampsAtZero`
+- [x] `tokensFormatting`
 
 ## UsageSource (12)
 
@@ -151,13 +152,30 @@ still to do.
 - [ ] `skipsSyntheticClaudeTurns`
 - [ ] `dedupesRepeatedRequestIdsKeepingLast`
 - [ ] `codexTakesLastCumulativeEvent`
-- [ ] `codexLocalProviderProducesRemainingPercent`
+- [x] `codexLocalProviderProducesRemainingPercent`
 - [ ] `parsesOpenCodeMessageJSON`
 - [ ] `parsesOpenCodeSQLiteSnapshot`
 - [ ] `parsesNewOpenCodeSessionMessage`
 - [ ] `parsesNewOpenCodeSQLiteSchema`
 - [ ] `querySamplesUsesInjectedSQLiteRunner`
 - [ ] `fileManagerPathsAppendsAppName`
+
+## Icon and asset parity (macOS is the reference)
+
+- [x] Flame + dial geometry ported (`burnrate_core::dial`), mean channel diff
+      **6.5/255** against the shipped `Resources/AppIcon.icns` — antialiasing only
+- [x] Needle angle + severity ramp ported and **byte-identical** to Swift
+      (`scripts/xcheck_core.sh` diffs the two implementations)
+- [x] Menu-bar image is monochrome (macOS template), dial punched out of the flame
+- [x] Assets generated from that one source: `cargo run -p icon-gen`
+      (PNG set, `.icns`, `.ico`, `tray.rgba`) — no hand-drawn art anywhere
+- [ ] **Decide the app-icon pose.** The committed icns is *stale*: it predates
+      the Sep-2026 severity-ramp refactor and is **amber** (`rgb(255,149,66)`),
+      while `AppIconRenderer.appIconImage` passes `nil`, which the ramp reads as
+      70% and paints **green**. The port defaults to amber (what you can see
+      today) via `dial::SHIPPED_ICON_POSE_REMAINING`; `dial::app_icon_at(_, None)`
+      gives the current Swift renderer's green. One line either way.
+- [ ] App icon radius/border and dial rim match at every size (spot-check 16px)
 
 ## Non-test parity work
 
@@ -169,4 +187,3 @@ still to do.
       honouring XDG; macOS Keychain via `security`)
 - [ ] `rusqlite` (bundled, read-only) replaces shelling out to `/usr/bin/sqlite3`
 - [ ] Provider diagnostics (`lastStatus`) surfaced in the UI
-

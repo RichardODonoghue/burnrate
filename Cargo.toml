@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/burnrate-core", "src-tauri"]
+members = ["crates/burnrate-core", "crates/icon-gen", "src-tauri"]
 
 # Tauri's generated context/config reads these from src-tauri/tauri.conf.json;
 # nothing platform-specific lives in the workspace root.

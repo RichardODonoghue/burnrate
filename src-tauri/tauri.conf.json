@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BurnRate",
+  "productName": "BurnRate Tauri",
   "version": "1.0.0",
-  "identifier": "com.burnrate.desktop",
+  "identifier": "com.burnrate.desktop.tauri",
   "build": {
     "frontendDist": "../ui/app"
   },

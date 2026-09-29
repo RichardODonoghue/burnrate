@@ -1,0 +1,15 @@
+[package]
+name = "icon-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Renders the BurnRate icon set from burnrate-core's geometry"
+
+[[bin]]
+name = "icon-gen"
+path = "src/main.rs"
+
+[dependencies]
+burnrate-core = { path = "../burnrate-core" }
+png = "0.17"
