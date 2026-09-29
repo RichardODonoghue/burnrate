@@ -146,10 +146,12 @@ html, body {
 }
 
 /* Title and its controls share a row, the shape `HStack { Text; Spacer(); Picker }`
-   has in the Swift build. */
+   has in the Swift build. `justify-content: space-between` is the Spacer: the
+   group is pinned to the card's right edge rather than trailing the heading. */
 .card-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
 }
@@ -164,7 +166,8 @@ html, body {
 
 /* A segmented control. The Swift build uses `Picker(…).pickerStyle(.segmented)`,
    which is one connected run of buttons with the selection lit — not a menu, so
-   not a <select> either. */
+   not a <select> either. Fixed at 86px per segment (floor of three, so the
+   control does not resize as options come and go), as in the Swift view. */
 .segmented {
   display: inline-flex;
   flex: none;
@@ -179,7 +182,9 @@ html, body {
   appearance: none;
   border: 0;
   margin: 0;
-  padding: 4px 12px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 10px;
   border-radius: 6px;
   background: transparent;
   color: var(--fg-muted);
