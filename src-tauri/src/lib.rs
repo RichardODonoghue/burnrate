@@ -180,7 +180,14 @@ struct Bar {
 #[serde(rename_all = "camelCase")]
 struct Dashboard {
     range: ChartRange,
+    /// `ChartRange.label()` — "24h", "7d", "30d". The card titles read this, and
+    /// read `rangeLabel` for two releases before the field existed, so both
+    /// charts were titled "Top models (undefined)".
+    range_label: String,
     metric: Metric,
+    /// `Metric.label()` — "Tokens", "Cost". The titles capitalise these, and
+    /// `Metric` itself serialises lowercase, so the chart read "(tokens)".
+    metric_label: String,
     window_label: String,
     provider_filter: Option<String>,
     /// Window labels actually present, for the picker.
@@ -757,7 +764,9 @@ fn snapshot(
         platforms: platform_info(),
         dashboard: Dashboard {
             range,
+            range_label: range.label().to_string(),
             metric,
+            metric_label: metric.label().to_string(),
             window_label,
             provider_filter: provider_filter.clone(),
             window_labels,
@@ -790,12 +799,16 @@ fn snapshot(
 }
 
 /// Recorded so `model_colours` can return the palette for every model on screen.
+///
+/// A process-wide lock, not a `thread_local`: `snapshot` fills this and
+/// `model_colours` reads it, and those are two separate commands with no promise
+/// of landing on the same thread. It works today only because both happen to be
+/// dispatched on the main thread — a change to either would silently strip every
+/// chart of its model colours.
 fn remember_models(entries: &[ModelUsageEntry]) {
-    MODELS_SEEN.with(|models| {
-        let mut models = models.borrow_mut();
-        models.clear();
-        models.extend(entries.iter().map(|entry| entry.display_name()));
-    });
+    let mut models = MODELS_SEEN.lock().expect("models lock");
+    models.clear();
+    models.extend(entries.iter().map(|entry| entry.display_name()));
 }
 
 fn bar_for(entry: &ModelUsageEntry, metric: Metric) -> Bar {
@@ -923,13 +936,11 @@ fn model_colours() -> std::collections::BTreeMap<String, String> {
 
 /// Model names the app has seen, so the palette can be returned for all of them.
 fn state_snapshot_entries() -> Vec<String> {
-    MODELS_SEEN.with(|models| models.borrow().clone())
+    MODELS_SEEN.lock().expect("models lock").clone()
 }
 
-thread_local! {
-    /// Model names seen in the last snapshot, filled in by `snapshot`.
-    static MODELS_SEEN: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
-}
+/// Model names seen in the last snapshot, filled in by `snapshot`.
+static MODELS_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Delivers a test banner and reports whether the platform accepted it. Used to
 /// confirm notification permission, which is otherwise invisible until a real
@@ -1354,6 +1365,88 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::nice_ticks;
+
+    /// snake_case to the camelCase the wire uses.
+    fn camel(name: &str) -> String {
+        let mut out = String::new();
+        let mut upper = false;
+        for character in name.chars() {
+            if character == '_' {
+                upper = true;
+            } else if upper {
+                out.extend(character.to_uppercase());
+                upper = false;
+            } else {
+                out.push(character);
+            }
+        }
+        out
+    }
+
+    /// The frontend reads `dashboard.<field>` by name, and nothing checks that
+    /// the field exists. `rangeLabel` was read for two releases while `Dashboard`
+    /// had no such field, so both charts were titled "Top models (undefined)" —
+    /// and a hand-written test fixture that *did* set `rangeLabel` hid it.
+    ///
+    /// This parses the struct's field list out of this file and every
+    /// `dashboard.<name>` out of the frontend, and fails on anything unmatched.
+    #[test]
+    fn the_frontend_only_reads_dashboard_fields_that_exist() {
+        let source = include_str!("lib.rs");
+        let start = source.find("struct Dashboard {").expect("Dashboard struct");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}").expect("end of struct")];
+        let declared: Vec<String> = body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
+            .filter_map(|line| line.split_once(':').map(|(name, _)| name.trim()))
+            .filter(|name| {
+                !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|character| character.is_ascii_lowercase() || character == '_')
+            })
+            .map(camel)
+            .collect();
+        assert!(
+            declared.len() > 15,
+            "parsed only {} fields, so the parse is wrong: {declared:?}",
+            declared.len()
+        );
+
+        let mut missing: Vec<String> = Vec::new();
+        for (file, source) in [
+            ("usage.js", include_str!("../../ui/app/usage.js")),
+            ("app.js", include_str!("../../ui/app/app.js")),
+        ] {
+            for line in source.lines() {
+                // Comments talk about these names too.
+                let line = line.split("//").next().unwrap_or("");
+                let mut rest = line;
+                while let Some(at) = rest.find("dashboard.") {
+                    rest = &rest[at + "dashboard.".len()..];
+                    let name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric())
+                        .collect();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    if !declared.contains(&name) {
+                        missing.push(format!("{file}: dashboard.{name}"));
+                    }
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "the frontend reads dashboard fields that Dashboard does not send, which \
+             renders as `undefined`: {missing:?}"
+        );
+    }
 
     /// The bug this replaced: a ladder of fixed small steps meant a large span
     /// landed on 500k and produced a gridline every 500k — 7,306 of them on a

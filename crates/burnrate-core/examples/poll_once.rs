@@ -48,7 +48,10 @@ fn main() {
     }
 
     println!("\n=== models (top 8) ===");
-    let totals = ModelUsageAggregator::totals(&result.batches);
+    // The real pricing cache, so the example reports the same estimated costs the
+    // app does for models whose source reports none (Claude's logs never do).
+    let mut pricing = pricing_table();
+    let totals = ModelUsageAggregator::totals(&result.batches, &mut pricing);
     if totals.is_empty() {
         println!("  (none)");
     }
@@ -85,4 +88,17 @@ fn main() {
         println!("    {provider}: {} samples", samples.len());
     }
     println!("\n  notifications raised: {}", result.notifications.len());
+}
+
+/// The cached LiteLLM price table, or an empty one if it has not been fetched.
+fn pricing_table() -> burnrate_core::usage::PricingTable {
+    let path = burnrate_core::paths::AppPaths::detect()
+        .app_directory()
+        .join("pricing.json");
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            burnrate_core::usage::PricingTable::from_litellm_json(&bytes).unwrap_or_default()
+        }
+        Err(_) => burnrate_core::usage::PricingTable::default(),
+    }
 }

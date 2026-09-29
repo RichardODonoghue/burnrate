@@ -95,6 +95,7 @@ impl ModelUsageAggregator {
         days: i64,
         now: i64,
         offset_at: &dyn Fn(i64) -> i64,
+        pricing: &mut PricingTable,
     ) -> Vec<DailyModelUsage> {
         let window_start = now - (days - 1) * 86_400;
         let start = start_of_day(window_start, offset_at(window_start));
@@ -111,7 +112,7 @@ impl ModelUsageAggregator {
                     .or_default()
                     .entry(entry_key(provider, sample))
                     .or_insert_with(|| make_entry(provider, sample));
-                add(sample, entry);
+                add(sample, entry, pricing);
             }
         }
 
@@ -128,7 +129,10 @@ impl ModelUsageAggregator {
     }
 
     /// Flat totals over all provided samples, sorted by tokens.
-    pub fn totals(buckets: &[(String, Vec<UsageSample>)]) -> Vec<ModelUsageEntry> {
+    pub fn totals(
+        buckets: &[(String, Vec<UsageSample>)],
+        pricing: &mut PricingTable,
+    ) -> Vec<ModelUsageEntry> {
         let mut by_key: HashMap<String, ModelUsageEntry> = HashMap::new();
         for (provider, samples) in buckets {
             for sample in samples {
@@ -140,7 +144,7 @@ impl ModelUsageAggregator {
                     .get(&key)
                     .cloned()
                     .unwrap_or_else(|| make_entry(provider, sample));
-                add(sample, &mut entry);
+                add(sample, &mut entry, pricing);
                 by_key.insert(key, entry);
             }
         }
@@ -217,9 +221,11 @@ fn make_entry(provider: &str, sample: &UsageSample) -> ModelUsageEntry {
     }
 }
 
-fn add(sample: &UsageSample, entry: &mut ModelUsageEntry) {
+fn add(sample: &UsageSample, entry: &mut ModelUsageEntry, pricing: &mut PricingTable) {
     entry.tokens = entry.tokens + sample.tokens;
-    entry.cost += sample.cost.unwrap_or(0.0);
+    // Vendor cost when the source reports one, otherwise a list-price estimate —
+    // `ModelUsage.add`'s `sample.cost ?? PricingService.shared.cost(of: sample)`.
+    entry.cost += sample_cost(sample, pricing);
     entry.requests += 1;
 }
 
@@ -251,11 +257,41 @@ impl ModelPricing {
 }
 
 /// Cost of a sample under a pricing entry.
+///
+/// Cache channels are only charged when the table has a rate for them, matching
+/// `PricingService.estimate(model:tokens:)` — which adds them under `if let`.
+/// Falling back to the input rate would silently overcharge every model whose
+/// pricing entry omits them.
 pub fn cost_of(sample: &UsageSample, pricing: &ModelPricing) -> f64 {
-    sample.tokens.input as f64 * pricing.input
-        + sample.tokens.output as f64 * pricing.output
-        + sample.tokens.cache_read as f64 * pricing.cache_read.unwrap_or(pricing.input)
-        + sample.tokens.cache_write as f64 * pricing.cache_write.unwrap_or(pricing.input)
+    let mut cost =
+        sample.tokens.input as f64 * pricing.input + sample.tokens.output as f64 * pricing.output;
+    if let Some(rate) = pricing.cache_read {
+        cost += sample.tokens.cache_read as f64 * rate;
+    }
+    if let Some(rate) = pricing.cache_write {
+        cost += sample.tokens.cache_write as f64 * rate;
+    }
+    cost
+}
+
+/// Cost of a sample: vendor-reported if present, else estimated from the pricing
+/// table, else nothing.
+///
+/// This is `PricingService.cost(of:)`, and it is what puts a figure in the COST
+/// column for Claude. Claude's logs carry no `costUSD`, so without the estimate
+/// every Claude row reads "—" while Swift shows a list-price figure — the
+/// pricing table was loaded, refreshed and never consulted.
+pub fn sample_cost(sample: &UsageSample, pricing: &mut PricingTable) -> f64 {
+    if let Some(vendor) = sample.cost {
+        return vendor;
+    }
+    let Some(model) = sample.model.as_deref() else {
+        return 0.0;
+    };
+    match pricing.lookup(model) {
+        Some(entry) => cost_of(sample, &entry),
+        None => 0.0,
+    }
 }
 
 /// Resolves a model name to a price, memoised: the LiteLLM table is large and
@@ -546,7 +582,8 @@ mod tests {
                 sample(None, "sonnet", 20, 1),
             ],
         )];
-        let daily = ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC);
+        let daily =
+            ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC, &mut PricingTable::default());
         assert_eq!(daily.len(), 2, "two distinct days");
         let today = &daily[1];
         assert_eq!(today.entries.len(), 1, "two samples, same model, same day");
@@ -561,7 +598,7 @@ mod tests {
             "Claude".to_string(),
             vec![UsageSample::new(now(), TokenUsage::new(5, 0, 0, 0))],
         )];
-        let totals = ModelUsageAggregator::totals(&buckets);
+        let totals = ModelUsageAggregator::totals(&buckets, &mut PricingTable::default());
         assert_eq!(totals[0].model, "unknown");
     }
 
@@ -575,7 +612,7 @@ mod tests {
                 sample(None, "opus", 10, 0),
             ],
         )];
-        let totals = ModelUsageAggregator::totals(&buckets);
+        let totals = ModelUsageAggregator::totals(&buckets, &mut PricingTable::default());
         assert_eq!(totals.len(), 1);
         assert_eq!(totals[0].tokens.input, 10);
     }
@@ -590,7 +627,7 @@ mod tests {
                 sample(Some("opencode"), "gpt-5", 200, 0),
             ],
         )];
-        let totals = ModelUsageAggregator::totals(&buckets);
+        let totals = ModelUsageAggregator::totals(&buckets, &mut PricingTable::default());
         assert_eq!(totals.len(), 2);
         let labels: Vec<String> = totals.iter().map(|entry| entry.display_name()).collect();
         assert!(labels.contains(&"gpt-5 · Go".to_string()));
@@ -622,8 +659,9 @@ mod tests {
                 sample(Some("opencode-go"), "opus", 40, 1),
             ],
         )];
-        let flat = ModelUsageAggregator::totals(&buckets);
-        let daily = ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC);
+        let flat = ModelUsageAggregator::totals(&buckets, &mut PricingTable::default());
+        let daily =
+            ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC, &mut PricingTable::default());
         let merged = ModelUsageAggregator::totals_from_daily(&daily);
 
         assert_eq!(flat.len(), merged.len());
@@ -648,7 +686,8 @@ mod tests {
                 UsageSample::new(base + DAY + 60, TokenUsage::new(20, 0, 0, 0)),
             ],
         )];
-        let daily = ModelUsageAggregator::daily(&buckets, 3, now(), &|_| UTC);
+        let daily =
+            ModelUsageAggregator::daily(&buckets, 3, now(), &|_| UTC, &mut PricingTable::default());
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].entries[0].tokens.input, 10);
         assert_eq!(daily[1].entries[0].tokens.input, 20);
@@ -678,6 +717,63 @@ mod tests {
         assert!(
             (cost - (3.0 + 15.0 + 0.3 + 3.75)).abs() < 0.001,
             "got {cost}"
+        );
+    }
+
+    /// Claude's logs carry no `costUSD`, so every Claude row in the breakdown
+    /// table read "—" while Swift showed a list-price figure: the pricing table
+    /// was loaded, refreshed and never consulted.
+    #[test]
+    fn cost_falls_back_to_the_pricing_table() {
+        let mut pricing = PricingTable::new(HashMap::from([(
+            "claude-opus-5".to_string(),
+            ModelPricing::new(15e-6, 75e-6, Some(1.5e-6), Some(18.75e-6)),
+        )]));
+
+        // No vendor cost: estimated from the table.
+        let unpriced = UsageSample::new(0, TokenUsage::new(1_000_000, 0, 0, 0));
+        let unpriced = UsageSample {
+            model: Some("claude-opus-5".to_string()),
+            ..unpriced
+        };
+        assert!((sample_cost(&unpriced, &mut pricing) - 15.0).abs() < 1e-9);
+
+        // A vendor figure wins over the estimate.
+        let vendor = UsageSample {
+            model: Some("claude-opus-5".to_string()),
+            cost: Some(2.5),
+            ..UsageSample::new(0, TokenUsage::new(1_000_000, 0, 0, 0))
+        };
+        assert_eq!(sample_cost(&vendor, &mut pricing), 2.5);
+
+        // A model the table does not know stays at zero rather than guessing.
+        let unknown = UsageSample {
+            model: Some("no-such-model".to_string()),
+            ..UsageSample::new(0, TokenUsage::new(1_000_000, 0, 0, 0))
+        };
+        assert_eq!(sample_cost(&unknown, &mut pricing), 0.0);
+    }
+
+    /// The estimate has to reach the aggregate the table is built from, not just
+    /// the helper.
+    #[test]
+    fn daily_buckets_carry_estimated_cost() {
+        let mut pricing = PricingTable::new(HashMap::from([(
+            "claude-opus-5".to_string(),
+            ModelPricing::new(15e-6, 75e-6, Some(1.5e-6), Some(18.75e-6)),
+        )]));
+        let now = now();
+        let sample = UsageSample {
+            model: Some("claude-opus-5".to_string()),
+            ..UsageSample::new(now, TokenUsage::new(1_000_000, 0, 0, 0))
+        };
+        let buckets = vec![("Claude".to_string(), vec![sample])];
+        let daily = ModelUsageAggregator::daily(&buckets, 7, now, &|_| UTC, &mut pricing);
+        let entry = &daily.last().expect("a bucket").entries[0];
+        assert!(
+            (entry.cost - 15.0).abs() < 1e-9,
+            "estimated cost reached the entry: {}",
+            entry.cost
         );
     }
 
