@@ -525,6 +525,9 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
   font-size: 11px;
   fill: var(--fg);
   font-family: var(--font);
+  /* Anchored at its right edge against the plot. Without this the name starts at
+     the plot's left edge and runs straight over its own bar. */
+  text-anchor: end;
 }
 .chart .rank-value {
   font-size: 10.5px;

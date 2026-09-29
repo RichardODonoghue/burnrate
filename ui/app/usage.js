@@ -212,10 +212,20 @@ function trendSvg(dashboard, width) {
         line.points.map((point) => [map.x(point.x), map.y(point.y)])
       );
       const dash = line.scoped ? ' stroke-dasharray="6 4"' : "";
+      const colour = providerColour(line.provider);
+      const opacity = line.scoped ? 0.55 : 1;
+      // One sample is a moveto and draws nothing at all. A single poll is the
+      // normal state for the first five minutes after launch, and an empty chart
+      // is not what "one reading" should look like.
+      if (points.length === 1) {
+        const [x, y] = points[0];
+        return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5"
+                fill="${colour}" opacity="${opacity}"/>`;
+      }
       return `<path d="${monotonePath(points)}" fill="none"
-              stroke="${providerColour(line.provider)}" stroke-width="2"
+              stroke="${colour}" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round"
-              opacity="${line.scoped ? 0.55 : 1}"${dash}/>`;
+              opacity="${opacity}"${dash}/>`;
     })
     .join("");
 
@@ -331,9 +341,12 @@ function dayHeading(day) {
 function rankingSvg(dashboard, width) {
   const rows = dashboard.ranking;
   const rowHeight = 34;
-  const height = rows.length * rowHeight + 10;
   const tokens = dashboard.metric === "tokens";
-  const pad = { top: 6, right: 64, bottom: tokens ? 24 : 8, left: 148 };
+  const pad = { top: 6, right: tokens ? 76 : 66, bottom: tokens ? 24 : 8, left: 148 };
+  // The height has to include both paddings. It was `rows * rowHeight + 10`,
+  // which ignored them, so with a 24px bottom pad the bars ran straight through
+  // the value axis and its labels — the overlap, not a spacing tweak.
+  const height = pad.top + rows.length * rowHeight + pad.bottom;
   const top = Math.max(...rows.map((row) => row.value), 1);
   const map = projector({
     width,

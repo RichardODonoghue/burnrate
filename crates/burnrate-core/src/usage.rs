@@ -10,12 +10,16 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{TokenUsage, UsageSample};
 
 /// Totals for one model on one provider.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+///
+/// `Deserialize` is derived for the persisted `modelUsageHistory` payload, which
+/// is the same shape the Swift build wrote to `UserDefaults` — see
+/// `crate::migration`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageEntry {
     pub provider: String,
@@ -24,6 +28,7 @@ pub struct ModelUsageEntry {
     pub cost: f64,
     pub requests: i64,
     /// Sub-source tag (OpenCode's providerID: "opencode-go", "opencode", …).
+    #[serde(default)]
     pub source_tag: Option<String>,
 }
 
@@ -60,7 +65,7 @@ impl ModelUsageEntry {
 }
 
 /// One day of per-model usage. `day` is a local start-of-day epoch.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyModelUsage {
     pub day: i64,
@@ -79,13 +84,20 @@ impl ModelUsageAggregator {
 
     /// Buckets samples into per-day per-model totals over the trailing `days`,
     /// merging across providers. `now` is seconds since the Unix epoch.
+    ///
+    /// `offset_at` returns the local UTC offset **in effect at a given instant**,
+    /// rather than one offset for the whole window. A single offset is wrong
+    /// across a daylight-saving change: New Zealand moves between +12 and +13, so
+    /// bucketing a month with today's offset puts the first hour of every
+    /// pre-transition day into the day before.
     pub fn daily(
         buckets: &[(String, Vec<UsageSample>)],
         days: i64,
         now: i64,
-        local_offset_seconds: i64,
+        offset_at: &dyn Fn(i64) -> i64,
     ) -> Vec<DailyModelUsage> {
-        let start = start_of_day(now - (days - 1) * 86_400, local_offset_seconds);
+        let window_start = now - (days - 1) * 86_400;
+        let start = start_of_day(window_start, offset_at(window_start));
         let mut by_day: HashMap<i64, HashMap<String, ModelUsageEntry>> = HashMap::new();
 
         for (provider, samples) in buckets {
@@ -93,7 +105,7 @@ impl ModelUsageAggregator {
                 if sample.timestamp < start || !Self::is_displayable(sample.model.as_deref()) {
                     continue;
                 }
-                let day = start_of_day(sample.timestamp, local_offset_seconds);
+                let day = start_of_day(sample.timestamp, offset_at(sample.timestamp));
                 let entry = by_day
                     .entry(day)
                     .or_default()
@@ -534,7 +546,7 @@ mod tests {
                 sample(None, "sonnet", 20, 1),
             ],
         )];
-        let daily = ModelUsageAggregator::daily(&buckets, 7, now(), UTC);
+        let daily = ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC);
         assert_eq!(daily.len(), 2, "two distinct days");
         let today = &daily[1];
         assert_eq!(today.entries.len(), 1, "two samples, same model, same day");
@@ -611,7 +623,7 @@ mod tests {
             ],
         )];
         let flat = ModelUsageAggregator::totals(&buckets);
-        let daily = ModelUsageAggregator::daily(&buckets, 7, now(), UTC);
+        let daily = ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC);
         let merged = ModelUsageAggregator::totals_from_daily(&daily);
 
         assert_eq!(flat.len(), merged.len());
@@ -636,7 +648,7 @@ mod tests {
                 UsageSample::new(base + DAY + 60, TokenUsage::new(20, 0, 0, 0)),
             ],
         )];
-        let daily = ModelUsageAggregator::daily(&buckets, 3, now(), UTC);
+        let daily = ModelUsageAggregator::daily(&buckets, 3, now(), &|_| UTC);
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].entries[0].tokens.input, 10);
         assert_eq!(daily[1].entries[0].tokens.input, 20);

@@ -77,6 +77,25 @@ impl AppPaths {
         self.app_directory().join("settings.json")
     }
 
+    /// The remaining-% history the trend chart reads.
+    ///
+    /// The Swift build keeps this in `UserDefaults` under `remainingHistory` and
+    /// reloads it on launch; a file next to the settings is the same thing
+    /// without the defaults domain. Without it the chart is empty on every
+    /// launch and only refills over hours, which reads as "the chart is broken".
+    pub fn remaining_history_file(&self) -> PathBuf {
+        self.app_directory().join("remaining-history.json")
+    }
+
+    /// The daily per-model buckets the dashboard charts read.
+    ///
+    /// The Swift build keeps these in `UserDefaults` under `modelUsageHistory`.
+    /// Persisting them means a day whose logs have rotated away is still
+    /// charted, which a live-only parse cannot do.
+    pub fn model_history_file(&self) -> PathBuf {
+        self.app_directory().join("model-history.json")
+    }
+
     /// Creates the app directory, returning it.
     pub fn ensure_app_directory(&self) -> std::io::Result<PathBuf> {
         let dir = self.app_directory();

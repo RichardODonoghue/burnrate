@@ -14,3 +14,6 @@ thiserror = "2"
 png = "0.17"
 ureq = { version = "2", features = ["json"] }
 time = { version = "0.3", features = ["local-offset"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

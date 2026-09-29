@@ -22,6 +22,8 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
+mod swift_import;
+
 use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
 use burnrate_core::charts::{axis_label, metric_value, ChartRange, Metric, TrendChartData};
 use burnrate_core::dial;
@@ -1114,7 +1116,13 @@ fn poll_once(app: &AppHandle<Wry>) {
     let settings = state.settings();
     let result = {
         let mut poller = state.poller.lock().expect("poller lock");
-        poller.poll(&settings)
+        let result = poller.poll(&settings);
+        // Persist the trend history with each poll, as the Swift build does, so
+        // the chart has data immediately on the next launch rather than after
+        // hours of polling.
+        poller.save_history();
+        poller.save_model_history();
+        result
     };
     let notifications = result.notifications.clone();
     let providers = result.usage.len();
@@ -1179,6 +1187,28 @@ pub fn run() {
                 1 + handles.widgets.len()
             );
             app.manage(Mutex::new(handles));
+
+            // Reload the persisted trend history before the first poll, so the
+            // chart has a line on launch instead of only a "collecting" hint.
+            // On a fresh install this is also where the Swift app's history is
+            // imported from `UserDefaults`, once.
+            {
+                let state = handle.state::<Arc<AppState>>();
+                let mut poller = state.poller.lock().expect("poller lock");
+                let now = burnrate_core::poller::now_unix();
+                poller.load_history(now);
+                poller.load_model_history(now);
+                if let Some(summary) =
+                    swift_import::import_swift_history_if_needed(&mut poller, now)
+                {
+                    eprintln!("burnrate: {summary}");
+                }
+                eprintln!(
+                    "burnrate: trend history {} sample(s), {} day(s) of model history",
+                    poller.remaining_history().len(),
+                    poller.model_history_len()
+                );
+            }
 
             // Settings from disk, or defaults; a bad file must not stop launch.
             let paths = AppPaths::detect();

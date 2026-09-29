@@ -20,7 +20,7 @@
 //! Still to port: the daily/ranking chart windows (see `PARITY.md`).
 
 use crate::formatting::TokenFormat;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 /// Trailing time windows the dashboard can show.
@@ -67,7 +67,7 @@ impl ChartRange {
 }
 
 /// One point of vendor-reported remaining-% history.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemainingSample {
     pub provider: String,
