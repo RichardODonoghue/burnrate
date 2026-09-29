@@ -8,7 +8,6 @@
 //! the raw RGBA the Rust runtime hands to Tauri all come from here, so they
 //! cannot drift apart.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use burnrate_core::dial::{self, Canvas};

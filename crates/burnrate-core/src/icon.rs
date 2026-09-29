@@ -39,6 +39,13 @@ impl RgbColor {
     }
 }
 
+/// A colour as raw 0–1 components, the form the ramp mixes in.
+type Components = (f64, f64, f64);
+
+/// One severity ramp stop: the remaining-% threshold and its top/bottom
+/// gradient colours.
+type Stop = (f64, Components, Components);
+
 /// The gradient's top and bottom stops.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tint {
@@ -60,7 +67,7 @@ impl StatusIcon {
     pub fn tint(remaining: Option<f64>) -> Tint {
         let value = Self::clamped(remaining);
         // (threshold, top, bottom)
-        let stops: [(f64, (f64, f64, f64), (f64, f64, f64)); 4] = [
+        let stops: [Stop; 4] = [
             (55.0, rgb_hex(0x8F, 0xE0, 0x7A), rgb_hex(0x33, 0xAE, 0x70)),
             (45.0, rgb_hex(0xFF, 0xC2, 0x4B), rgb_hex(0xFF, 0x7A, 0x3D)),
             (20.0, rgb_hex(0xFF, 0x8A, 0x5C), rgb_hex(0xE6, 0x40, 0x19)),
@@ -102,7 +109,7 @@ impl StatusIcon {
     }
 }
 
-const fn rgb_hex(red: u8, green: u8, blue: u8) -> (f64, f64, f64) {
+const fn rgb_hex(red: u8, green: u8, blue: u8) -> Components {
     (
         red as f64 / 255.0,
         green as f64 / 255.0,

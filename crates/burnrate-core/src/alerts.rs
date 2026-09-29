@@ -45,9 +45,10 @@ impl Milestone {
                 }
             }
         }
-        let mut out: Vec<Milestone> = best.into_values().collect();
-        out.sort_by(|a, b| a.key().cmp(&b.key()));
-        out
+        // Deterministic order so the settings UI and the tests agree.
+        let mut out: Vec<(String, Milestone)> = best.into_iter().collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.into_iter().map(|(_, milestone)| milestone).collect()
     }
 }
 
@@ -127,7 +128,9 @@ impl MilestoneEvaluator {
             levels.push((k * step).round());
             k += 1.0;
         }
-        levels.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        // Descending, as the Swift original sorts: highest level first.
+        levels.sort_by(|a, b| a.partial_cmp(b).expect("grid levels are finite"));
+        levels.reverse();
         levels
     }
 

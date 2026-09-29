@@ -11,8 +11,16 @@
 
 use crate::icon::{RgbColor, StatusIcon};
 
+/// A point in the 72-unit design space.
+type Point = [f64; 2];
+
+/// One cubic Bézier segment of the flame outline, as (to, control1, control2,
+/// from) — the reverse of how a drawing API would take it, so the segments read
+/// in the order the flame is drawn.
+type Segment = (Point, Point, Point, Point);
+
 /// 72-unit design space: the flame outline, as cubic Béziers (FLO).
-const FLAME: [([f64; 2], [f64; 2], [f64; 2], [f64; 2]); 6] = [
+const FLAME: [Segment; 6] = [
     // (to, control1, control2, from)
     ([19.5, 27.0], [33.0, 14.0], [24.0, 20.0], [36.0, 6.0]),
     ([15.5, 41.0], [16.5, 32.0], [15.5, 36.5], [19.5, 27.0]),
@@ -412,6 +420,7 @@ mod tests {
     fn app_icon_tint_tracks_remaining() {
         let healthy = app_icon_at(64, Some(95.0));
         let spent = app_icon_at(64, Some(5.0));
+        assert!(!healthy.pixels.is_empty());
         assert_ne!(healthy.pixels, spent.pixels, "tint must reach the pixels");
         assert_eq!(StatusIcon::tint(Some(95.0)).top.to_hex(), "#8fe07a");
         // The 20% and 0% stops are the same red, so 5% lands on it exactly.
@@ -422,15 +431,18 @@ mod tests {
     /// The flame fill lands inside the outline, not outside it.
     #[test]
     fn flame_fill_is_inside_the_outline() {
+        fn alpha_at(canvas: &Canvas, x: u32, y: u32) -> u8 {
+            let index = ((y * canvas.size + x) * 4) as usize;
+            canvas.pixels[index + 3]
+        }
+
         let mut canvas = Canvas::new(72);
         let red = RgbColor::new(1.0, 0.0, 0.0);
         canvas.fill_shape(in_flame, red, red, (6.0, 60.0));
         // The top-left corner must stay empty: an inverted fill would flood it.
-        let corner = ((1 * 72 + 1) * 4) as usize;
-        assert_eq!(canvas.pixels[corner + 3], 0, "corner must be transparent");
+        assert_eq!(alpha_at(&canvas, 1, 1), 0, "corner must be transparent");
         // The flame body must be painted.
-        let body = ((36 * 72 + 24) * 4) as usize;
-        assert_eq!(canvas.pixels[body + 3], 255, "flame body must be opaque");
+        assert_eq!(alpha_at(&canvas, 24, 36), 255, "flame body must be opaque");
     }
 
     /// The app icon defaults to the pose the shipped icns was drawn at.
