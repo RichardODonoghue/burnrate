@@ -18,11 +18,12 @@ const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 // would take the whole script — and the whole window — down with it.
 window.BurnRate = window.BurnRate || {};
 
+// Titles and order match the Swift build's sidebar, including "Menu Bar Widgets".
 const PANES = [
-  { id: "usage", title: "Usage", glyph: "◐" },
-  { id: "notifications", title: "Notifications", glyph: "◔" },
-  { id: "widgets", title: "Widgets", glyph: "▢" },
-  { id: "about", title: "About", glyph: "ⓘ" },
+  { id: "usage", title: "Usage" },
+  { id: "notifications", title: "Notifications" },
+  { id: "widgets", title: "Menu Bar Widgets" },
+  { id: "about", title: "About" },
 ];
 
 // Mirrors SettingsView.color(for:) in the Swift build.
@@ -39,7 +40,6 @@ let state = {
   pane: "usage",
   snapshot: null,
   providers: [],
-  iconStates: [],
   settingsPath: "",
   busy: false,
   // Chart controls, sent with every snapshot so the payload matches the view.
@@ -56,10 +56,6 @@ const esc = (value) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
   );
 
-const fmtPercent = (value) =>
-  value === null || value === undefined ? "--" : `${Math.round(value)}%`;
-
-/** Severity ramp, mirroring StatusIcon.tint's stops. */
 function severityColour(remaining) {
   if (remaining === null || remaining === undefined) return "var(--fg-muted)";
   if (remaining >= 55) return "rgb(143, 224, 122)";
@@ -153,7 +149,7 @@ function toast(message) {
 }
 
 async function refresh() {
-  const [snapshot, providers, iconStates, settingsPath, modelColours] = await Promise.all([
+  const [snapshot, providers, settingsPath, modelColours] = await Promise.all([
     invoke("snapshot", {
       pane: state.pane,
       range: state.range,
@@ -162,13 +158,11 @@ async function refresh() {
       providerFilter: state.providerFilter,
     }),
     invoke("known_providers"),
-    invoke("icon_states"),
     invoke("settings_file_path"),
     invoke("model_colours"),
   ]);
   state.snapshot = snapshot;
   state.providers = providers;
-  state.iconStates = iconStates;
   state.settingsPath = settingsPath;
   window.BurnRate.configure({
     providerColours: PROVIDER_COLOURS,
@@ -204,6 +198,27 @@ async function mutate(command, args, message) {
 
 // ---------- rendering ----------
 
+/**
+ * Sidebar icons, drawn rather than typed.
+ *
+ * These were Unicode glyphs ("◐", "▢") which depend on the font having them —
+ * the Widgets item rendered with no icon at all. These mirror the SF Symbols the
+ * Swift build uses: `chart.bar.doc.horizontal`, `bell.badge.fill`,
+ * `menubar.dock.rectangle`, `info.circle`.
+ */
+const PANE_ICONS = {
+  usage: `<path d="M3 13h2v4H3zM7 9h2v8H7zM11 6h2v11h-2z"/><path d="M15.5 12.5h3.2v3.2h-3.2z"/>`,
+  notifications: `<path d="M9 3a4.6 4.6 0 0 0-4.6 4.6c0 3.3-1.4 4.3-1.4 4.3h12s-1.4-1-1.4-4.3A4.6 4.6 0 0 0 9 3z"/><path d="M7.6 14.2a1.5 1.5 0 0 0 2.8 0z"/><circle cx="13.6" cy="4.4" r="2.4"/>`,
+  widgets: `<rect x="1.6" y="3.4" width="14.8" height="3.6" rx="1.1"/><path d="M3.4 7.6h3.1v5.9H3.4zM7.6 7.6h3.1v5.9H7.6zM11.8 7.6h3.1v5.9h-3.1z"/>`,
+  about: `<circle cx="9" cy="9" r="6.6"/><path d="M9 8.1v4.2"/><circle cx="9" cy="5.9" r="0.9"/>`,
+};
+
+function paneIcon(id) {
+  return `<svg class="glyph" viewBox="0 0 18 18" aria-hidden="true" fill="currentColor">${
+    PANE_ICONS[id] ?? ""
+  }</svg>`;
+}
+
 function renderSidebar() {
   const list = el("pane-list");
   const settings = state.snapshot?.settings;
@@ -217,7 +232,7 @@ function renderSidebar() {
   list.innerHTML = PANES.map((pane) => {
     const count = counts[pane.id];
     return `<li><button data-pane="${pane.id}" aria-current="${pane.id === state.pane}">
-      <span class="glyph">${pane.glyph}</span>
+      ${paneIcon(pane.id)}
       <span>${pane.title}</span>
       ${count === null ? "" : `<span class="count">${count}</span>`}
     </button></li>`;
@@ -244,6 +259,10 @@ function render() {
     content.innerHTML = `<div class="empty">Loading…</div>`;
     return;
   }
+  // `refresh` runs every five seconds and re-renders by replacing innerHTML,
+  // which resets the scroll container to the top — so scrolling down bounced back
+  // within a second or two. The offset is captured and put back.
+  const scrollTop = content.scrollTop;
   // The Swift toolbar: heading left, then provider popup, then two segmented
   // pickers, then a refresh icon button. The picker labels ("Provider", "Metric",
   // "Range") are not rendered — a segmented macOS picker shows only its
@@ -297,6 +316,12 @@ function render() {
   }
   // The Usage pane is the only one with a toolbar above it, as in the Swift build.
   content.innerHTML = (state.pane === "usage" ? toolbar : "") + renderer(state.snapshot);
+  // Restored after the new markup is in place, and clamped in case the new
+  // content is shorter than the old.
+  content.scrollTop = Math.max(
+    0,
+    Math.min(scrollTop, content.scrollHeight - content.clientHeight)
+  );
   wireContent();
 }
 
@@ -384,7 +409,7 @@ function renderNotifications() {
 
     <div class="card">
       <h2>Daily spend</h2>
-      ${costs || `<p class="hint">No spend caps. Only OpenCode reports cost today.</p>`}
+      ${costs || `<p class="hint">No spend caps. Claude's cost is a list-price estimate; OpenCode's is reported.</p>`}
       <div class="row">
         <select id="co-provider">${providers
           .map((p) => `<option>${esc(p)}</option>`)
@@ -430,46 +455,11 @@ function renderWidgets() {
       <h2>Per-plan items</h2>
       ${rows || `<p class="hint">No providers known yet.</p>`}
     </div>
-    <div class="card">
-      <h2>Charts row</h2>
-      <label class="switch">
-        <input type="checkbox" id="includes-charts" ${
-          settings.includesCharts ? "checked" : ""
-        } />
-        <span>Show “Charts…” in the tray menu</span>
-      </label>
-      <p class="hint">Off by default on macOS, where this window is the dashboard
-      itself. Linux and Windows default it on.</p>
-    </div>`;
-}
-
-/** The G2 mark at each severity stop, so the ramp is inspectable, not implied. */
-function iconStrip() {
-  return state.iconStates
-    .map((entry) => {
-      const angle = entry.needleDegrees;
-      return `<div class="icon-swatch">
-        <div class="plate">
-          <svg viewBox="0 0 72 72" aria-hidden="true">
-            <path d="M36 6 C33 14 24 20 19.5 27 C16.5 32 15.5 36.5 15.5 41
-                     C15.5 52 24.5 60 36 60 C47.5 60 56.5 52 56.5 41
-                     C56.5 36.5 55.5 32 52.5 27 C48 20 39 14 36 6 Z"
-                  fill="${entry.tint}"/>
-            <circle cx="36" cy="42" r="10.5" fill="#200a02"/>
-            <line x1="36" y1="46" x2="${36 + 22 * Math.sin((angle * Math.PI) / 180)}"
-                  y2="${46 - 22 * Math.cos((angle * Math.PI) / 180)}"
-                  stroke="#fff6ea" stroke-width="2.6" stroke-linecap="round"/>
-            <circle cx="36" cy="46" r="2.2" fill="#fff6ea"/>
-          </svg>
-        </div>
-        <div class="cap">${entry.remaining}%</div>
-      </div>`;
-    })
-    .join("");
+`;
 }
 
 function renderAbout() {
-  const { appVersion, coreVersion, platforms, remaining } = state.snapshot;
+  const { appVersion, coreVersion, platforms } = state.snapshot;
   const deps = platforms.runtimeDependencies ?? [];
   return `<h1>About</h1>
     <p class="sub">BurnRate — AI plan usage in the menu bar.</p>
@@ -485,9 +475,6 @@ function renderAbout() {
       <div class="row"><span class="grow label">Platform</span><span class="value">${esc(
         platforms.os
       )}</span></div>
-      <div class="row"><span class="grow label">Icon severity</span><span class="value">${fmtPercent(
-        remaining
-      )} remaining</span></div>
       ${
         deps.length
           ? `<div class="row"><span class="grow label">Runtime deps</span><span class="value">${deps
@@ -508,14 +495,7 @@ function renderAbout() {
       <p class="hint">Written on every change. A Swift install's settings migrate on
       first read.</p>
     </div>
-
-    <div class="card">
-      <h2>Icon severity ramp</h2>
-      <div class="icon-strip">${iconStrip()}</div>
-      <p class="hint">Needle angle and flame tint both track remaining percent. The
-      app icon ships at the 45% pose, which is the amber in the shipped
-      <code>AppIcon.icns</code>.</p>
-    </div>`;
+`;
 }
 
 // ---------- event wiring ----------
@@ -699,14 +679,6 @@ function wireContent() {
     mutate("toggle_widget", { provider }, "Widget updated");
   });
 
-  const charts = el("includes-charts");
-  if (charts) {
-    charts.addEventListener("change", async () => {
-      const settings = state.snapshot.settings;
-      settings.includesCharts = charts.checked;
-      await mutate("save_settings", { settings }, "Tray menu updated");
-    });
-  }
 }
 
 // Chart layout and tooltips live in usage.js, next to the markup that produces

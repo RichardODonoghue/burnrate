@@ -296,6 +296,17 @@ impl Poller {
         self.model_history.len()
     }
 
+    /// How many prices the table holds, and how many models it could not price.
+    ///
+    /// Surfaced because an empty table is silent: every Claude row falls back to
+    /// a list-price estimate, so with no table those rows read "—" while
+    /// vendor-reported costs (OpenCode) still appear — which looks like "Claude
+    /// has no cost" rather than "the price table did not load".
+    pub fn pricing_state(&self) -> (usize, Vec<String>) {
+        let table = self.pricing.lock().expect("pricing lock");
+        (table.len(), table.unresolved().to_vec())
+    }
+
     /// Reloads the persisted trend history, dropping anything past retention.
     ///
     /// Called at startup. The Swift build does the same thing from

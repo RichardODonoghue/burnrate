@@ -89,6 +89,34 @@ function textWidth(text) {
   return text.length * 6.2;
 }
 
+/**
+ * Places a tooltip inside its chart frame.
+ *
+ * `left` was set straight from the pointer, so a tooltip near the right edge
+ * rendered past the card and over whatever was beside it. This flips the tooltip
+ * to the other side of its anchor when it would overflow, then clamps — a flip
+ * alone is not enough at the very edges, where neither side fits.
+ */
+function placeTooltip(tip, frame, anchorX, anchorY) {
+  const frameWidth = frame.clientWidth || 0;
+  const frameHeight = frame.clientHeight || 0;
+  const tipWidth = tip.offsetWidth || 0;
+  const tipHeight = tip.offsetHeight || 0;
+  const gap = 10;
+
+  let left = anchorX + gap;
+  if (left + tipWidth > frameWidth) {
+    left = anchorX - gap - tipWidth;
+  }
+  left = Math.max(0, Math.min(left, Math.max(0, frameWidth - tipWidth)));
+
+  let top = anchorY - tipHeight / 2;
+  top = Math.max(0, Math.min(top, Math.max(0, frameHeight - tipHeight)));
+
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
+}
+
 /** Middle truncation, as the Swift legend's `.truncationMode(.middle)`. */
 function middleTruncate(text, limit) {
   if (text.length <= limit) return text;
@@ -541,7 +569,15 @@ function breakdownTable(dashboard) {
       </div>`
     )
     .join("");
-  return `<div class="table"><div class="tr head">${head}</div>${rows}</div>`;
+  // A dash in the COST column means "no list price for this model", which is
+  // worth saying out loud: the column is otherwise a silent row of dashes.
+  const unpriced = dashboard.unpricedModels ?? [];
+  const note = unpriced.length
+    ? `<p class="hint">No list price for ${unpriced
+        .map((model) => E(model))
+        .join(", ")} — their cost shows as “—”.</p>`
+    : "";
+  return `<div class="table"><div class="tr head">${head}</div>${rows}</div>${note}`;
 }
 
 // ------------------------------------------------------------------ the pane
@@ -692,7 +728,7 @@ function wireUsage(snapshot) {
       const x = (rows.reduce((best, row) =>
         Math.abs(row.at - at) < Math.abs(best.at - at) ? row : best
       ).at - xLow) / (xHigh - xLow);
-      trend.tip.style.left = `${x * box.width}px`;
+      placeTooltip(trend.tip, trend.plot, x * box.width, box.height / 2);
       if (rule && svg) {
         rule.setAttribute("x1", String(x * box.width));
         rule.setAttribute("x2", String(x * box.width));
@@ -738,9 +774,12 @@ function wireUsage(snapshot) {
           day.partial ? " · in progress" : ""
         }</div>${rows.join("")}${total}`;
       daily.tip.hidden = false;
-      const ratio = (Number(group.dataset.x) + Number(group.dataset.slot) / 2) /
-        (daily.plot.clientWidth || 1);
-      daily.tip.style.left = `${ratio * (daily.plot.clientWidth || 0)}px`;
+      placeTooltip(
+        daily.tip,
+        daily.plot,
+        Number(group.dataset.x) + Number(group.dataset.slot) / 2,
+        (daily.plot.clientHeight || 0) / 2
+      );
     });
     daily.plot.addEventListener("mouseleave", () => {
       daily.tip.hidden = true;
@@ -780,8 +819,12 @@ function wireUsage(snapshot) {
          }</span></div>
          ${reasoning}`;
       ranking.tip.hidden = false;
-      ranking.tip.style.left = `${ranking.plot.clientWidth}px`;
-      ranking.tip.style.top = `${group.dataset.y}px`;
+      placeTooltip(
+        ranking.tip,
+        ranking.plot,
+        ranking.plot.clientWidth || 0,
+        Number(group.dataset.y)
+      );
     });
     ranking.plot.addEventListener("mouseleave", () => {
       ranking.tip.hidden = true;
