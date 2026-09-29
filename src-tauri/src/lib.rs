@@ -28,7 +28,6 @@ use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
 use burnrate_core::charts::{axis_label, metric_value, ChartRange, Metric, TrendChartData};
 use burnrate_core::dial;
 use burnrate_core::formatting::TokenFormat;
-use burnrate_core::icon::StatusIcon;
 use burnrate_core::menu::{StatusMenuAction, StatusMenuBuilder, StatusMenuEntry, StatusMenuModel};
 use burnrate_core::model::ProviderUsage;
 use burnrate_core::paths::AppPaths;
@@ -230,6 +229,10 @@ struct Dashboard {
     ranking_ticks: Vec<f64>,
     ranking_tick_labels: Vec<String>,
     table: Vec<Bar>,
+    /// Models with no entry in the LiteLLM price table. Their COST cell reads
+    /// "—" because the figure is genuinely unknown, and saying so is better than
+    /// a confident zero — or than a silently empty column.
+    unpriced_models: Vec<String>,
 }
 
 /// A labelled figure for the snapshot cards.
@@ -744,6 +747,16 @@ fn snapshot(
     let requests_today: i64 = today_entries.iter().map(|entry| entry.requests).sum();
     let cost_today: f64 = today_entries.iter().map(|entry| entry.cost).sum();
 
+    // Models the price table could not resolve, so the breakdown can say why a
+    // cost is missing instead of leaving a column of dashes unexplained.
+    //
+    // Reuses the poller guard opened at the top of this function. Taking the lock
+    // again here is a self-deadlock — `std::sync::Mutex` is not reentrant, and
+    // `snapshot` runs on the main thread, so the whole app hangs rather than just
+    // this command. The Linux tray smoke test caught it: with the main thread
+    // blocked, the D-Bus property call stopped answering.
+    let unpriced_models: Vec<String> = poller.pricing_state().1;
+
     let provider_names: Vec<String> = {
         let mut names: Vec<String> = totals.iter().map(|entry| entry.provider.clone()).collect();
         names.sort();
@@ -790,6 +803,7 @@ fn snapshot(
             ranking_ticks,
             ranking_tick_labels,
             table,
+            unpriced_models,
         },
         spend_today: last
             .as_ref()
@@ -970,31 +984,6 @@ fn refresh_now(app: AppHandle<Wry>) {
 #[tauri::command]
 fn settings_file_path() -> String {
     AppPaths::detect().settings_file().display().to_string()
-}
-
-#[tauri::command]
-fn icon_states() -> Vec<IconState> {
-    // The full severity ramp, so the settings pane can show the icon states
-    // exactly as the menu bar will render them.
-    [100.0f64, 70.0, 55.0, 45.0, 30.0, 20.0, 5.0]
-        .iter()
-        .map(|remaining| IconState {
-            remaining: *remaining,
-            needle_degrees: StatusIcon::needle_angle(Some(*remaining)),
-            tint: StatusIcon::tint(Some(*remaining)).top.to_hex(),
-            matches_app_icon: (*remaining - 45.0).abs() < f64::EPSILON,
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct IconState {
-    remaining: f64,
-    needle_degrees: f64,
-    tint: String,
-    /// True for the pose the shipped app icon is drawn at.
-    matches_app_icon: bool,
 }
 
 #[tauri::command]
@@ -1252,13 +1241,27 @@ pub fn run() {
                 }
             }
 
-            // Kick off pricing in the background: cost is a nicety and must not
-            // delay the first usage figures.
+            // The cached price table is a local file read, and it has to be in
+            // place *before* the first poll: Claude's logs report no cost, so
+            // without it the first poll prices nothing and every Claude row reads
+            // "—" until the next one. Only the network refresh is backgrounded.
+            {
+                let state = handle.state::<Arc<AppState>>();
+                let mut poller = state.poller.lock().expect("poller lock");
+                poller.load_pricing_cache();
+                let (prices, unpriced) = poller.pricing_state();
+                eprintln!("burnrate: pricing table {prices} entries");
+                if !unpriced.is_empty() {
+                    eprintln!("burnrate: no list price for {}", unpriced.join(", "));
+                }
+            }
+
+            // Fetch a fresh table in the background: a failure here is not fatal,
+            // the cache above is still in use.
             {
                 let state = handle.state::<Arc<AppState>>().inner().clone();
                 std::thread::spawn(move || {
                     let mut poller = state.poller.lock().expect("poller lock");
-                    poller.load_pricing_cache();
                     poller.refresh_pricing(&burnrate_core::providers::UreqClient::default());
                 });
             }
@@ -1346,7 +1349,6 @@ pub fn run() {
             model_colours,
             refresh_now,
             app_icon_data_url,
-            icon_states,
             upsert_milestone,
             remove_milestone,
             upsert_burn_alert,
