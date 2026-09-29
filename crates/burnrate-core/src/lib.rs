@@ -11,6 +11,7 @@ pub mod dial;
 pub mod formatting;
 pub mod icon;
 pub mod menu;
+pub mod migration;
 pub mod model;
 pub mod notifier;
 pub mod paths;

@@ -59,6 +59,10 @@ pub struct Poller {
     snapshots: Vec<RemainingSnapshot>,
     /// Flat samples, mirrored from `snapshots` for the chart API.
     remaining_history: Vec<crate::charts::RemainingSample>,
+    /// Thirty days of per-model daily buckets, persisted and merged with each
+    /// live parse. The live parse is authoritative for the days it covers; this
+    /// keeps the days whose logs have since rotated away.
+    model_history: Vec<DailyModelUsage>,
     /// 7 days of minute-resolution history is plenty for a month of charts.
     history_limit: usize,
     last_local_poll: Option<Instant>,
@@ -88,6 +92,7 @@ impl Poller {
             pricing: Mutex::new(PricingTable::default()),
             snapshots: Vec::new(),
             remaining_history: Vec::new(),
+            model_history: Vec::new(),
             history_limit: 7 * 24 * 60,
             last_local_poll: None,
             // The Claude log parse is expensive the first time; after that the
@@ -211,18 +216,7 @@ impl Poller {
         // --- history for the trend chart -------------------------------------
         let snapshot = RemainingSnapshot {
             at: now,
-            values: usage
-                .iter()
-                .flat_map(|provider| {
-                    provider.windows.iter().map(move |window| {
-                        (
-                            provider.provider_name.clone(),
-                            window.label.clone(),
-                            window.percent_remaining.unwrap_or(0.0),
-                        )
-                    })
-                })
-                .collect(),
+            values: history_values(&usage),
         };
         if !snapshot.values.is_empty() {
             for (provider, label, percent) in &snapshot.values {
@@ -253,8 +247,14 @@ impl Poller {
 
         // --- models and cost --------------------------------------------------
         let model_totals = ModelUsageAggregator::totals(&batches);
-        let model_daily =
-            ModelUsageAggregator::daily(&batches, 30, now, local_utc_offset_seconds());
+        let fresh_daily = ModelUsageAggregator::daily(&batches, 30, now, &local_offset_at);
+        // Merged with the persisted history, so a day whose logs have rotated
+        // away is still charted. Fresh wins wherever both have the day.
+        self.model_history = crate::migration::prune_daily(
+            crate::migration::merge_daily(&self.model_history, &fresh_daily),
+            now,
+        );
+        let model_daily = self.model_history.clone();
         let spend_today = spend_since_start_of_day(&batches, now, local_utc_offset_seconds());
         notifications.extend(self.notifier.evaluate_cost(
             start_of_day_local(now, local_utc_offset_seconds()),
@@ -282,6 +282,95 @@ impl Poller {
         &self.remaining_history
     }
 
+    /// How many days of model history are held, for the launch log.
+    pub fn model_history_len(&self) -> usize {
+        self.model_history.len()
+    }
+
+    /// Reloads the persisted trend history, dropping anything past retention.
+    ///
+    /// Called at startup. The Swift build does the same thing from
+    /// `UserDefaults` in `ModelUsageViewModel.init`; without it the trend chart
+    /// is blank for the first hours of every launch, which is indistinguishable
+    /// from a broken chart.
+    pub fn load_history(&mut self, now: i64) {
+        self.load_history_from(
+            &crate::paths::AppPaths::detect().remaining_history_file(),
+            now,
+        );
+    }
+
+    /// The file half of [`Poller::load_history`], with the path passed in so it
+    /// can be tested without touching the real app directory.
+    pub fn load_history_from(&mut self, path: &std::path::Path, now: i64) {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(samples) = serde_json::from_str::<Vec<crate::charts::RemainingSample>>(&text) else {
+            // A corrupt cache is not worth failing a poll over: start clean.
+            return;
+        };
+        let cutoff = now - 7 * 86_400;
+        self.remaining_history = samples
+            .into_iter()
+            .filter(|sample| sample.date >= cutoff)
+            .collect();
+    }
+
+    /// Writes the trend history out, so the next launch has a chart.
+    pub fn save_history(&self) {
+        let paths = crate::paths::AppPaths::detect();
+        if paths.ensure_app_directory().is_err() {
+            return;
+        }
+        self.save_history_to(&paths.remaining_history_file());
+    }
+
+    /// The file half of [`Poller::save_history`].
+    pub fn save_history_to(&self, path: &std::path::Path) {
+        if let Ok(text) = serde_json::to_string(&self.remaining_history) {
+            // Best-effort: a full disk must not take the poll loop down.
+            let _ = std::fs::write(path, text);
+        }
+    }
+
+    /// Reloads the persisted daily model history.
+    pub fn load_model_history(&mut self, now: i64) {
+        self.load_model_history_from(&crate::paths::AppPaths::detect().model_history_file(), now);
+    }
+
+    pub fn load_model_history_from(&mut self, path: &std::path::Path, now: i64) {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(days) = serde_json::from_str::<Vec<DailyModelUsage>>(&text) else {
+            return;
+        };
+        self.model_history = crate::migration::prune_daily(days, now);
+    }
+
+    /// Writes the daily model history out.
+    pub fn save_model_history(&self) {
+        let paths = crate::paths::AppPaths::detect();
+        if paths.ensure_app_directory().is_err() {
+            return;
+        }
+        if let Ok(text) = serde_json::to_string(&self.model_history) {
+            let _ = std::fs::write(paths.model_history_file(), text);
+        }
+    }
+
+    /// Replaces the daily history wholesale — used by the Swift import, which
+    /// runs before the first poll and must not be merged with an empty list.
+    pub fn set_model_history(&mut self, days: Vec<DailyModelUsage>) {
+        self.model_history = days;
+    }
+
+    /// Replaces the trend history wholesale, for the Swift import.
+    pub fn set_remaining_history(&mut self, samples: Vec<crate::charts::RemainingSample>) {
+        self.remaining_history = samples;
+    }
+
     /// Trend series for a window label.
     pub fn trend(&self, label: &str, provider: Option<&str>) -> Vec<TrendSeries> {
         ChartData::trend_series(&self.snapshots, label, provider)
@@ -295,6 +384,7 @@ impl Poller {
     pub fn clear_history(&mut self) {
         self.snapshots.clear();
         self.remaining_history.clear();
+        self.model_history.clear();
     }
 
     /// Forces the next poll to go out immediately, skipping the throttle — used
@@ -312,6 +402,31 @@ impl Default for Poller {
     }
 }
 
+/// Remaining-% readings for the trend history: one per window that reported a
+/// percentage.
+///
+/// A window with no figure is **skipped**, not recorded as zero. The first
+/// version used `unwrap_or(0.0)`, which wrote a false 0% reading into the
+/// history — the trend chart drew it as a real drop, and it dragged the Y domain
+/// down to 0 so every genuine line was flattened against the top of the plot.
+/// Swift's `guard let remaining = window.percentRemaining else { continue }` is
+/// the same rule, and a provider that is rate-limited is exactly when this fires.
+fn history_values(usage: &[ProviderUsage]) -> Vec<(String, String, f64)> {
+    usage
+        .iter()
+        .flat_map(|provider| {
+            provider.windows.iter().filter_map(move |window| {
+                let percent = window.percent_remaining?;
+                Some((
+                    provider.provider_name.clone(),
+                    window.label.clone(),
+                    percent,
+                ))
+            })
+        })
+        .collect()
+}
+
 pub fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -324,6 +439,26 @@ pub fn now_unix() -> i64 {
 ///
 /// Falls back to UTC when the platform cannot answer (a sandbox without
 /// timezone data, say) — which only makes the buckets UTC-aligned, not wrong.
+#[cfg(unix)]
+pub fn local_offset_at(timestamp: i64) -> i64 {
+    // `localtime_r` applies the timezone rules for that instant, DST included.
+    let time = timestamp as libc::time_t;
+    let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
+    let resolved = unsafe { !libc::localtime_r(&time, &mut broken_down).is_null() };
+    if resolved {
+        broken_down.tm_gmtoff as i64
+    } else {
+        0
+    }
+}
+
+/// Off Unix there is no cheap per-instant lookup, so this is the current offset.
+/// Windows has the same DST hazard; it is not the platform this was found on.
+#[cfg(not(unix))]
+pub fn local_offset_at(_timestamp: i64) -> i64 {
+    local_utc_offset_seconds()
+}
+
 pub fn local_utc_offset_seconds() -> i64 {
     match time::UtcOffset::current_local_offset() {
         Ok(offset) => offset.whole_seconds() as i64,
@@ -368,6 +503,83 @@ mod tests {
         let start = start_of_day_local(now, 0);
         assert!(start <= now);
         assert_eq!(start % 86_400, 0, "UTC midnight with a zero offset");
+    }
+
+    /// The trend chart is empty on every launch unless the history is persisted,
+    /// which is exactly how it looked broken.
+    #[test]
+    fn history_survives_a_restart_and_is_pruned_to_retention() {
+        let dir = std::env::temp_dir().join(format!("burnrate-history-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("remaining-history.json");
+        let _ = std::fs::remove_file(&path);
+        let now = 1_800_000_000_i64;
+
+        let mut poller = Poller::with_keychain(false);
+        let sample = |date: i64, remaining: f64| crate::charts::RemainingSample {
+            provider: "Claude".to_string(),
+            label: "Rolling".to_string(),
+            date,
+            remaining,
+        };
+        poller.remaining_history = vec![
+            sample(now - 60, 84.0),
+            sample(now - 120, 85.0),
+            // Nine days old: outside the seven-day retention.
+            sample(now - 9 * 86_400, 12.0),
+        ];
+        poller.save_history_to(&path);
+
+        let mut restarted = Poller::with_keychain(false);
+        restarted.load_history_from(&path, now);
+        let history = restarted.remaining_history();
+        assert_eq!(history.len(), 2, "the stale sample is dropped");
+        assert_eq!(history[0].remaining, 84.0);
+        assert_eq!(history[1].remaining, 85.0);
+
+        // A missing or corrupt file must leave an empty history, not panic.
+        let mut fresh = Poller::with_keychain(false);
+        fresh.load_history_from(&dir.join("absent.json"), now);
+        assert!(fresh.remaining_history().is_empty());
+        std::fs::write(&path, "{not json").expect("write");
+        let mut corrupt = Poller::with_keychain(false);
+        corrupt.load_history_from(&path, now);
+        assert!(corrupt.remaining_history().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A window that reported no percentage must not enter the history as 0%.
+    #[test]
+    fn a_window_with_no_percentage_is_skipped_not_zeroed() {
+        use crate::model::{ProviderUsage, UsageWindow};
+        let usage = vec![ProviderUsage::new(
+            "Claude",
+            None,
+            vec![
+                UsageWindow::new("Rolling", 0, Some(84.0), None),
+                // No capacity configured, or the quota call was rate-limited.
+                UsageWindow::new("Weekly", 0, None, None),
+                UsageWindow::new("Fable", 0, Some(100.0), None),
+            ],
+        )];
+        let values = history_values(&usage);
+        assert_eq!(
+            values.len(),
+            2,
+            "the unmeasured window is dropped: {values:?}"
+        );
+        assert!(values.iter().all(|(_, _, percent)| *percent > 0.0));
+        assert!(values.iter().any(|(_, label, _)| label == "Rolling"));
+        assert!(!values.iter().any(|(_, label, _)| label == "Weekly"));
+
+        // And a provider with nothing measured contributes nothing at all.
+        let empty = vec![ProviderUsage::new(
+            "Codex",
+            None,
+            vec![UsageWindow::new("Rolling", 0, None, None)],
+        )];
+        assert!(history_values(&empty).is_empty());
     }
 
     #[test]
