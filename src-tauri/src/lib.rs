@@ -23,8 +23,9 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
-use burnrate_core::charts::{metric_value, ChartRange, Metric, TrendChartData};
+use burnrate_core::charts::{axis_label, metric_value, ChartRange, Metric, TrendChartData};
 use burnrate_core::dial;
+use burnrate_core::formatting::TokenFormat;
 use burnrate_core::icon::StatusIcon;
 use burnrate_core::menu::{StatusMenuAction, StatusMenuBuilder, StatusMenuEntry, StatusMenuModel};
 use burnrate_core::model::ProviderUsage;
@@ -152,8 +153,22 @@ struct Bar {
     label: String,
     value: f64,
     cost: f64,
+    /// Token total. The breakdown table shows the four channels below instead,
+    /// which is why they travel separately — the first version of that table put
+    /// this total in the INPUT column and left the rest as dashes.
     tokens: i64,
+    input: i64,
+    output: i64,
+    /// Cache reads plus cache writes, as `ModelsView` sums them into one column.
+    cache: i64,
+    reasoning: i64,
     requests: i64,
+    /// `axisLabel(value, metric)` — "1.2m", "$12.5". Pre-formatted because the
+    /// frontend formatting its own copy is exactly how the axes drifted from the
+    /// Swift build the first time round.
+    value_text: String,
+    /// The ranking chart's trailing annotation: "1.2m tok" or "$12.50".
+    annotation: String,
 }
 
 /// Everything the Usage pane draws. The Swift layout, section for section:
@@ -187,9 +202,24 @@ struct Dashboard {
     // daily stacked bars
     daily: Vec<DailyBar>,
     daily_y_ticks: Vec<f64>,
+    /// `daily_y_ticks` as `axisLabel` renders them, so the axis needs no
+    /// formatting in the frontend.
+    daily_y_labels: Vec<String>,
+    /// The tallest day, for the daily chart's Y domain.
+    daily_maximum: f64,
+
+    /// Whether the 30-day history has any entries for the current filter. The
+    /// Swift view branches on `filteredDaily.isEmpty` and shows an
+    /// unavailable-view instead of the cards; an empty chart series is not the
+    /// same condition, because the trend history outlives the model history.
+    has_data: bool,
 
     // ranking + table
     ranking: Vec<Bar>,
+    /// The ranking chart's value axis. Only drawn for the token metric, as in
+    /// `ModelsView`, where a dollar axis under eight bars is noise.
+    ranking_ticks: Vec<f64>,
+    ranking_tick_labels: Vec<String>,
     table: Vec<Bar>,
 }
 
@@ -208,6 +238,7 @@ struct Figure {
 struct DailyBar {
     day: i64,
     total: f64,
+    total_text: String,
     bars: Vec<Bar>,
     /// Today, or yesterday if the day has not finished: drawn faded, because a
     /// part-day beside complete days reads as a cliff.
@@ -634,13 +665,28 @@ fn snapshot(
         daily.push(DailyBar {
             day: cursor,
             total,
+            total_text: axis_label(total, metric),
             bars,
             partial: cursor == today_start,
         });
         cursor += 86_400;
     }
     let daily_max = daily.iter().map(|day| day.total).fold(0.0_f64, f64::max);
-    let daily_ticks = daily_ticks(0.0, daily_max);
+    let daily_ticks = nice_ticks(0.0, daily_max);
+    let daily_y_labels: Vec<String> = daily_ticks
+        .iter()
+        .map(|value| axis_label(*value, metric))
+        .collect();
+
+    // Whether there is anything at all for this filter over the full 30 days —
+    // the Swift view's `filteredDaily.isEmpty` check.
+    let has_data = daily_all.iter().any(|day| {
+        day.entries.iter().any(|entry| {
+            provider_filter
+                .as_deref()
+                .is_none_or(|f| entry.provider == f)
+        })
+    });
 
     // Totals are aggregated from the in-range buckets, not the full 30 days:
     // otherwise a narrow range would list models it is not showing.
@@ -655,6 +701,18 @@ fn snapshot(
     }
     let table: Vec<Bar> = totals.iter().map(|entry| bar_for(entry, metric)).collect();
     let ranking: Vec<Bar> = table.iter().take(8).cloned().collect();
+    // The ranking's value axis, from the same nice-number rule as the daily
+    // chart, and empty for cost (as Swift draws it).
+    let ranking_max = ranking.iter().map(|bar| bar.value).fold(0.0_f64, f64::max);
+    let ranking_ticks = if metric == Metric::Tokens {
+        nice_ticks(0.0, ranking_max)
+    } else {
+        Vec::new()
+    };
+    let ranking_tick_labels: Vec<String> = ranking_ticks
+        .iter()
+        .map(|value| axis_label(*value, metric))
+        .collect();
 
     // --- snapshot cards ---------------------------------------------------
     remember_models(&totals);
@@ -714,7 +772,12 @@ fn snapshot(
             y_ticks,
             daily,
             daily_y_ticks: daily_ticks,
+            daily_y_labels,
+            daily_maximum: daily_max,
+            has_data,
             ranking,
+            ranking_ticks,
+            ranking_tick_labels,
             table,
         },
         spend_today: last
@@ -734,37 +797,70 @@ fn remember_models(entries: &[ModelUsageEntry]) {
 }
 
 fn bar_for(entry: &ModelUsageEntry, metric: Metric) -> Bar {
+    let value = metric_value(metric, entry.total_tokens(), entry.cost);
     Bar {
         key: entry.display_name(),
         provider: entry.provider.clone(),
         label: entry.display_name(),
-        value: metric_value(metric, entry.total_tokens(), entry.cost),
+        value,
         cost: entry.cost,
         tokens: entry.total_tokens(),
+        input: entry.tokens.input,
+        output: entry.tokens.output,
+        cache: entry.tokens.cache_read + entry.tokens.cache_write,
+        reasoning: entry.tokens.reasoning,
         requests: entry.requests,
+        value_text: axis_label(value, metric),
+        // Matches `ModelUsageEntry.annotation(_:)`: tokens carry a " tok" unit,
+        // cost is bare dollars to the cent. The unit is not decoration — the bar
+        // is unlabelled by an axis on the cost metric, so "$12.50" alone has to
+        // say what it is.
+        annotation: match metric {
+            Metric::Tokens => format!("{} tok", TokenFormat::format(entry.total_tokens())),
+            Metric::Cost => format!("${:.2}", entry.cost),
+        },
     }
 }
 
-/// Gridlines for a token or cost axis, at the Swift build's magnitudes.
-fn daily_ticks(low: f64, high: f64) -> Vec<f64> {
-    if high <= low {
+/// Gridlines for a token or cost axis, at "nice" magnitudes.
+///
+/// This was a ladder of fixed steps (500k, 50k, 5k, …) chosen by span. It reads
+/// like it scales, but every branch is a *small* number, so a large span landed
+/// on 500k and produced a tick every 500k — 7,306 gridlines and labels on a real
+/// 3.65e9 day, 176 on a 8.8e7 one. Thousands of SVG nodes, which is why the
+/// chart looked cooked rather than merely dense.
+///
+/// Steps now scale with the span: 1, 2 or 5 times a power of ten, sized to land
+/// on roughly five gridlines whatever the magnitude.
+fn nice_ticks(low: f64, high: f64) -> Vec<f64> {
+    const TARGET_TICKS: f64 = 5.0;
+    if !high.is_finite() || !low.is_finite() || high <= low {
         return vec![low];
     }
     let span = high - low;
-    let step = if span > 1_000_000.0 {
-        500_000.0
-    } else if span > 100_000.0 {
-        50_000.0
-    } else if span > 10_000.0 {
-        5_000.0
-    } else if span > 1_000.0 {
-        500.0
-    } else {
-        100.0
-    };
+    let raw = span / TARGET_TICKS;
+    let magnitude = 10f64.powf(raw.log10().floor());
+    let normalised = raw / magnitude;
+    // 1, 2, 5, 10 — the "nice" multipliers, so labels read 1e9 / 2e9 rather
+    // than 1.37e9.
+    let step = magnitude
+        * if normalised <= 1.0 {
+            1.0
+        } else if normalised <= 2.0 {
+            2.0
+        } else if normalised <= 5.0 {
+            5.0
+        } else {
+            10.0
+        };
+    if step <= 0.0 || !step.is_finite() {
+        return vec![low];
+    }
     let mut ticks = Vec::new();
     let mut value = (low / step).ceil() * step;
-    while value <= high {
+    // A cap as a backstop: the step is derived from the span, so this cannot
+    // trip, but a degenerate input should draw nothing rather than hang.
+    while value <= high && ticks.len() < 64 {
         ticks.push(value);
         value += step;
     }
@@ -1223,4 +1319,60 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running BurnRate");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nice_ticks;
+
+    /// The bug this replaced: a ladder of fixed small steps meant a large span
+    /// landed on 500k and produced a gridline every 500k — 7,306 of them on a
+    /// real day. Thousands of SVG nodes is why the chart looked cooked.
+    #[test]
+    fn tick_count_stays_small_at_every_magnitude() {
+        for maximum in [
+            12.0,
+            850.0,
+            42_000.0,
+            1_200_000.0,
+            87_801_324.0,
+            3_652_595_073.0,
+            1.0e13,
+        ] {
+            let ticks = nice_ticks(0.0, maximum);
+            assert!(
+                (2..=12).contains(&ticks.len()),
+                "max {maximum} produced {} ticks",
+                ticks.len()
+            );
+        }
+    }
+
+    /// The axis must land on round numbers, not on whatever the span divided by
+    /// five happens to be.
+    #[test]
+    fn ticks_are_round_numbers_in_range() {
+        let ticks = nice_ticks(0.0, 3_652_595_073.0);
+        assert_eq!(
+            ticks,
+            vec![0.0, 1_000_000_000.0, 2_000_000_000.0, 3_000_000_000.0]
+        );
+        for tick in &ticks {
+            assert!(*tick <= 3_652_595_073.0, "{tick} is above the data");
+        }
+    }
+
+    #[test]
+    fn degenerate_spans_do_not_hang_or_panic() {
+        assert_eq!(nice_ticks(5.0, 5.0), vec![5.0]);
+        assert_eq!(nice_ticks(10.0, 1.0), vec![10.0]);
+        assert_eq!(nice_ticks(0.0, f64::NAN), vec![0.0]);
+        assert_eq!(nice_ticks(0.0, f64::INFINITY), vec![0.0]);
+    }
+
+    /// A zero-maximum day (nothing used) still gets an axis rather than none.
+    #[test]
+    fn a_flat_zero_series_still_has_an_axis() {
+        assert_eq!(nice_ticks(0.0, 0.0), vec![0.0]);
+    }
 }

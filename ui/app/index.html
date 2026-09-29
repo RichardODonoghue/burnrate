@@ -24,7 +24,10 @@
       <main class="content" id="content" tabindex="-1"></main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js"></script>
+    <!-- usage.js first: it registers the pane's renderer, and app.js resolves it
+         from `window.BurnRate` during its first render. Loading them the other
+         way round works only because the first paint happens after an await. -->
     <script src="./usage.js"></script>
+    <script src="./app.js"></script>
   </body>
 </html>

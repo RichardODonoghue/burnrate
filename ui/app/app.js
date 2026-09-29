@@ -117,6 +117,32 @@ function trim(value) {
   return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
+/**
+ * The Swift `Picker(…).pickerStyle(.segmented)`, as a button group.
+ *
+ * A connected run of buttons with the selection lit — not a menu, so not a
+ * `<select>`. Used by the toolbar (Metric, Range) and by the trend card's window
+ * picker, so it lives here and is handed to usage.js.
+ *
+ * `totalWidth` fixes the group's width: the Swift build sets an explicit
+ * `.frame(width:)` on both, and a control that reflows as options change reads
+ * as a layout bug.
+ */
+function segmented(id, options, selected, totalWidth = 0) {
+  return `<div class="segmented" id="${id}" role="group"${
+    totalWidth ? ` style="width:${totalWidth}px"` : ""
+  }>${options
+    .map(
+      (option) =>
+        `<button type="button" data-value="${esc(option.value ?? option)}"${
+          (option.value ?? option) === selected
+            ? ' class="on" aria-pressed="true"'
+            : ' aria-pressed="false"'
+        }>${esc(option.label ?? option)}</button>`
+    )
+    .join("")}</div>`;
+}
+
 let toastTimer = null;
 function toast(message) {
   const node = el("toast");
@@ -149,6 +175,14 @@ async function refresh() {
     modelColours,
     tokenCount,
     esc,
+    // The pane draws its own segmented controls and looks up its own frames, so
+    // it needs the same helpers the shell uses rather than a second copy.
+    segmented,
+    el,
+    selectWindow(label) {
+      state.windowLabel = label;
+      refresh();
+    },
   });
   render();
 }
@@ -210,42 +244,45 @@ function render() {
     content.innerHTML = `<div class="empty">Loading…</div>`;
     return;
   }
+  // The Swift toolbar: heading left, then provider popup, then two segmented
+  // pickers, then a refresh icon button. The picker labels ("Provider", "Metric",
+  // "Range") are not rendered — a segmented macOS picker shows only its
+  // segments, and showing the labels was making the row read as a form.
   const toolbar = `
     <div class="toolbar">
-      <strong>Usage Dashboard</strong>
+      <span class="toolbar-title">Usage Dashboard</span>
       <span class="grow"></span>
-      <label>Provider
-        <select id="provider-select">
-          <option value="" ${state.providerFilter ? "" : "selected"}>All providers</option>
-          ${(state.snapshot?.dashboard?.providerNames ?? [])
-            .map(
-              (name) =>
-                `<option value="${esc(name)}" ${
-                  state.providerFilter === name ? "selected" : ""
-                }>${esc(name)}</option>`
-            )
-            .join("")}
-        </select>
-      </label>
-      <label>Metric
-        <select id="metric-select">
-          <option value="tokens" ${state.metric === "tokens" ? "selected" : ""}>Tokens</option>
-          <option value="cost" ${state.metric === "cost" ? "selected" : ""}>Cost</option>
-        </select>
-      </label>
-      <label>Range
-        <select id="range-select">
-          ${["24h", "7d", "30d"]
-            .map(
-              (label) =>
-                `<option value="${label}" ${
-                  state.range === label ? "selected" : ""
-                }>${label}</option>`
-            )
-            .join("")}
-        </select>
-      </label>
-      <button class="action" id="toolbar-refresh" title="Refresh">↻</button>
+      <select id="provider-select" class="popup" title="Provider">
+        <option value="" ${state.providerFilter ? "" : "selected"}>All providers</option>
+        ${(state.snapshot?.dashboard?.providerNames ?? [])
+          .map(
+            (name) =>
+              `<option value="${esc(name)}" ${
+                state.providerFilter === name ? "selected" : ""
+              }>${esc(name)}</option>`
+          )
+          .join("")}
+      </select>
+      ${segmented(
+        "metric-group",
+        [
+          { value: "tokens", label: "Tokens" },
+          { value: "cost", label: "Cost" },
+        ],
+        state.metric,
+        120
+      )}
+      ${segmented(
+        "range-group",
+        [
+          { value: "24h", label: "24h" },
+          { value: "7d", label: "7d" },
+          { value: "30d", label: "30d" },
+        ],
+        state.range,
+        180
+      )}
+      <button class="action icon" id="toolbar-refresh" title="Refresh">↻</button>
     </div>`;
   const renderers = {
     usage: window.BurnRate.renderUsage,
@@ -260,9 +297,6 @@ function render() {
   }
   // The Usage pane is the only one with a toolbar above it, as in the Swift build.
   content.innerHTML = (state.pane === "usage" ? toolbar : "") + renderer(state.snapshot);
-  if (state.pane === "usage") {
-    wireUsageCharts();
-  }
   wireContent();
 }
 
@@ -500,21 +534,8 @@ function wireContent() {
     }
   };
 
-  // Usage toolbar
-  const rangeSelect = el("range-select");
-  if (rangeSelect) {
-    rangeSelect.addEventListener("change", () => {
-      state.range = rangeSelect.value;
-      refresh();
-    });
-  }
-  const metricSelect = el("metric-select");
-  if (metricSelect) {
-    metricSelect.addEventListener("change", () => {
-      state.metric = metricSelect.value;
-      refresh();
-    });
-  }
+  // Usage toolbar. Provider stays a popup (a menu, as in Swift, which uses the
+  // default picker style there); Metric and Range are segmented button groups.
   const providerSelect = el("provider-select");
   if (providerSelect) {
     providerSelect.addEventListener("change", () => {
@@ -522,33 +543,38 @@ function wireContent() {
       refresh();
     });
   }
-  // The Window picker is a segmented button group (the Swift Picker is
-  // segmented, so a <select> would be a different control). Click, not change.
-  for (const button of content.querySelectorAll("#window-group button")) {
+  for (const button of content.querySelectorAll("#metric-group button")) {
     button.addEventListener("click", () => {
-      state.windowLabel = button.dataset.value;
+      state.metric = button.dataset.value;
       refresh();
     });
   }
-  for (const id of ["toolbar-refresh"]) {
-    const button = el(id);
-    if (button) {
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          await invoke("refresh_now");
-          await refresh();
-          toast("Refreshed");
-        } catch (error) {
-          toast(String(error));
-        } finally {
-          button.disabled = false;
-        }
-      });
-    }
+  for (const button of content.querySelectorAll("#range-group button")) {
+    button.addEventListener("click", () => {
+      state.range = button.dataset.value;
+      refresh();
+    });
+  }
+  const refreshButton = el("toolbar-refresh");
+  if (refreshButton) {
+    refreshButton.addEventListener("click", async () => {
+      refreshButton.disabled = true;
+      try {
+        await invoke("refresh_now");
+        await refresh();
+        toast("Refreshed");
+      } catch (error) {
+        toast(String(error));
+      } finally {
+        refreshButton.disabled = false;
+      }
+    });
   }
 
-  wireUsageCharts();
+  // The Usage pane owns its own charts and tooltips: they are the bulk of this
+  // file's old size, and they belong next to the markup that produces them.
+  window.BurnRate.layoutUsage?.(state.snapshot);
+  window.BurnRate.wireUsage?.(state.snapshot);
 
   // About
   const testNotification = el("test-notification");
@@ -560,43 +586,6 @@ function wireContent() {
       } catch (error) {
         toast(`Notification failed: ${error}`);
       }
-    });
-  }
-
-  // Usage — the toolbar's controls are wired below.
-
-  // Hover tooltip on the trend chart: nearest point per series.
-  const trend = el("trend");
-  if (trend) {
-    trend.addEventListener("mousemove", (event) => {
-      const rect = trend.getBoundingClientRect();
-      const ratio = (event.clientX - rect.left) / rect.width;
-      const [xLow, xHigh] = state.snapshot.dashboard.xDomain ?? [0, 1];
-      const at = Math.round(xLow + ratio * (xHigh - xLow));
-      const rows = (state.snapshot.dashboard.series ?? [])
-        .map((line) => {
-          if (!line.points.length) return null;
-          const point = nearestPoint(line.points, at);
-          if (!point) return null;
-          return `<div><i class="dot" style="background:${
-            PROVIDER_COLOURS[line.provider] ?? "var(--accent)"
-          }"></i>${esc(line.provider)} <strong>${point.y.toFixed(0)}%</strong></div>`;
-        })
-        .filter(Boolean);
-      const tip = el("trend-tip");
-      if (!rows.length) {
-        tip.hidden = true;
-        return;
-      }
-      tip.innerHTML =
-        rows.join("") +
-        `<div class="hint">${new Date(at * 1000).toLocaleTimeString()}</div>`;
-      tip.hidden = false;
-      tip.style.left = `${event.clientX - rect.left}px`;
-    });
-    trend.addEventListener("mouseleave", () => {
-      const tip = el("trend-tip");
-      if (tip) tip.hidden = true;
     });
   }
 
@@ -720,75 +709,8 @@ function wireContent() {
   }
 }
 
-/** Hover tooltips for the trend and daily charts. */
-function wireUsageCharts() {
-  const trend = el("trend");
-  const trendTip = el("trend-tip");
-  if (trend && trendTip) {
-    trend.addEventListener("mousemove", (event) => {
-      const target = event.target.closest(".probe");
-      if (!target) {
-        trendTip.hidden = true;
-        return;
-      }
-      const colour = PROVIDER_COLOURS[target.dataset.provider] ?? "var(--accent)";
-      const scoped = target.dataset.scoped === "1";
-      trendTip.innerHTML =
-        `<div><i class="dot" style="background:${colour};opacity:${scoped ? 0.55 : 1}"></i>` +
-        `${esc(target.dataset.series)} <strong>${Math.round(Number(target.dataset.y ?? 0))}%</strong></div>`;
-      trendTip.hidden = false;
-      const box = trend.getBoundingClientRect();
-      trendTip.style.left = `${Math.min(event.clientX - box.left + 10, box.width - 130)}px`;
-    });
-    trend.addEventListener("mouseleave", () => {
-      trendTip.hidden = true;
-    });
-  }
-
-  const daily = el("daily");
-  const dailyTip = el("daily-tip");
-  if (daily && dailyTip) {
-    daily.addEventListener("mousemove", (event) => {
-      const group = event.target.closest(".day");
-      if (!group) {
-        dailyTip.hidden = true;
-        return;
-      }
-      const day = dashboardDay(Number(group.dataset.day));
-      if (!day) {
-        dailyTip.hidden = true;
-        return;
-      }
-      const rows = day.bars
-        .map(
-          (bar) =>
-            `<div><i class="dot" style="background:${window.BurnRate.modelColours?.[bar.key] ??
-              "var(--accent)"}"></i>${esc(bar.label)} <strong>${esc(
-              axisValue(bar.value)
-            )}</strong></div>`
-        )
-        .join("");
-      dailyTip.innerHTML =
-        rows + `<div class="hint">${new Date(day.day * 1000).toLocaleDateString()}</div>`;
-      dailyTip.hidden = false;
-      const box = daily.getBoundingClientRect();
-      dailyTip.style.left = `${Math.min(Number(group.dataset.x) + 10, box.width - 150)}px`;
-    });
-    daily.addEventListener("mouseleave", () => {
-      dailyTip.hidden = true;
-    });
-  }
-}
-
-function dashboardDay(day) {
-  return state.snapshot?.dashboard?.daily?.find((entry) => entry.day === day);
-}
-
-function axisValue(value) {
-  return state.snapshot?.dashboard?.metric === "cost"
-    ? `$${value.toFixed(2)}`
-    : tokenCount(Math.round(value));
-}
+// Chart layout and tooltips live in usage.js, next to the markup that produces
+// them.
 
 // ---------- boot ----------
 
@@ -800,6 +722,18 @@ async function main() {
   await refresh();
   // The shell's heartbeat is what drives the tick; mirror it here.
   setInterval(refresh, 5000);
+
+  // Charts are drawn for the measured pixel width, so they have to be redrawn
+  // when that changes. Without this they keep the width they were first drawn
+  // at, and every resize leaves the axis text stretched or the plot short.
+  let resizeTimer = null;
+  new ResizeObserver(() => {
+    if (state.pane !== "usage" || !state.snapshot) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      window.BurnRate.layoutUsage?.(state.snapshot);
+    }, 60);
+  }).observe(el("content"));
 }
 
 main();
