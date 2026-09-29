@@ -522,14 +522,15 @@ function wireContent() {
       refresh();
     });
   }
-  const windowSelect = el("window-select");
-  if (windowSelect) {
-    windowSelect.addEventListener("change", () => {
-      state.windowLabel = windowSelect.value;
+  // The Window picker is a segmented button group (the Swift Picker is
+  // segmented, so a <select> would be a different control). Click, not change.
+  for (const button of content.querySelectorAll("#window-group button")) {
+    button.addEventListener("click", () => {
+      state.windowLabel = button.dataset.value;
       refresh();
     });
   }
-  for (const id of ["toolbar-refresh", "poll-refresh"]) {
+  for (const id of ["toolbar-refresh"]) {
     const button = el(id);
     if (button) {
       button.addEventListener("click", async () => {
@@ -597,17 +598,6 @@ function wireContent() {
       const tip = el("trend-tip");
       if (tip) tip.hidden = true;
     });
-  }
-
-  const pollSave = el("poll-save");
-  if (pollSave) {
-    pollSave.addEventListener("click", () =>
-      mutate(
-        "set_poll_interval",
-        { seconds: Number(el("poll-interval").value) },
-        "Polling interval saved"
-      )
-    );
   }
 
   // Notifications

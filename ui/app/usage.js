@@ -10,6 +10,20 @@ function card(title, body, extra = "") {
   return `<section class="card">${title ? `<h2>${E(title)}</h2>` : ""}${body}${extra}</section>`;
 }
 
+/**
+ * A card whose title row also carries controls on the right, the shape the Swift
+ * build uses for the trend chart: `HStack { Text(title); Spacer(); Picker }`.
+ */
+function cardWithControls(title, controls, body) {
+  return `<section class="card">
+    <div class="card-head">
+      <h2>${E(title)}</h2>
+      ${controls}
+    </div>
+    ${body}
+  </section>`;
+}
+
 // Injected by app.js: {providerColours, modelColours, tokenCount, esc}.
 let deps = {};
 const E = (value) => deps.esc(value);
@@ -171,6 +185,9 @@ function dailyChart(dashboard) {
   const bars = dashboard.daily
     .map((day, index) => {
       const x = map.left + index * slot + (slot - barWidth) / 2;
+      // Today is not finished. Beside complete days a part-day reads as a
+      // cliff, so it is drawn faded — the day is there, it is just not over.
+      const opacity = day.partial ? 0.5 : 1;
       let offset = 0;
       const stack = day.bars
         .map((bar) => {
@@ -179,18 +196,16 @@ function dailyChart(dashboard) {
           offset += height;
           return `<rect class="bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}"
             width="${barWidth.toFixed(1)}" height="${Math.max(1, height).toFixed(1)}"
-            rx="2" fill="${modelColour(bar.key)}"><title>${E(bar.label)}: ${E(
-            axisLabel(bar.value, dashboard.metric)
-          )}</title></rect>`;
+            rx="2" fill="${modelColour(bar.key)}" opacity="${opacity}"><title>${E(
+            bar.label
+          )}: ${E(axisLabel(bar.value, dashboard.metric))}</title></rect>`;
         })
         .join("");
-      const label = new Date(day.day * 1000).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      });
+      const label = dayLabel(day.day);
+      const suffix = day.partial ? " (in progress)" : "";
       return `<g class="day" data-day="${day.day}" data-x="${x.toFixed(1)}">
           ${stack}
-          <title>${E(label)}: ${E(axisLabel(day.total, dashboard.metric))}</title>
+          <title>${E(label + suffix)}: ${E(axisLabel(day.total, dashboard.metric))}</title>
         </g>`;
     })
     .join("");
@@ -198,15 +213,17 @@ function dailyChart(dashboard) {
   // Day labels: first, middle and last only, so they never collide.
   const marks = dashboard.daily
     .map((day, index) => {
-      if (index !== 0 && index !== dashboard.daily.length - 1 && index !== Math.floor(dashboard.daily.length / 2)) {
+      if (
+        index !== 0 &&
+        index !== dashboard.daily.length - 1 &&
+        index !== Math.floor(dashboard.daily.length / 2)
+      ) {
         return "";
       }
       const x = map.left + index * slot + slot / 2;
-      const label = new Date(day.day * 1000).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      });
-      return `<text class="tick x" x="${x.toFixed(1)}" y="${(H - 6).toFixed(1)}">${E(label)}</text>`;
+      return `<text class="tick x" x="${x.toFixed(1)}" y="${(H - 6).toFixed(1)}">${E(
+        dayLabel(day.day)
+      )}</text>`;
     })
     .join("");
 
@@ -281,6 +298,18 @@ function rangeLabel(range) {
   return { today: "24h", week: "7d", month: "30d" }[range] ?? range;
 }
 
+/**
+ * A day bucket's date. `day.day` is the epoch of *local* midnight, so the local
+ * fields of that instant are the day — reading UTC fields instead would show
+ * yesterday for anyone east of Greenwich.
+ */
+function dayLabel(day) {
+  return new Date(day * 1000).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function axisLabel(value, metric) {
   if (metric === "cost") {
     return value >= 1 ? `$${value.toFixed(0)}` : `$${value.toFixed(2)}`;
@@ -293,8 +322,20 @@ function modelColour(model) {
   return deps.modelColours?.[model] ?? "var(--accent)";
 }
 
+/** The Swift `Picker(…).pickerStyle(.segmented)`, as a button group. */
+function segmented(id, options, selected) {
+  return `<div class="segmented" id="${id}" role="group">${options
+    .map(
+      (option) =>
+        `<button type="button" data-value="${E(option)}"${
+          option === selected ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'
+        }>${E(option)}</button>`
+    )
+    .join("")}</div>`;
+}
+
 function renderUsage(snapshot) {
-  const { usage, missing, settings, dashboard } = snapshot;
+  const { usage, dashboard } = snapshot;
   const parts = [];
 
   if (!usage.length) {
@@ -336,91 +377,28 @@ function renderUsage(snapshot) {
   </div>`);
 
   // --- remaining over time ---
+  // Title and window picker share a row, as in the Swift build. The control is a
+  // button group rather than a <select>: the Swift Picker is segmented, and a
+  // collapsed menu is a different control, not a restyled one.
   const monthlyNote =
     dashboard.windowLabel === "Monthly"
       ? `<p class="hint">Claude has no monthly limit — its windows are 5-hour and weekly.</p>`
       : "";
   parts.push(
-    card(
-      `Remaining over time — ${E(dashboard.windowLabel)}`,
-      `${monthlyNote}<div class="chart-controls">
-        <label>Window
-          <select id="window-select">
-            ${dashboard.windowLabels
-              .map(
-                (label) =>
-                  `<option ${
-                    dashboard.windowLabel === label ? "selected" : ""
-                  }>${E(label)}</option>`
-              )
-              .join("")}
-          </select>
-        </label>
-      </div>${trendChart(dashboard)}`
+    cardWithControls(
+      `Remaining over time — ${dashboard.windowLabel}`,
+      segmented("window-group", dashboard.windowLabels, dashboard.windowLabel),
+      `${monthlyNote}${trendChart(dashboard)}`
     )
   );
 
-  // --- daily + ranking ---
-  parts.push(`<div class="split">
-    ${card(`Daily usage by model (${E(dashboard.metric)})`, dailyChart(dashboard))}
-    ${card(`Top models (${E(dashboard.rangeLabel)})`, rankingChart(dashboard))}
-  </div>`);
+  // --- daily, then top models, each full width, in the Swift order ---
+  parts.push(card(`Daily usage by model (${dashboard.metric})`, dailyChart(dashboard)));
+  parts.push(card(`Top models (${dashboard.rangeLabel})`, rankingChart(dashboard)));
 
   // --- breakdown ---
-  parts.push(
-    card(`Breakdown (${E(dashboard.rangeLabel)})`, breakdownTable(dashboard))
-  );
-
-  if (missing.length) {
-    parts.push(
-      card(
-        "Not detected",
-        missing
-          .map(
-            (line) =>
-              `<div class="row"><span class="grow missing">${E(line)}</span></div>`
-          )
-          .join("")
-      )
-    );
-  }
-
-  const spend = snapshot.spendToday ?? {};
-  if (Object.keys(spend).length) {
-    parts.push(
-      card(
-        "Spent today",
-        Object.entries(spend)
-          .map(
-            ([provider, amount]) =>
-              `<div class="figure"><i class="dot" style="background:${providerColour(
-                provider
-              )}"></i><span class="grow">${E(provider)}</span><span class="value">$${amount.toFixed(
-                2
-              )}</span></div>`
-          )
-          .join("")
-      )
-    );
-  }
-
-  // --- polling ---
-  parts.push(
-    card(
-      "Polling",
-      `<div class="row">
-        <span class="grow label">Interval</span>
-        <input type="number" id="poll-interval" min="30" max="3600" step="30"
-               value="${settings.pollIntervalSeconds}" />
-        <span class="label">seconds</span>
-        <button class="action" id="poll-save">Save</button>
-        <button class="action" id="poll-refresh">Refresh now</button>
-      </div>
-      <p class="hint">Poll #${
-        snapshot.pollCount
-      } · last ${new Date(snapshot.lastPollUnix * 1000).toLocaleTimeString()}</p>`
-    )
-  );
+  parts.push(card(`Breakdown (${dashboard.rangeLabel})`, breakdownTable(dashboard)));
 
   return parts.join("");
 }
+

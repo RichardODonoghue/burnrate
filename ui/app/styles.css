@@ -145,6 +145,58 @@ html, body {
   color: var(--fg-muted);
 }
 
+/* Title and its controls share a row, the shape `HStack { Text; Spacer(); Picker }`
+   has in the Swift build. */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.card-head h2 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A segmented control. The Swift build uses `Picker(…).pickerStyle(.segmented)`,
+   which is one connected run of buttons with the selection lit — not a menu, so
+   not a <select> either. */
+.segmented {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.segmented button {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.segmented button:hover { color: var(--fg); }
+
+.segmented button.on {
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+}
+
 .row {
   display: flex;
   align-items: center;
