@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/RichardODonoghue/burnrate/compare/v0.8.0...v0.8.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* serialise the env-mutating platform path tests ([#82](https://github.com/RichardODonoghue/burnrate/issues/82)) ([7eec8aa](https://github.com/RichardODonoghue/burnrate/commit/7eec8aaec136c0dbd98ac58a7872b1a52bb75c94))
+
 ## [0.8.0](https://github.com/RichardODonoghue/burnrate/compare/v0.7.4...v0.8.0) (2026-09-25)
 
 
