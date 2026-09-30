@@ -1,0 +1,83 @@
+{
+  "": {
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/primary.swiftdeps"
+  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/BurnRateEvaluatorTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/BurnRateEvaluatorTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/BurnRateEvaluatorTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/BurnRateEvaluatorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/BurnRateEvaluatorTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/BurnRateEvaluatorTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/MilestoneEvaluatorTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneEvaluatorTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneEvaluatorTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneEvaluatorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneEvaluatorTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneEvaluatorTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/MilestoneNotifierTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneNotifierTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneNotifierTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneNotifierTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneNotifierTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/MilestoneNotifierTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/ModelUsageTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ModelUsageTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ModelUsageTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ModelUsageTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ModelUsageTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ModelUsageTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/PlatformPathsTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PlatformPathsTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PlatformPathsTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PlatformPathsTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PlatformPathsTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PlatformPathsTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/PricingServiceTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PricingServiceTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PricingServiceTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PricingServiceTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PricingServiceTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/PricingServiceTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/ProviderThrottleTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ProviderThrottleTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ProviderThrottleTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ProviderThrottleTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ProviderThrottleTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/ProviderThrottleTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/StatusIconTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusIconTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusIconTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusIconTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusIconTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusIconTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/StatusMenuTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusMenuTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusMenuTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusMenuTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusMenuTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/StatusMenuTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/TrendSeriesTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/TrendSeriesTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/TrendSeriesTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/TrendSeriesTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/TrendSeriesTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/TrendSeriesTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/UsageAPITests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageAPITests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageAPITests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageAPITests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageAPITests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageAPITests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/UsageComputationTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageComputationTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageComputationTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageComputationTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageComputationTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageComputationTests.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Tests/BurnRateCoreTests/UsageSourceTests.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageSourceTests.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageSourceTests.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageSourceTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageSourceTests.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRateCoreTests.build/UsageSourceTests.dia"  }
+}
