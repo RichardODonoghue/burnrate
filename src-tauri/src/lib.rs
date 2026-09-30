@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuBuilder, MenuItem};
+use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
@@ -38,7 +38,6 @@ use burnrate_core::usage::{DailyModelUsage, ModelUsageAggregator, ModelUsageEntr
 
 /// Menu item ids. Fixed strings, because a Linux tray menu cannot be replaced
 /// once set — rows are reused and only their text changes.
-const ID_STATUS: &str = "status";
 const ID_DASHBOARD: &str = "open-dashboard";
 const ID_CHARTS: &str = "open-charts";
 const ID_UPDATE: &str = "check-updates";
@@ -55,11 +54,30 @@ struct AppState {
     /// Set while a notification is being delivered, so a burst cannot stack.
     notified: AtomicU64,
     core_version: String,
+    /// Providers detected at least once this session.
+    ///
+    /// A widget is only created for one of these. A configured provider whose CLI
+    /// is not installed used to get a menu-bar item that could never show a
+    /// figure — the permanently empty "Codex" widget. Tracking what has been
+    /// *seen* rather than what is in the latest poll keeps a widget from
+    /// disappearing during a transient API failure.
+    seen_providers: Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl AppState {
     fn settings(&self) -> Settings {
         self.settings.lock().expect("settings lock").clone()
+    }
+
+    fn seen_providers(&self) -> std::collections::BTreeSet<String> {
+        self.seen_providers.lock().expect("seen lock").clone()
+    }
+
+    fn note_providers(&self, usage: &[ProviderUsage]) {
+        let mut seen = self.seen_providers.lock().expect("seen lock");
+        for provider in usage {
+            seen.insert(provider.provider_name.clone());
+        }
     }
 
     fn usage(&self) -> Vec<ProviderUsage> {
@@ -78,7 +96,15 @@ impl AppState {
 /// and Quit rows are owned by the menu itself and are dispatched by id, so
 /// keeping a handle to them would be dead weight.
 struct TrayHandles<R: tauri::Runtime> {
-    status: MenuItem<R>,
+    /// One item per usage row — a provider header or a window. Swift's menu is
+    /// laid out this way; folding them into a single item put every figure on
+    /// one line.
+    rows: Vec<RowItem<R>>,
+    /// The shape the rows were built for, so a rebuild happens only when the
+    /// provider or window count actually changes.
+    row_kinds: Vec<RowKind>,
+    /// Bumped on each rebuild, so row ids never collide.
+    generation: u64,
     dashboard: MenuItem<R>,
     charts: MenuItem<R>,
     update: MenuItem<R>,
@@ -319,28 +345,97 @@ fn widget_id(provider: &str) -> String {
 }
 
 /// A menu item paired with the id the event handler dispatches on.
-type Row<R> = (&'static str, MenuItem<R>);
+/// The kind of a usage row, so a menu rebuild can be limited to the polls where
+/// the *shape* changed rather than every poll.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RowKind {
+    Header,
+    Window,
+    Text,
+    Separator,
+}
 
-fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<(Menu<R>, Vec<Row<R>>)> {
-    let status = MenuItem::with_id(app, ID_STATUS, "Starting…", false, None::<&str>)?;
+/// A row of the usage block: either a text row or a separator.
+enum RowItem<R: tauri::Runtime> {
+    Text(MenuItem<R>),
+    /// Held so the separator outlives the builder; the field is not read.
+    Separator(#[allow(dead_code)] PredefinedMenuItem<R>),
+}
+
+/// The rows the usage block should contain, in order.
+///
+/// Swift renders each provider header and each window as its **own** `NSMenuItem`
+/// (`menu.addItem(NSMenuItem(title: "  \(label): \(detail)"))`). This used to
+/// fold the whole block into one item's text with embedded newlines, which macOS
+/// does not render as lines — so every provider and window arrived on a single
+/// line.
+fn row_plan(model: &StatusMenuModel) -> Vec<(RowKind, String)> {
+    model
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            StatusMenuEntry::ProviderHeader { title } => Some((RowKind::Header, title.clone())),
+            // The two leading spaces are Swift's, and are what indents a window
+            // row under its provider.
+            StatusMenuEntry::WindowRow { label, detail } => {
+                Some((RowKind::Window, format!("  {label}: {detail}")))
+            }
+            StatusMenuEntry::Text { text } => Some((RowKind::Text, text.clone())),
+            StatusMenuEntry::Separator => Some((RowKind::Separator, String::new())),
+            StatusMenuEntry::Action { .. } => None,
+        })
+        .collect()
+}
+
+/// A built menu with the handles the next render needs.
+struct BuiltMenu<R: tauri::Runtime> {
+    menu: Menu<R>,
+    rows: Vec<RowItem<R>>,
+    dashboard: MenuItem<R>,
+    charts: MenuItem<R>,
+    update: MenuItem<R>,
+}
+
+/// Builds the menu for a given row plan.
+fn build_menu<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    plan: &[(RowKind, String)],
+    generation: u64,
+) -> tauri::Result<BuiltMenu<R>> {
     let dashboard = MenuItem::with_id(app, ID_DASHBOARD, "Usage Dashboard…", true, None::<&str>)?;
     let charts = MenuItem::with_id(app, ID_CHARTS, "Charts…", true, None::<&str>)?;
     let update = MenuItem::with_id(app, ID_UPDATE, "Check for Updates…", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
     // A plain item, not PredefinedMenuItem::quit: on Linux the predefined Quit
     // reports itself disabled through DBusMenu, so the row is greyed out and
-    // never dispatches — the app becomes unquittable from its own menu. The
-    // Swift build used a plain NSMenuItem with an action, and so does this.
+    // never dispatches — the app becomes unquittable from its own menu.
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)?;
-    let items = vec![
-        (ID_STATUS, status.clone()),
-        (ID_DASHBOARD, dashboard.clone()),
-        (ID_CHARTS, charts.clone()),
-        (ID_UPDATE, update.clone()),
-        (ID_SETTINGS, settings_item.clone()),
-    ];
-    let menu = MenuBuilder::new(app)
-        .item(&status)
+
+    // Row ids are namespaced by generation: the old menu is discarded on a
+    // rebuild but its ids may still be registered.
+    let mut rows: Vec<RowItem<R>> = Vec::with_capacity(plan.len());
+    let mut builder = MenuBuilder::new(app);
+    for (index, (kind, text)) in plan.iter().enumerate() {
+        match kind {
+            RowKind::Separator => {
+                let separator = PredefinedMenuItem::separator(app)?;
+                builder = builder.item(&separator);
+                rows.push(RowItem::Separator(separator));
+            }
+            _ => {
+                let item = MenuItem::with_id(
+                    app,
+                    format!("row-{generation}-{index}"),
+                    text.as_str(),
+                    false,
+                    None::<&str>,
+                )?;
+                builder = builder.item(&item);
+                rows.push(RowItem::Text(item));
+            }
+        }
+    }
+    let menu = builder
         .separator()
         .item(&dashboard)
         .item(&charts)
@@ -349,18 +444,27 @@ fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<(Menu<R>, 
         .item(&settings_item)
         .item(&quit)
         .build()?;
-    Ok((menu, items))
+    Ok(BuiltMenu {
+        menu,
+        rows,
+        dashboard,
+        charts,
+        update,
+    })
 }
 
 fn install_trays(app: &AppHandle<Wry>) -> tauri::Result<TrayHandles<Wry>> {
-    let (menu, items) = build_menu(app)?;
-    let lookup = |id: &str| {
-        items
-            .iter()
-            .find(|(key, _)| *key == id)
-            .map(|(_, item)| item.clone())
-            .expect("menu item")
-    };
+    // The menu starts with no usage rows: the first poll fills them in and the
+    // shape is rebuilt then. One "Loading usage…" row stands in until it arrives,
+    // which is what the Swift menu shows too.
+    let plan = vec![(RowKind::Text, "Loading usage…".to_string())];
+    let BuiltMenu {
+        menu,
+        rows,
+        dashboard,
+        charts,
+        update,
+    } = build_menu(app, &plan, 0)?;
     let main = TrayIconBuilder::with_id("main")
         .icon(tray_image(None, 22))
         .icon_as_template(true)
@@ -369,10 +473,12 @@ fn install_trays(app: &AppHandle<Wry>) -> tauri::Result<TrayHandles<Wry>> {
         .build(app)?;
 
     Ok(TrayHandles {
-        status: lookup(ID_STATUS),
-        dashboard: lookup(ID_DASHBOARD),
-        charts: lookup(ID_CHARTS),
-        update: lookup(ID_UPDATE),
+        rows,
+        row_kinds: plan.iter().map(|(kind, _)| *kind).collect(),
+        generation: 0,
+        dashboard,
+        charts,
+        update,
         main,
         widgets: Vec::new(),
         known_widgets: Vec::new(),
@@ -428,16 +534,56 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     handles.main.set_icon(Some(tray_image(remaining, 22))).ok();
 
     let model = StatusMenuBuilder::main_menu(&usage, None, false, settings.includes_charts, now);
-    write_menu(
-        &model,
-        &handles.status,
-        &handles.dashboard,
-        &handles.charts,
-        &handles.update,
-    );
+    let plan = row_plan(&model);
+    let kinds: Vec<RowKind> = plan.iter().map(|(kind, _)| *kind).collect();
 
-    // Widgets: add the ones the settings ask for, drop the rest.
+    // Rebuild only when the shape changes — a provider appearing, or a window
+    // count moving. On Linux a tray menu cannot be replaced once set, so this is
+    // a no-op there and the text rewrite below is what carries the update.
+    if kinds != handles.row_kinds {
+        let generation = handles.generation + 1;
+        match build_menu(app, &plan, generation) {
+            Ok(built) => {
+                if handles.main.set_menu(Some(built.menu)).is_ok() {
+                    handles.rows = built.rows;
+                    handles.row_kinds = kinds;
+                    handles.generation = generation;
+                    handles.dashboard = built.dashboard;
+                    handles.charts = built.charts;
+                    handles.update = built.update;
+                }
+            }
+            Err(error) => eprintln!("burnrate: menu rebuild failed: {error}"),
+        }
+    }
+
+    // Text is rewritten every poll: the figures change, the shape does not.
+    for (item, (_, text)) in handles.rows.iter_mut().zip(plan.iter()) {
+        if let RowItem::Text(item) = item {
+            let _ = item.set_text(text);
+        }
+    }
+    let _ = handles.dashboard.set_enabled(true);
+    let has_charts = model.entries.iter().any(|entry| {
+        matches!(
+            entry,
+            StatusMenuEntry::Action {
+                action: StatusMenuAction::OpenCharts,
+                ..
+            }
+        )
+    });
+    let _ = handles.charts.set_enabled(has_charts);
+    let _ = handles.update.set_enabled(true);
+
+    // Widgets: only for providers this app has actually detected. A configured
+    // provider whose CLI is not installed used to get a menu-bar item that could
+    // never show a figure — a permanently empty "Codex" widget.
+    let detected = app_state.seen_providers();
     for provider in &settings.widget_providers {
+        if !detected.contains(provider) {
+            continue;
+        }
         if handles.known_widgets.iter().any(|name| name == provider) {
             continue;
         }
@@ -473,57 +619,6 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     }
     handles.known_widgets = alive;
     Ok(())
-}
-
-/// Rewrites the fixed rows of an already-created menu.
-fn write_menu(
-    model: &StatusMenuModel,
-    status: &MenuItem<Wry>,
-    dashboard: &MenuItem<Wry>,
-    charts: &MenuItem<Wry>,
-    update: &MenuItem<Wry>,
-) {
-    // Everything between the header and the actions is rendered as one summary
-    // line: a fixed menu cannot grow rows, and the dashboard carries the detail.
-    let summary = menu_summary(model);
-    let _ = status.set_text(summary);
-    let _ = dashboard.set_enabled(true);
-    let _ = charts.set_enabled(model_has_charts(model));
-    let _ = update.set_enabled(true);
-}
-
-fn menu_has_charts_row(model: &StatusMenuModel) -> bool {
-    model.entries.iter().any(|entry| {
-        matches!(
-            entry,
-            StatusMenuEntry::Action {
-                action: StatusMenuAction::OpenCharts,
-                ..
-            }
-        )
-    })
-}
-
-fn model_has_charts(model: &StatusMenuModel) -> bool {
-    menu_has_charts_row(model)
-}
-
-fn menu_summary(model: &StatusMenuModel) -> String {
-    let mut lines: Vec<String> = Vec::new();
-    for entry in &model.entries {
-        match entry {
-            StatusMenuEntry::ProviderHeader { title } => lines.push(title.clone()),
-            StatusMenuEntry::WindowRow { label, detail } => {
-                lines.push(format!("  {label}: {detail}"))
-            }
-            StatusMenuEntry::Text { text } => lines.push(text.clone()),
-            _ => {}
-        }
-    }
-    if lines.is_empty() {
-        return "No providers found".to_string();
-    }
-    lines.join("\n")
 }
 
 // MARK: - Commands
@@ -1113,8 +1208,10 @@ fn set_notify_on_reset(app: AppHandle<Wry>, enabled: bool) -> Result<Settings, S
 #[tauri::command]
 fn known_providers(app: AppHandle<Wry>) -> Vec<String> {
     let state = app.state::<Arc<AppState>>();
-    let usage = state.usage();
-    let mut names: Vec<String> = usage.iter().map(|u| u.provider_name.clone()).collect();
+    // Providers this app has detected, not every provider it could support: the
+    // widgets pane offered a Codex toggle to someone with no Codex credentials,
+    // and the tray then showed an empty "Codex" item.
+    let mut names: Vec<String> = state.seen_providers().into_iter().collect();
     for alert in &state.settings().milestones {
         if !names.contains(&alert.provider) {
             names.push(alert.provider.clone());
@@ -1156,6 +1253,7 @@ fn poll_once(app: &AppHandle<Wry>) {
         poller.save_model_history();
         result
     };
+    state.note_providers(&result.usage);
     let notifications = result.notifications.clone();
     let providers = result.usage.len();
     let missing = result.missing.len();
@@ -1210,8 +1308,24 @@ pub fn run() {
             last: Mutex::new(None),
             notified: AtomicU64::new(0),
             core_version: burnrate_core::VERSION.to_string(),
+            seen_providers: Mutex::new(std::collections::BTreeSet::new()),
         }))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // BurnRate lives in the menu bar. Closing the dashboard window
+                // used to quit the app and take the tray icon with it; the window
+                // is hidden instead and the tray keeps polling.
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
+            // A menu-bar app has no Dock icon, as the Swift build's LSUIElement
+            // gives it. Without this the app shows up in the Dock and the app
+            // switcher while it is only a tray icon.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let handle = app.handle().clone();
             let handles = install_trays(&handle)?;
             eprintln!(
