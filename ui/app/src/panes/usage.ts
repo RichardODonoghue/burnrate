@@ -302,10 +302,9 @@ export function wire(snapshot: Snapshot, context: PaneContext): void {
               day.totalText
             )}</span></div>`
           : "";
-      daily.tip.innerHTML =
-        `<div class="tip-head">${esc(dayHeading(day.day))}${
-          day.partial ? " · in progress" : ""
-        }</div>${rows.join("")}${total}`;
+      daily.tip.innerHTML = `<div class="tip-head">${esc(
+        dayHeading(day.day)
+      )}</div>${rows.join("")}${total}`;
       daily.tip.hidden = false;
       placeTooltip(
         daily.tip,

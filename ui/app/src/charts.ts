@@ -323,9 +323,6 @@ function dailySvg(dashboard: Dashboard, width: number): string {
   const bars = dashboard.daily
     .map((day, index) => {
       const x = map.left + index * slot + (slot - barWidth) / 2;
-      // Today is not over. Beside complete days a part-day reads as a cliff, so
-      // it is drawn faded — the day is there, it is simply not finished.
-      const opacity = day.partial ? 0.5 : 1;
       let offset = 0;
       const stack = day.bars
         .map((bar) => {
@@ -334,7 +331,7 @@ function dailySvg(dashboard: Dashboard, width: number): string {
           offset += barHeight;
           return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}"
             width="${barWidth.toFixed(1)}" height="${Math.max(1, barHeight).toFixed(1)}"
-            rx="2" fill="${modelColour(bar.key)}" opacity="${opacity}"/>`;
+            rx="2" fill="${modelColour(bar.key)}"/>`;
         })
         .join("");
       // The transparent full-height rect is the hover target for the whole column.

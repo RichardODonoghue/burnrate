@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::alerts::BurnAlert;
 use crate::model::{ProviderUsage, UsageWindow};
@@ -37,10 +37,44 @@ pub struct Notification {
 struct WindowState {
     /// Last remaining % seen, i.e. the "previous" for a crossing test.
     last_remaining: Option<f64>,
+    /// The vendor's reset time for this window, last seen. A vendor *moving it
+    /// forward* means a fresh window began — the primary reset signal, and the
+    /// only one that works when the old window ended at a high percentage.
+    resets_at: Option<i64>,
     /// Monotonic second at which a burn alert last fired for this window.
     last_burn_fired: Option<i64>,
     /// Remaining-% history for the burn-rate baseline.
     history: Vec<crate::alerts::Reading>,
+}
+
+/// The part of the notifier's state that has to survive a relaunch.
+///
+/// Swift writes this to `UserDefaults` as `notifierState`. Without it the first
+/// poll after a launch has no baseline, so a plan switch that happened while the
+/// app was closed is indistinguishable from a continued session — and, just as
+/// importantly, restoring the baseline is what makes the saved fingerprint
+/// load-bearing, because that fingerprint is the only thing that can tell the two
+/// apart.
+///
+/// The burn history is deliberately not persisted: it has six hours of retention
+/// and is rebuilt from the first few polls, so what a relaunch loses is a few
+/// minutes of baseline.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifierState {
+    pub account_fingerprint: Option<String>,
+    pub windows: HashMap<String, PersistedWindow>,
+    pub cost_alerted_days: HashMap<String, i64>,
+}
+
+/// One window's durable state.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedWindow {
+    pub last_remaining: Option<f64>,
+    pub resets_at: Option<i64>,
+    /// Kept for the burn cooldown, which outlives a poll by design.
+    pub last_burn_fired: Option<i64>,
 }
 
 /// Decides which notifications to raise, given successive polls.
@@ -77,6 +111,51 @@ impl MilestoneNotifier {
     pub fn with_burn_cooldown(mut self, cooldown: Duration) -> Self {
         self.burn_cooldown = cooldown;
         self
+    }
+
+    /// The durable state, for writing to disk.
+    pub fn snapshot_state(&self) -> NotifierState {
+        NotifierState {
+            account_fingerprint: self.account_fingerprint.clone(),
+            windows: self
+                .windows
+                .iter()
+                .map(|(key, state)| {
+                    (
+                        key.clone(),
+                        PersistedWindow {
+                            last_remaining: state.last_remaining,
+                            resets_at: state.resets_at,
+                            last_burn_fired: state.last_burn_fired,
+                        },
+                    )
+                })
+                .collect(),
+            cost_alerted_days: self.cost_alerted_days.clone(),
+        }
+    }
+
+    /// Restores it. `history` and the suppression flags are left alone: the first
+    /// is rebuilt from the next few polls, and the second is derived from the
+    /// current settings rather than from anything that happened before.
+    pub fn restore_state(&mut self, state: NotifierState) {
+        self.account_fingerprint = state.account_fingerprint;
+        self.cost_alerted_days = state.cost_alerted_days;
+        self.windows = state
+            .windows
+            .into_iter()
+            .map(|(key, window)| {
+                (
+                    key,
+                    WindowState {
+                        last_remaining: window.last_remaining,
+                        resets_at: window.resets_at,
+                        last_burn_fired: window.last_burn_fired,
+                        history: Vec::new(),
+                    },
+                )
+            })
+            .collect();
     }
 
     /// A plan switch (or a first poll) resets the per-window history, so a
@@ -134,6 +213,7 @@ impl MilestoneNotifier {
 
                 let suppressed = self.suppressed.get(&key).copied().unwrap_or(false);
                 if !suppressed {
+                    // Every one of these needs a baseline to compare against.
                     if let (Some(previous), Some(current)) = (previous, current) {
                         for milestone in &settings.milestones {
                             if milestone.provider != provider.provider_name
@@ -153,14 +233,29 @@ impl MilestoneNotifier {
                         }
 
                         if settings.notify_on_reset {
-                            // Remaining jumping back up is a reset.
-                            if current > previous + 5.0 {
+                            // Two signals, as the Swift build has it.
+                            //
+                            // Primary: the vendor moved the window's reset time
+                            // forward, so a fresh window began — *however much*
+                            // remaining jumped, because an old window can end at a
+                            // high percentage after hours of idle. That is the case
+                            // a jump test misses entirely.
+                            let moved_forward = matches!(
+                                (state.resets_at, window.resets_at),
+                                (Some(was), Some(now_resets)) if now_resets > was
+                            );
+                            let moved = moved_forward && current > previous;
+                            // Fallback, for sources that report no reset time: a
+                            // large jump. 40 points, not the 5 this used — a quiet
+                            // window can gain 5 points from cache expiry alone.
+                            let jumped = current - previous >= 40.0;
+                            if moved || jumped {
                                 notifications.push(Notification {
                                     title: format!(
                                         "{} {} reset",
                                         provider.provider_name, window.label
                                     ),
-                                    body: format!("Back to {current:.0}% remaining."),
+                                    body: format!("Window reset — {current:.0}% remaining."),
                                     kind: "reset",
                                 });
                             }
@@ -183,6 +278,12 @@ impl MilestoneNotifier {
                     }
                 }
 
+                // Recorded whether or not the rule was suppressed: suppression is
+                // about not *notifying*, and a stale reset time would make the next
+                // poll see the same move forward a second time.
+                if window.resets_at.is_some() {
+                    state.resets_at = window.resets_at;
+                }
                 state.last_remaining = current;
             }
         }
@@ -284,6 +385,26 @@ mod tests {
             name,
             None,
             vec![UsageWindow::new(window_label, 0, Some(percent), None)],
+        )
+    }
+
+    /// A reading with the vendor's reset time attached, which is what the primary
+    /// reset signal needs.
+    fn provider_resetting(
+        name: &str,
+        window_label: &str,
+        percent: f64,
+        resets_at: i64,
+    ) -> ProviderUsage {
+        ProviderUsage::new(
+            name,
+            None,
+            vec![UsageWindow::new(
+                window_label,
+                0,
+                Some(percent),
+                Some(resets_at),
+            )],
         )
     }
 
@@ -389,6 +510,183 @@ mod tests {
             300,
         );
         assert!(burst.is_empty(), "no phantom milestones after a switch");
+    }
+
+    /// The primary reset signal: the vendor moved the window's reset time
+    /// forward, so a fresh window began.
+    ///
+    /// This is the case a jump test cannot see. The old window ended at **95%**
+    /// remaining — hours of idle — and the new one starts at 100%, so remaining
+    /// moved by 5 points and the old threshold of 5 would only *just* have caught
+    /// it, while anything quieter would have been missed entirely.
+    #[test]
+    fn a_later_reset_time_means_a_fresh_window() {
+        let mut notifier = MilestoneNotifier::new();
+        let mut settings = settings_for(20.0);
+        settings.notify_on_reset = true;
+
+        notifier.evaluate(
+            &[provider_resetting("Claude", "Rolling", 95.0, NOW + 3600)],
+            &settings,
+            NOW,
+            300,
+        );
+        // Same reading, but the window now resets an hour later: it rolled over.
+        let reset = notifier.evaluate(
+            &[provider_resetting("Claude", "Rolling", 100.0, NOW + 7200)],
+            &settings,
+            NOW + 300,
+            300,
+        );
+        assert_eq!(reset.len(), 1, "got {reset:?}");
+        assert_eq!(reset[0].kind, "reset");
+    }
+
+    /// An unchanged reset time is not a reset, however the reading moves, and a
+    /// reset time that has *not* moved is not one either.
+    #[test]
+    fn an_unchanged_reset_time_is_not_a_reset() {
+        let mut notifier = MilestoneNotifier::new();
+        let mut settings = settings_for(20.0);
+        settings.notify_on_reset = true;
+
+        notifier.evaluate(
+            &[provider_resetting("Claude", "Rolling", 80.0, NOW + 3600)],
+            &settings,
+            NOW,
+            300,
+        );
+        // Drifts up well past the old 5-point threshold, same deadline.
+        let quiet = notifier.evaluate(
+            &[provider_resetting("Claude", "Rolling", 92.0, NOW + 3600)],
+            &settings,
+            NOW + 300,
+            300,
+        );
+        assert!(
+            quiet.is_empty(),
+            "a 12-point drift is not a reset: {quiet:?}"
+        );
+    }
+
+    /// The fallback, for sources that report no reset time at all: a large jump.
+    #[test]
+    fn a_large_jump_is_a_reset_without_a_deadline() {
+        let mut notifier = MilestoneNotifier::new();
+        let mut settings = settings_for(20.0);
+        settings.notify_on_reset = true;
+
+        notifier.evaluate(&[provider("Claude", "Rolling", 10.0)], &settings, NOW, 300);
+        let reset = notifier.evaluate(
+            &[provider("Claude", "Rolling", 98.0)],
+            &settings,
+            NOW + 300,
+            300,
+        );
+        assert_eq!(reset.len(), 1, "got {reset:?}");
+        assert_eq!(reset[0].kind, "reset");
+    }
+
+    /// The first poll has no baseline, so nothing can be a reset.
+    #[test]
+    fn the_first_reading_is_never_a_reset() {
+        let mut notifier = MilestoneNotifier::new();
+        let mut settings = settings_for(20.0);
+        settings.notify_on_reset = true;
+        let first = notifier.evaluate(
+            &[provider_resetting("Claude", "Rolling", 100.0, NOW + 3600)],
+            &settings,
+            NOW,
+            300,
+        );
+        assert!(first.is_empty(), "got {first:?}");
+    }
+
+    /// A burn alert has to fire through `evaluate`, not just through
+    /// `evaluate_burn` in isolation. It did not: a stray `if false` left the
+    /// burn loop unreachable and the whole suite still passed, because nothing
+    /// exercised the path end to end.
+    #[test]
+    fn a_burn_alert_fires_through_evaluate() {
+        let mut notifier = MilestoneNotifier::new();
+        let mut settings = settings_for(20.0);
+        // A 10-minute alert, because `BurnRateEvaluator::detect` requires the
+        // window to actually *span* its minutes: a 30-minute alert needs ~28
+        // minutes of history, which three polls 5 minutes apart do not provide.
+        settings.burn_alerts = vec![BurnAlert::new("Claude", "Rolling", 15.0, 10)];
+
+        notifier.evaluate(&[provider("Claude", "Rolling", 90.0)], &settings, NOW, 300);
+        notifier.evaluate(
+            &[provider("Claude", "Rolling", 80.0)],
+            &settings,
+            NOW + 600,
+            300,
+        );
+        let burned = notifier.evaluate(
+            &[provider("Claude", "Rolling", 60.0)],
+            &settings,
+            NOW + 1200,
+            300,
+        );
+        assert!(
+            burned.iter().any(|n| n.kind == "burn"),
+            "a 20-point drop in 20 minutes should fire: {burned:?}"
+        );
+    }
+
+    /// The durable state round-trips, and the burn cooldown survives with it.
+    #[test]
+    fn notifier_state_round_trips() {
+        let mut notifier = MilestoneNotifier::new();
+        let settings = settings_for(20.0);
+
+        notifier.set_account_fingerprint(Some("acct-1".into()));
+        notifier.evaluate(
+            &[provider_resetting("Claude", "Rolling", 74.0, NOW + 3600)],
+            &settings,
+            NOW,
+            300,
+        );
+        let saved = notifier.snapshot_state();
+        assert_eq!(saved.account_fingerprint.as_deref(), Some("acct-1"));
+        assert_eq!(saved.windows["Claude|Rolling"].last_remaining, Some(74.0));
+        assert_eq!(saved.windows["Claude|Rolling"].resets_at, Some(NOW + 3600));
+
+        // A relaunch restores the baseline, so a continued session does not look
+        // like a fresh account.
+        let mut restarted = MilestoneNotifier::new();
+        restarted.restore_state(saved.clone());
+        assert_eq!(restarted.snapshot_state(), saved);
+        assert_eq!(
+            restarted.snapshot_state().account_fingerprint.as_deref(),
+            Some("acct-1"),
+            "the fingerprint must survive, or a switch across a relaunch is invisible"
+        );
+    }
+
+    /// A switch across a relaunch: the saved fingerprint is what makes the
+    /// restored baseline suppressible rather than a burst of phantom alerts.
+    #[test]
+    fn a_switch_across_a_relaunch_suppresses_a_burst() {
+        let settings = settings_for(20.0);
+        let mut before = MilestoneNotifier::new();
+        before.set_account_fingerprint(Some("acct-a".into()));
+        before.evaluate(&[provider("Claude", "Rolling", 95.0)], &settings, NOW, 300);
+
+        // Restart, having switched accounts while the app was closed.
+        let mut after = MilestoneNotifier::new();
+        after.restore_state(before.snapshot_state());
+        after.set_account_fingerprint(Some("acct-b".into()));
+        let burst = after.evaluate(
+            &[provider("Claude", "Rolling", 5.0)],
+            &settings,
+            NOW + 300,
+            300,
+        );
+        assert!(
+            burst.is_empty(),
+            "the restored baseline must not fire for the new account: {burst:?}"
+        );
     }
 
     /// `resetWithoutAccountSwitchStillAlerts` — a genuine reset still notifies.
