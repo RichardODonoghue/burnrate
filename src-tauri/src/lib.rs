@@ -22,6 +22,7 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
+mod notifications;
 mod swift_import;
 
 use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
@@ -1091,28 +1092,15 @@ static MODELS_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// "notifications are broken" and "notifications cannot be tested this way".
 #[tauri::command]
 fn send_test_notification(app: AppHandle<Wry>) -> Result<String, String> {
-    use tauri_plugin_notification::NotificationExt;
-    let notifications = app.notification();
-
-    let permission = notifications
-        .permission_state()
-        .map(|state| format!("{state:?}"))
-        .unwrap_or_else(|error| format!("unknown ({error})"));
-
-    notifications
-        .builder()
-        .title("BurnRate test")
-        .body("If you can read this, notifications are working.")
-        .show()
-        .map_err(|error| format!("delivery failed: {error}"))?;
-
-    if tauri::is_dev() {
-        return Ok(format!(
-            "Sent (permission: {permission}), but a dev build is attributed to \
-             Terminal, not BurnRate — check the bundled app for the real banner."
-        ));
-    }
-    Ok(format!("Sent (permission: {permission})"))
+    post_banner(
+        &app,
+        "BurnRate test",
+        "If you can read this, notifications are working.",
+    )?;
+    Ok(format!(
+        "Sent — permission {}",
+        notification_permission(&app)
+    ))
 }
 
 /// Forces an immediate poll, skipping the throttle — the tray's Refresh.
@@ -1295,16 +1283,65 @@ fn poll_once(app: &AppHandle<Wry>) {
 /// Delivers notifications natively. The plugin is a no-op where the platform
 /// refuses permission, so a failure is logged rather than fatal: usage figures
 /// matter more than banners.
-fn deliver(app: &AppHandle<Wry>, notifications: &[burnrate_core::notifier::Notification]) {
-    use tauri_plugin_notification::NotificationExt;
-    for notification in notifications {
-        let delivered = app
-            .notification()
+/// Posts one banner.
+///
+/// macOS needs `UNUserNotificationCenter` — see `notifications.rs`. Elsewhere the
+/// Tauri plugin's path works and is used instead.
+fn post_banner(app: &AppHandle<Wry>, title: &str, body: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        notifications::post(title, body)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        app.notification()
             .builder()
-            .title(&notification.title)
-            .body(&notification.body)
-            .show();
-        if let Err(error) = delivered {
+            .title(title)
+            .body(body)
+            .show()
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// Asks for notification permission, prompting where the platform does that.
+fn authorise_notifications(app: &AppHandle<Wry>) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        notifications::authorise()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        app.notification()
+            .request_permission()
+            .map(|state| format!("{state:?}"))
+            .unwrap_or_else(|error| format!("error ({error})"))
+    }
+}
+
+/// The current permission state, without prompting.
+fn notification_permission(app: &AppHandle<Wry>) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        notifications::permission_state()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        app.notification()
+            .permission_state()
+            .map(|state| format!("{state:?}"))
+            .unwrap_or_else(|error| format!("unknown ({error})"))
+    }
+}
+
+fn deliver(app: &AppHandle<Wry>, notifications: &[burnrate_core::notifier::Notification]) {
+    for notification in notifications {
+        if let Err(error) = post_banner(app, &notification.title, &notification.body) {
             eprintln!(
                 "burnrate: notification failed ({error}): {}",
                 notification.title
@@ -1438,30 +1475,22 @@ pub fn run() {
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(3));
                     let _ = runner.run_on_main_thread(move || {
-                        use tauri_plugin_notification::NotificationExt;
-                        let handle = ask.clone();
-                        // `show` is what triggers the macOS permission prompt,
-                        // so its result is the only way to tell "delivered" from
-                        // "the platform refused".
-                        match handle
-                            .notification()
-                            .builder()
-                            .title("BurnRate")
-                            .body("Notifications are on. Milestones, resets, burn rate and daily spend appear here.")
-                            .show()
-                        {
-                            Ok(()) => eprintln!("burnrate: welcome notification accepted"),
-                            Err(error) => eprintln!("burnrate: welcome notification refused: {error}"),
+                        // Asking is what shows the macOS permission prompt, so it
+                        // is also the only way to learn the answer.
+                        let asked = authorise_notifications(&ask);
+                        eprintln!("burnrate: notification permission {asked}");
+                        if asked.starts_with("granted") || asked.contains("Granted") {
+                            match post_banner(
+                                &ask,
+                                "BurnRate",
+                                "Notifications are on. Milestones, resets, burn rate and daily spend appear here.",
+                            ) {
+                                Ok(()) => eprintln!("burnrate: welcome notification delivered"),
+                                Err(error) => {
+                                    eprintln!("burnrate: welcome notification failed: {error}")
+                                }
+                            }
                         }
-                        let permission = handle
-                            .notification()
-                            .permission_state()
-                            .map(|state| format!("{state:?}"))
-                            .unwrap_or_else(|error| format!("unknown ({error})"));
-                        eprintln!(
-                            "burnrate: notification permission {permission}, dev build {}",
-                            tauri::is_dev()
-                        );
                     });
                 });
             }

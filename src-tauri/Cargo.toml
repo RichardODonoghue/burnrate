@@ -21,3 +21,13 @@ serde_json = "1"
 base64 = "0.23"
 burnrate-core = { path = "../crates/burnrate-core" }
 tauri-plugin-notification = "2"
+
+# macOS notifications go through UNUserNotificationCenter. The notification
+# plugin cannot do this: it routes through `notify-rust` -> `mac-notification-sys`,
+# which posts via `NSUserNotificationCenter` — deprecated in macOS 10.14 and inert
+# on current releases, so `show()` reports success while nothing is displayed.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-user-notifications = "0.3"
+block2 = "0.6"
