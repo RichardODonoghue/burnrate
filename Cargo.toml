@@ -2,11 +2,15 @@
 resolver = "2"
 members = ["crates/burnrate-core", "crates/icon-gen", "src-tauri"]
 
-# Tauri's generated context/config reads these from src-tauri/tauri.conf.json;
-# nothing platform-specific lives in the workspace root.
+# The version here is the app's *only* version. Tauri's generated context reads
+# it when `src-tauri/tauri.conf.json` omits `version` (which it must), and
+# `burnrate_core::VERSION` reports it too, so the two numbers in About cannot
+# disagree. release-please bumps it; see release-please-config.json.
+#
+# Nothing platform-specific lives in the workspace root.
 
 [workspace.package]
-version = "1.0.0"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
