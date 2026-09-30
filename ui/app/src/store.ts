@@ -6,7 +6,7 @@
 // other way.
 
 import { api } from "./api.js";
-import { toast } from "./dom.js";
+import { esc, toast } from "./dom.js";
 import type { AppPane, Snapshot } from "./types.js";
 
 export interface AppState {
@@ -86,8 +86,12 @@ export function windowLabelsFor(provider: string): string[] {
 
 /** The `<option>` list for a window select. */
 export function windowOptions(provider: string): string {
+  // Escaped because these labels are not all ours: a Claude model-scoped window
+  // is labelled with the vendor API's `scope.model.display_name`, and this lands
+  // in `innerHTML`. Everything else rendered from the snapshot is escaped for the
+  // same reason; this one was not.
   return windowLabelsFor(provider)
-    .map((label) => `<option>${label}</option>`)
+    .map((label) => `<option>${esc(label)}</option>`)
     .join("");
 }
 
