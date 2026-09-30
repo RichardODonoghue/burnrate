@@ -1722,6 +1722,27 @@ mod tests {
         );
     }
 
+    /// The bundle version has exactly one source: the workspace `Cargo.toml`.
+    ///
+    /// A `version` in `tauri.conf.json` **overrides** the crate version, and the
+    /// two then drift without anything noticing. They did: both read `1.0.0`
+    /// while the newest release was `0.8.0`, so About showed a number that
+    /// corresponded to no release at all. Omitting the field makes Tauri fall
+    /// back to the crate version — which is also what `burnrate_core::VERSION`
+    /// reports for About's "Core" line, so the two cannot disagree.
+    #[test]
+    fn the_bundle_version_has_one_source() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json parses");
+        assert!(
+            config.get("version").is_none(),
+            "tauri.conf.json must not set `version`: it overrides the crate version and drifts"
+        );
+        // And the crate version really is the workspace one, so a crate that
+        // grew its own version would be caught here.
+        assert_eq!(env!("CARGO_PKG_VERSION"), burnrate_core::VERSION);
+    }
+
     // The frontend's view of the wire is checked by TypeScript now
     // (`ui/app/src/types.ts`) — the job this test did by parsing JavaScript for
     // `dashboard.<field>` strings. A field read that Rust does not send is a

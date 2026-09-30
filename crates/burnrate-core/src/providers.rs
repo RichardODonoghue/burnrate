@@ -303,7 +303,6 @@ impl ClaudeUsageApiProvider {
         Ok((windows, plan))
     }
 
-    /// The OAuth access token, from the credentials file or the Keychain.
     /// The signed-in account's identity, for detecting a plan switch.
     ///
     /// `~/.claude.json`'s `oauthAccount` gives `accountUuid|organizationUuid`,
@@ -348,26 +347,32 @@ impl ClaudeUsageApiProvider {
         format!("token|{}", crate::formatting::stable_hash(token))
     }
 
+    /// The OAuth access token, from the credentials file or the Keychain.
     pub fn access_token(&self) -> Option<String> {
+        self.read_credential_oauth()?
+            .get("accessToken")
+            .and_then(|v| v.as_str())
+            .filter(|token| !token.is_empty())
+            .map(str::to_string)
+    }
+
+    /// The signed-in Claude Code OAuth object, from
+    /// `~/.claude/.credentials.json` or, failing that, the login Keychain.
+    ///
+    /// Both hold the same shape, and the Keychain is the *only* place on a fresh
+    /// install — there is no credentials file at all on this machine. Reading
+    /// just the file is why the token worked (that path had grown its own
+    /// Keychain fallback) while the plan tier came back empty: "the plan is
+    /// missing for Claude subs".
+    fn read_credential_oauth(&self) -> Option<serde_json::Value> {
         if let Some(oauth) = self.read_credentials_file() {
-            if let Some(token) = oauth
-                .get("accessToken")
-                .and_then(|v| v.as_str())
-                .filter(|token| !token.is_empty())
-            {
-                return Some(token.to_string());
-            }
+            return Some(oauth);
         }
-        // Claude Code can hold the same JSON in the login Keychain.
         let raw = self
             .credentials
             .generic_password("Claude Code-credentials")?;
         let value: serde_json::Value = serde_json::from_slice(&raw).ok()?;
-        value
-            .get("claudeAiOauth")
-            .and_then(|oauth| oauth.get("accessToken"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
+        value.get("claudeAiOauth").cloned()
     }
 
     fn read_credentials_file(&self) -> Option<serde_json::Value> {
@@ -378,28 +383,58 @@ impl ClaudeUsageApiProvider {
 
     /// Plan tier from the credential, e.g. "Max 20x".
     fn credential_plan(&self) -> Option<String> {
-        let oauth = self.read_credentials_file()?;
+        let oauth = self.read_credential_oauth()?;
         let subscription = oauth
             .get("subscriptionType")
             .or_else(|| oauth.get("subscription_type"))
-            .and_then(|v| v.as_str());
+            .and_then(|v| v.as_str())?;
         let tier = oauth
             .get("rateLimitTier")
             .or_else(|| oauth.get("rate_limit_tier"))
             .and_then(|v| v.as_str());
-        Self::format_plan(subscription?, tier)
+        Self::format_plan(subscription, tier)
     }
 
-    /// "Max" + "20x" → "Max 20x"; missing pieces are dropped.
+    /// `"max"` + `"default_claude_max_20x"` → `"Max 20x"`.
+    ///
+    /// Ported from Swift's `formatPlan`, and it is *not* "join the two strings":
+    /// the subscription type goes through a fixed table, and the multiplier is
+    /// the `\d+x` at the **end of the tier** — `default_claude_max_20x` carries
+    /// the "20x", not the whole string. Joining them yielded
+    /// `"max default_claude_max_20x"`.
+    ///
+    /// An empty subscription type is `None` rather than `""`, so no caller can
+    /// render a provider as "Claude - ".
     pub fn format_plan(subscription_type: &str, rate_limit_tier: Option<&str>) -> Option<String> {
-        let mut parts: Vec<&str> = Vec::new();
-        if !subscription_type.is_empty() {
-            parts.push(subscription_type);
+        if subscription_type.is_empty() {
+            return None;
         }
-        if let Some(tier) = rate_limit_tier.filter(|tier| !tier.is_empty()) {
-            parts.push(tier);
-        }
-        (!parts.is_empty()).then(|| parts.join(" "))
+        let name = match subscription_type.to_lowercase().as_str() {
+            "max" => "Max",
+            "team" => "Team",
+            "pro" => "Pro",
+            "enterprise" => "Enterprise",
+            _ => subscription_type,
+        };
+        Some(match rate_limit_tier.and_then(Self::plan_multiplier) {
+            Some(multiplier) => format!("{name} {multiplier}"),
+            None => name.to_string(),
+        })
+    }
+
+    /// The `\d+x` suffix of a rate-limit tier: `"default_claude_max_20x"` →
+    /// `"20x"`. The Swift build matches this with the regex `[0-9]+x$`.
+    fn plan_multiplier(tier: &str) -> Option<String> {
+        let without_x = tier.strip_suffix('x')?;
+        let digits: String = without_x
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        (!digits.is_empty()).then(|| format!("{digits}x"))
     }
 
     /// Parses the usage response. Percentages are **used**; the app shows
@@ -1022,21 +1057,78 @@ mod tests {
         assert!(ClaudeUsageApiProvider::parse_windows(b"not json").is_err());
     }
 
+    /// The plan name comes from a fixed table and the multiplier from the *end*
+    /// of the rate-limit tier — the real credential shape, not two
+    /// already-formatted halves. The previous test fed it `"Max"` and `"20x"`,
+    /// so joining the strings looked correct and hid that the real credential
+    /// (`"max"`, `"default_claude_max_20x"`) rendered as
+    /// `"max default_claude_max_20x"`.
     #[test]
-    fn format_plan_joins_the_parts_it_has() {
+    fn format_plan_matches_the_swift_shapes() {
         assert_eq!(
-            ClaudeUsageApiProvider::format_plan("Max", Some("20x")),
+            ClaudeUsageApiProvider::format_plan("max", Some("default_claude_max_20x")),
             Some("Max 20x".into())
         );
         assert_eq!(
-            ClaudeUsageApiProvider::format_plan("Max", None),
-            Some("Max".into())
+            ClaudeUsageApiProvider::format_plan("team", Some("default_claude_team_5x")),
+            Some("Team 5x".into())
         );
         assert_eq!(
-            ClaudeUsageApiProvider::format_plan("", Some("20x")),
-            Some("20x".into())
+            ClaudeUsageApiProvider::format_plan("pro", None),
+            Some("Pro".into())
+        );
+        assert_eq!(
+            ClaudeUsageApiProvider::format_plan("enterprise", Some("default_claude_enterprise")),
+            Some("Enterprise".into())
+        );
+        // An unknown subscription type falls through verbatim rather than
+        // vanishing.
+        assert_eq!(
+            ClaudeUsageApiProvider::format_plan("weird", None),
+            Some("weird".into())
+        );
+        // The multiplier only counts at the end of the tier.
+        assert_eq!(
+            ClaudeUsageApiProvider::format_plan("max", Some("20x")),
+            Some("Max 20x".into())
+        );
+        assert_eq!(
+            ClaudeUsageApiProvider::format_plan("max", Some("20x_then_more")),
+            Some("Max".into())
         );
         assert_eq!(ClaudeUsageApiProvider::format_plan("", None), None);
+    }
+
+    /// The Keychain is the *only* credential store on a machine that never wrote
+    /// `~/.claude/.credentials.json`, and the plan has to come from there too —
+    /// not just the token. It did not: `credential_plan` read only the file, so
+    /// this machine showed "Claude" with no tier.
+    #[test]
+    fn keychain_supplies_the_plan_when_the_file_has_none() {
+        struct FixedKeychain;
+        impl CredentialReading for FixedKeychain {
+            fn generic_password(&self, _service: &str) -> Option<Vec<u8>> {
+                Some(
+                    br#"{"claudeAiOauth":{"accessToken":"from-keychain","subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}"#
+                        .to_vec(),
+                )
+            }
+        }
+        let dir = temp_dir("keychain-plan");
+        std::fs::write(dir.join(".credentials.json"), br#"{}"#).unwrap();
+        let mut provider = ClaudeUsageApiProvider::new(
+            Some(dir.join(".credentials.json")),
+            Some(Box::new(FixedKeychain)),
+        )
+        .with_client(Box::new(StubClient {
+            response: Ok(r#"{"limits":[{"kind":"session","percent":10}]}"#.to_string()),
+        }))
+        .with_cache(QuotaCache::new(
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+        ));
+        let usage = provider.fetch_usage(NOW).usage.expect("usage");
+        assert_eq!(usage.plan.as_deref(), Some("Max 20x"));
     }
 
     // ---- OpenCode parsing ----
@@ -1121,7 +1213,7 @@ mod tests {
         let dir = temp_dir("401");
         std::fs::write(
             dir.join(".credentials.json"),
-            br#"{"claudeAiOauth":{"accessToken":"tok","subscriptionType":"Max","rateLimitTier":"20x"}}"#,
+            br#"{"claudeAiOauth":{"accessToken":"tok","subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}"#,
         )
         .unwrap();
         let mut provider = ClaudeUsageApiProvider::new(Some(dir.join(".credentials.json")), None)
@@ -1139,7 +1231,7 @@ mod tests {
         let dir = temp_dir("ok");
         std::fs::write(
             dir.join(".credentials.json"),
-            br#"{"claudeAiOauth":{"accessToken":"tok","subscriptionType":"Max","rateLimitTier":"20x"}}"#,
+            br#"{"claudeAiOauth":{"accessToken":"tok","subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}"#,
         )
         .unwrap();
         let mut provider = ClaudeUsageApiProvider::new(Some(dir.join(".credentials.json")), None)

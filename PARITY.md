@@ -224,3 +224,34 @@ updater.
       it was a `StatusMenuBuilder` parameter, never a Swift setting.
 - [x] **Diverged on purpose:** provider diagnostics (`lastStatus`) are logged but
       not surfaced. The "Not detected" card was removed on request.
+- [x] `formatPlan` matches Swift: a fixed name table (`max`→`Max`, `team`→`Team`,
+      `pro`→`Pro`, `enterprise`→`Enterprise`, otherwise verbatim) plus the
+      multiplier read as the `\d+x` **suffix** of `rateLimitTier`, so
+      `default_claude_max_20x` yields `Max 20x`. It is not "join the two
+      strings" — doing that gave `max default_claude_max_20x`. Swift has no test
+      for this function, which is why it was missed; there are Rust tests now.
+- [x] The plan is read through the same file-then-Keychain lookup as the token
+      (Swift's `readCredentialOAuth`). Reading only the file left the tier empty
+      on any machine whose credential lives solely in the Keychain — the common
+      fresh-install case, and this one. Verified against the real Keychain:
+      `Some("Max 20x")`.
+
+## Release and versioning
+
+- [x] **One version**, in `[workspace.package]` of the root `Cargo.toml`. It
+      drives the bundle (`CFBundleShortVersionString`, `package_info().version`)
+      *and* `burnrate_core::VERSION`, so About's two numbers cannot disagree.
+      `tauri.conf.json` deliberately sets no `version`, because that field
+      **overrides** the crate version — and the two did drift: both read `1.0.0`
+      while the newest release was `0.8.0`, so About showed a number
+      corresponding to no release at all. A test fails if the field returns.
+- [x] release-please bumps it (`extra-files` with
+      `jsonpath: $.workspace.package.version`), so a release PR moves the app
+      version with the changelog and tag. The Swift build injected the tag
+      version into `Info.plist` at package time instead; with two numbers on
+      screen that would strand About's "Core" line on whatever `Cargo.toml`
+      happened to say.
+- [ ] **Not yet wired:** `release.yml` has no Tauri jobs, so a tag still builds
+      only the Swift bundle — the rewrite ships nothing from CI.
+- Note: the toml updater leaves `Cargo.lock` stale for the two local crates.
+      Cargo rewrites it on the next build and nothing here builds `--locked`.
