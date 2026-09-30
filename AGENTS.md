@@ -134,13 +134,15 @@ All changes go through a pull request. Do not commit or push directly to `main`.
   `workflow_dispatch`), but release-please's manifest must be updated by hand to
   match, or the next release PR computes from the wrong version.
 - `.github/workflows/ci.yml` — the only CI: frontend + `fmt`/`clippy`/`test`, a
-  build-and-bundle matrix (macOS `app`, Linux `deb`, Windows `nsis`), and the
-  Linux tray smoke.
+  build-and-bundle matrix (macOS `app`, Linux `deb,rpm`, Windows `nsis`), and
+  the Linux tray smoke.
 - `.github/workflows/release.yml` — per-OS bundles: macOS `BurnRate-<ver>-arm64.zip`
-  + `.dmg`, Linux `.deb` + `.AppImage`, Windows `-x64-setup.exe`, then one job
-  attaching them all with a combined `SHA256SUMS`. It has a `dry_run` dispatch
+  + `.dmg`, Linux `.deb` + `.rpm` + `.AppImage`, Windows `-x64-setup.exe`, then one
+  job attaching them all with a combined `SHA256SUMS`. It has a `dry_run` dispatch
   input that builds every platform without touching a release — use it to check
-  packaging changes. macOS checks that the bundle version equals the tag.
+  packaging changes. macOS checks that the bundle version equals the tag. The rpm
+  target needs `rpmbuild` (`apt-get install rpm`); without it the bundler fails
+  rather than skipping the target.
 - **Nothing is signed or notarised.** macOS is ad-hoc signed
   (`bundle.macOS.signingIdentity: "-"`), so Gatekeeper quarantines a downloaded
   copy; the README documents the two ways past that. Adding notarisation means a

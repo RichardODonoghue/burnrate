@@ -144,33 +144,38 @@ jobs:
 
       - *resolve-version
 
-      # WebKitGTK for the webview; GTK3 + libayatana for the tray-icon backend.
+      # WebKitGTK for the webview; GTK3 + libayatana for the tray-icon backend;
+      # `rpm` brings `rpmbuild` for the rpm bundle.
       - name: Install system deps
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev libxdo-dev libssl-dev
+            librsvg2-dev libxdo-dev libssl-dev rpm
 
       - name: Install the frontend
         working-directory: ui
         run: npm ci
 
       - name: Build and bundle
-        run: ${{ env.TAURI_CLI }} build --bundles deb,appimage
+        run: ${{ env.TAURI_CLI }} build --bundles deb,rpm,appimage
 
+      # Debian-style names for the deb and AppImage, rpm-style for the rpm, which
+      # is what each format's users expect to see.
       - name: Package
         env:
           VER: ${{ steps.v.outputs.version }}
         run: |
           cp target/release/bundle/deb/*.deb "BurnRate-$VER-amd64.deb"
+          cp target/release/bundle/rpm/*.rpm "BurnRate-$VER-x86_64.rpm"
           cp target/release/bundle/appimage/*.AppImage "BurnRate-$VER-amd64.AppImage"
-          ls -la BurnRate-$VER-amd64.*
+          ls -la BurnRate-$VER-amd64.* BurnRate-$VER-x86_64.*
 
       - uses: actions/upload-artifact@v4
         with:
           name: assets-linux
           path: |
             BurnRate-*-amd64.deb
+            BurnRate-*-x86_64.rpm
             BurnRate-*-amd64.AppImage
           retention-days: 14
 
