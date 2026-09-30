@@ -167,6 +167,19 @@ export interface PlatformInfo {
 }
 
 /** Everything the window renders from, in one payload. */
+/**
+ * What the Rust updater reports back, and what the snapshot carries.
+ *
+ * Mirrors `updater::UpdateStatus`; the fields are camelCase on the wire.
+ */
+export interface UpdateStatus {
+  available: string | null;
+  busy: boolean;
+  /** "up to date (0.8.1)", "0.9.0 is available", or why it failed. */
+  state: string;
+  canInstall: boolean;
+}
+
 export interface Snapshot {
   pane: AppPane;
   settings: Settings;
@@ -175,6 +188,13 @@ export interface Snapshot {
   remaining: number | null;
   appVersion: string;
   coreVersion: string;
+  /** The newer version GitHub is offering, if any. */
+  updateAvailable: string | null;
+  /** One line of updater state, for the About pane. */
+  updateState: string;
+  updateBusy: boolean;
+  /** False where the app cannot replace itself, so the pane offers the page. */
+  canInstallUpdate: boolean;
   lastPollUnix: number;
   pollCount: number;
   platforms: PlatformInfo;

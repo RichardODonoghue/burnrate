@@ -342,13 +342,14 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "burnrate-core"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "libc",
  "png 0.17.16",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
  "time",
  "ureq",
@@ -356,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "burnrate-desktop"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "base64 0.23.1",
  "block2",
@@ -1644,7 +1645,7 @@ dependencies = [
 
 [[package]]
 name = "icon-gen"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "burnrate-core",
  "png 0.17.16",

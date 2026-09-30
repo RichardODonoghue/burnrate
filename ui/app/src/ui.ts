@@ -5,6 +5,8 @@ import { esc } from "./dom.js";
 export const REPO_SLUG = "RichardODonoghue/burnrate";
 export const REPO_URL = `https://github.com/${REPO_SLUG}`;
 export const ISSUES_URL = `${REPO_URL}/issues`;
+/** The newest release, where a platform that cannot self-install sends you. */
+export const RELEASES_URL = `${REPO_URL}/releases/latest`;
 
 /** A card surface, the Swift `Card`. */
 export function card(title: string, body: string, extra = ""): string {
