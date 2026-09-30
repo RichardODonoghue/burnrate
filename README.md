@@ -36,11 +36,22 @@ report spend — the standard ccusage/tokscale convention.
 Grab the file for your platform from the
 [latest release](https://github.com/RichardODonoghue/burnrate/releases/latest):
 
-| Platform | File | Notes |
+| Platform | File | Install |
 | --- | --- | --- |
 | macOS (Apple Silicon) | `BurnRate-<version>-arm64.dmg` or `-arm64.zip` | Drag `BurnRate.app` to `/Applications`, then see below |
-| Linux (x86-64) | `BurnRate-<version>-amd64.deb` or `-amd64.AppImage` | Needs WebKitGTK 4.1 and libayatana-appindicator |
+| Linux, Debian/Ubuntu | `BurnRate-<version>-amd64.deb` | `sudo apt install ./BurnRate-<version>-amd64.deb` |
+| Linux, Fedora/RHEL | `BurnRate-<version>-x86_64.rpm` | `sudo dnf install ./BurnRate-<version>-x86_64.rpm` |
+| Linux, any | `BurnRate-<version>-amd64.AppImage` | `chmod +x` it and run |
 | Windows (x64) | `BurnRate-<version>-x64-setup.exe` | Installs the WebView2 runtime if it is missing |
+
+The `.deb` and `.rpm` declare their own dependencies and bring them in. The
+AppImage does not, so it needs WebKitGTK 4.1 and an appindicator present:
+
+- Debian/Ubuntu: `libwebkit2gtk-4.1-0 libayatana-appindicator3-1`
+- Fedora/RHEL: `webkit2gtk4.1 libayatana-appindicator-gtk3`
+
+The menu-bar icon needs a tray host — on plain GNOME, install an AppIndicator
+extension, or the app runs with no visible icon.
 
 **macOS: the app is not signed or notarised**, so Gatekeeper quarantines a
 downloaded copy and calls it damaged. Either right-click → **Open**, then Open
