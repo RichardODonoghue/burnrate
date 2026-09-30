@@ -129,4 +129,4 @@ Providers only appear if they're set up on your machine — no credentials, no e
 
 ## License
 
-GPL-2.0 — see [LICENSE](LICENSE).
+GPL-3.0 — see [LICENSE](LICENSE).
