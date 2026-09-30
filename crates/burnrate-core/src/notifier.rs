@@ -1,6 +1,6 @@
 //! Notification decisions: milestones, window resets, burn rate and daily spend.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/MilestoneNotifier.swift` plus the
+//! Ported 1:1 from the Swift app's `MilestoneNotifier.swift` plus the
 //! evaluators in `Alerts.swift`.
 //!
 //! The evaluators are pure; this is the stateful part — remembering the last

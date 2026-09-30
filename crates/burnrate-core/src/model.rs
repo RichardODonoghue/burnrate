@@ -1,7 +1,7 @@
 //! Usage model: token counts, samples, quota windows, and the window
 //! computation that turns samples into % remaining.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/UsageModel.swift`. Parity tests:
+//! Ported 1:1 from the Swift app's `UsageModel.swift`. Parity tests:
 //! `UsageComputationTests`, `UsageSourceTests` (sample decoding).
 
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,6 @@
 //! Local log parsing: Claude Code, Codex CLI and OpenCode.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/UsageSources.swift`. No network, no
+//! Ported 1:1 from the Swift app's `UsageSources.swift`. No network, no
 //! auth — everything comes from the CLIs' own session logs on disk.
 //!
 //! Three behaviours are load-bearing and easy to lose in a port:

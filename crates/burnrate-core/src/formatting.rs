@@ -1,6 +1,6 @@
 //! Formatting helpers shared by every platform's menus and dashboards.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/Formatting.swift`. Parity tests:
+//! Ported 1:1 from the Swift app's `Formatting.swift`. Parity tests:
 //! `UsageComputationTests.tokensFormatting`, `UsageComputationTests.relativeTimeBuckets`.
 
 /// Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t.

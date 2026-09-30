@@ -13,7 +13,7 @@ members = ["crates/burnrate-core", "crates/icon-gen", "src-tauri"]
 version = "0.8.0"
 edition = "2021"
 rust-version = "1.82"
-license = "MIT"
+license = "GPL-2.0-only"
 
 [profile.release]
 codegen-units = 1

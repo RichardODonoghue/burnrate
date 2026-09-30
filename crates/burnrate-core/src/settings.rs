@@ -1,6 +1,6 @@
 //! User settings, persisted as JSON.
 //!
-//! Ported 1:1 from `Sources/BurnRate/Settings.swift`, including the key names
+//! Ported 1:1 from the Swift app's `Settings.swift`, including the key names
 //! and the legacy-decoding behaviour, so a Swift install's settings migrate
 //! across untouched. Swift stored each key as a JSON blob inside UserDefaults;
 //! here they are fields of one `settings.json` in the app directory, and

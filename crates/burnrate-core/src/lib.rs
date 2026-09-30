@@ -2,8 +2,9 @@
 //!
 //! Everything here is pure Rust with no Tauri, UI or OS-framework dependency:
 //! local log parsing, vendor quota APIs, throttling, alert evaluation, chart
-//! aggregation. Ported 1:1 from the Swift `BurnRateCore` target, whose 111 tests
-//! are the parity spec (see `PARITY.md`).
+//! aggregation. Ported 1:1 from the Swift `BurnRateCore` target. That app is gone
+//! (Sep 2026), so the module comments that name its files are provenance, not
+//! live references.
 
 pub mod alerts;
 pub mod charts;
