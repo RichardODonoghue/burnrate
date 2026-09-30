@@ -429,11 +429,17 @@ fn build_menu<R: tauri::Runtime>(
                 rows.push(RowItem::Separator(separator));
             }
             _ => {
+                // **Enabled**, deliberately, even though the row does nothing.
+                // A disabled item is greyed out on macOS, which is what the
+                // usage figures were: unreadable. The Swift menu sets
+                // `autoenablesItems = false` so its `action: nil` rows render at
+                // full contrast; `enabled: true` is the same statement here, and
+                // the click is ignored by `on_menu_event`.
                 let item = MenuItem::with_id(
                     app,
                     format!("row-{generation}-{index}"),
                     text.as_str(),
-                    false,
+                    true,
                     None::<&str>,
                 )?;
                 builder = builder.item(&item);
@@ -487,11 +493,13 @@ fn install_trays(app: &AppHandle<Wry>) -> tauri::Result<TrayHandles<Wry>> {
 }
 
 fn install_widget(app: &AppHandle<Wry>, provider: &str) -> tauri::Result<WidgetHandles<Wry>> {
+    // Enabled for the same reason as the usage rows: a disabled item is greyed
+    // out, and this one carries the widget's own reading.
     let status = MenuItem::with_id(
         app,
         format!("{ID_WIDGET_PREFIX}{provider}-status"),
         provider,
-        false,
+        true,
         None::<&str>,
     )?;
     let remove = MenuItem::with_id(

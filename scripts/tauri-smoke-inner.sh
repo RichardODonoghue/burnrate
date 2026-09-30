@@ -159,6 +159,12 @@ printf '%s' "$LAYOUT" | grep -q "Rolling" ||
   fail "menu has no per-window row (usage block collapsed into one line?): $LAYOUT"
 printf '%s' "$LAYOUT" | grep -qE "Rolling[^']*%" ||
   fail "menu window row carries no figure: $LAYOUT"
+# Nothing may be disabled: a disabled row renders greyed out, which is what the
+# usage figures were. The Swift menu sets `autoenablesItems = false` for exactly
+# this reason, so its `action: nil` rows stay at full contrast.
+if printf '%s' "$LAYOUT" | grep -q "'enabled': <false>"; then
+  fail "a menu item is disabled, so it renders greyed out: $LAYOUT"
+fi
 echo "tray: menu OK (dashboard, quit, per-window rows; no charts/settings)"
 
 # In-place mutation. A Linux tray menu cannot be replaced once it is set, only
