@@ -176,6 +176,19 @@ All changes go through a pull request. Do not commit or push directly to `main`.
     chain against the real published release. Run it after a release: it is the
     only check that the *shipped* artifact passes the validation an install
     performs.
+  - **Asset URLs are pinned to GitHub's hosts**, so a manipulated API response
+    cannot point the download elsewhere. Defence in depth: the checksum is still
+    the load-bearing check.
+  - **There is no signature, and that is the one real gap.** The anchor is HTTPS
+    to GitHub plus the release's own `SHA256SUMS`; `codesign --verify` on an
+    *ad-hoc* signature proves internal consistency, not authorship, so a
+    compromised GitHub account or release could ship a malicious update. Closing
+    it needs either a Developer ID with `notarytool` credentials as secrets and an
+    entitlements file, or the Tauri updater plugin's keypair plus a hosted
+    `latest.json`. Both are credentials, not code.
+  - **Nothing installs from a single click.** The tray's `Update to X…` row opens
+    the About pane, where the version is shown and the Install button is the
+    confirmation.
 - **Nothing is signed or notarised.** macOS is ad-hoc signed
   (`bundle.macOS.signingIdentity: "-"`), so Gatekeeper quarantines a downloaded
   copy; the README documents the two ways past that. Adding notarisation means a

@@ -102,7 +102,7 @@ export function windowOptions(provider: string): string {
  * the scroll offset after the charts have been drawn rather than before.
  */
 export async function refresh(): Promise<void> {
-  const [snapshot, providers, settingsPath, modelColours] = await Promise.all([
+  const [snapshot, providers, modelColours] = await Promise.all([
     api.snapshot({
       pane: state.pane,
       range: state.range,
@@ -111,12 +111,11 @@ export async function refresh(): Promise<void> {
       providerFilter: state.providerFilter,
     }),
     api.knownProviders(),
-    api.settingsFilePath(),
     api.modelColours(),
   ]);
   state.snapshot = snapshot;
   state.providers = providers;
-  state.settingsPath = settingsPath;
+  state.settingsPath = snapshot.settingsPath;
   state.modelColours = modelColours;
 }
 

@@ -188,6 +188,8 @@ export interface Snapshot {
   remaining: number | null;
   appVersion: string;
   coreVersion: string;
+  /** Where `settings.json` lives, for the About pane. */
+  settingsPath: string;
   /** The newer version GitHub is offering, if any. */
   updateAvailable: string | null;
   /** One line of updater state, for the About pane. */
