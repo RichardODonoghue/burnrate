@@ -34,6 +34,10 @@ const PROVIDER_COLOURS = {
   Codex: "rgb(51, 173, 112)",
 };
 
+const REPO_SLUG = "RichardODonoghue/burnrate";
+const REPO_URL = `https://github.com/${REPO_SLUG}`;
+const ISSUES_URL = `${REPO_URL}/issues`;
+
 const WINDOW_LABELS = ["Rolling", "Weekly", "Monthly"];
 
 let state = {
@@ -199,24 +203,46 @@ async function mutate(command, args, message) {
 // ---------- rendering ----------
 
 /**
- * Sidebar icons, drawn rather than typed.
+ * Icons, drawn rather than typed.
  *
- * These were Unicode glyphs ("◐", "▢") which depend on the font having them —
- * the Widgets item rendered with no icon at all. These mirror the SF Symbols the
- * Swift build uses: `chart.bar.doc.horizontal`, `bell.badge.fill`,
- * `menubar.dock.rectangle`, `info.circle`.
+ * These were Unicode glyphs ("◐", "▢") which depend on the font having them — the
+ * Widgets item rendered with no icon at all. They mirror the SF Symbols the Swift
+ * build uses. Each entry carries its own fill/stroke: an outlined shape drawn
+ * with the group's `fill` becomes a solid blob, which is what the About item was.
  */
-const PANE_ICONS = {
-  usage: `<path d="M3 13h2v4H3zM7 9h2v8H7zM11 6h2v11h-2z"/><path d="M15.5 12.5h3.2v3.2h-3.2z"/>`,
-  notifications: `<path d="M9 3a4.6 4.6 0 0 0-4.6 4.6c0 3.3-1.4 4.3-1.4 4.3h12s-1.4-1-1.4-4.3A4.6 4.6 0 0 0 9 3z"/><path d="M7.6 14.2a1.5 1.5 0 0 0 2.8 0z"/><circle cx="13.6" cy="4.4" r="2.4"/>`,
-  widgets: `<rect x="1.6" y="3.4" width="14.8" height="3.6" rx="1.1"/><path d="M3.4 7.6h3.1v5.9H3.4zM7.6 7.6h3.1v5.9H7.6zM11.8 7.6h3.1v5.9h-3.1z"/>`,
-  about: `<circle cx="9" cy="9" r="6.6"/><path d="M9 8.1v4.2"/><circle cx="9" cy="5.9" r="0.9"/>`,
+const ICONS = {
+  // chart.bar.doc.horizontal
+  usage: `<g fill="currentColor"><path d="M3.2 12.4h2.3v2.8H3.2z"/><path d="M7.85 8.2h2.3v7H7.85z"/><path d="M12.5 4.8h2.3v10.4h-2.3z"/></g>`,
+  // bell.badge.fill
+  notifications: `<g fill="currentColor"><path d="M9 2.6a4.7 4.7 0 0 0-4.7 4.7c0 3.3-1.4 4.3-1.4 4.3h12.2s-1.4-1-1.4-4.3A4.7 4.7 0 0 0 9 2.6z"/><path d="M7.5 13.4a1.5 1.5 0 0 0 3 0z"/></g><g fill="currentColor" stroke="var(--sidebar)" stroke-width="1.3"><circle cx="13.4" cy="4.6" r="2.4"/></g>`,
+  // menubar.dock.rectangle
+  widgets: `<g fill="currentColor"><rect x="1.6" y="3.2" width="14.8" height="3.4" rx="1.1"/><rect x="3.5" y="7.4" width="3.1" height="5.8" rx="0.8"/><rect x="7.45" y="7.4" width="3.1" height="5.8" rx="0.8"/><rect x="11.4" y="7.4" width="3.1" height="5.8" rx="0.8"/></g>`,
+  // info.circle — outlined, so it must not inherit a fill
+  about: `<g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="9" r="6.4"/></g><g fill="currentColor"><circle cx="9" cy="5.9" r="0.95"/><rect x="8.2" y="7.9" width="1.6" height="4.4" rx="0.8"/></g>`,
+  // gauge.medium
+  gauge: `<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.6 12.9a6.4 6.4 0 1 1 12.8 0"/><path d="M9 12.9 12.1 8.4"/></g><circle cx="9" cy="12.9" r="1.2" fill="currentColor"/>`,
+  // bell.badge (outlined)
+  bell: `<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M9 3.1a4.4 4.4 0 0 0-4.4 4.4c0 3-1.3 4-1.3 4h11.4s-1.3-1-1.3-4A4.4 4.4 0 0 0 9 3.1z"/><path d="M7.6 13.6a1.5 1.5 0 0 0 2.8 0"/></g><circle cx="13.5" cy="4.5" r="2.3" fill="currentColor"/>`,
+  // arrow.down.circle
+  download: `<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="6.4"/><path d="M9 5.7v6.4"/><path d="M6.4 9.4 9 12l2.6-2.6"/></g>`,
+  // checkmark.seal
+  seal: `<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="6.4"/><path d="M6.2 9.3 8.1 11.2 12 7.2"/></g>`,
+  // internaldrive
+  drive: `<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="2.1" y="4.9" width="13.8" height="8.2" rx="1.7"/></g><circle cx="5.1" cy="9" r="0.95" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7.9 9h5.5"/></g>`,
+  // exclamationmark.bubble
+  bubble: `<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M2.4 4.2h13.2v7.4H8.3L4.9 14.6v-3H2.4z"/></g><g fill="currentColor"><rect x="8.25" y="6" width="1.5" height="3" rx="0.75"/><circle cx="9" cy="10.1" r="0.85"/></g>`,
+  // The GitHub mark, filled.
+  github: `<path fill="currentColor" d="M9 1.6a7.4 7.4 0 0 0-2.34 14.42c.37.07.5-.16.5-.36v-1.25c-2.06.45-2.49-.99-2.49-.99-.34-.86-.83-1.09-.83-1.09-.67-.46.05-.45.05-.45.75.05 1.14.77 1.14.77.66 1.13 1.73.8 2.15.61.07-.48.26-.8.47-.99-1.64-.19-3.37-.82-3.37-3.66 0-.81.29-1.47.76-1.99-.08-.19-.33-.94.07-1.96 0 0 .62-.2 2.04.76a7.1 7.1 0 0 1 3.71 0c1.42-.96 2.03-.76 2.03-.76.41 1.02.15 1.77.08 1.96.48.52.76 1.18.76 1.99 0 2.85-1.73 3.47-3.38 3.65.27.23.5.68.5 1.38v2.05c0 .2.13.44.51.36A7.4 7.4 0 0 0 9 1.6z"/>`,
 };
 
+/** The sidebar's icon for a pane. */
 function paneIcon(id) {
-  return `<svg class="glyph" viewBox="0 0 18 18" aria-hidden="true" fill="currentColor">${
-    PANE_ICONS[id] ?? ""
-  }</svg>`;
+  return `<svg class="glyph" viewBox="0 0 18 18" aria-hidden="true">${ICONS[id] ?? ""}</svg>`;
+}
+
+/** An icon for a labelled row in the About pane. */
+function rowIcon(id) {
+  return `<svg class="row-glyph" viewBox="0 0 18 18" aria-hidden="true">${ICONS[id] ?? ""}</svg>`;
 }
 
 function renderSidebar() {
@@ -467,14 +493,74 @@ function renderWidgets() {
 function renderAbout() {
   const { appVersion, coreVersion, platforms } = state.snapshot;
   const deps = platforms.runtimeDependencies ?? [];
+
+  /** One `Label(text, systemImage:)` row, as the Swift cards are built from. */
+  const labelled = (icon, text) =>
+    `<div class="about-row">${rowIcon(icon)}<span>${esc(text)}</span></div>`;
+
   return `<h1>About</h1>
     <p class="sub">BurnRate — AI plan usage in the menu bar.</p>
 
+    <div class="card hero">
+      <img id="about-icon" alt="" width="72" height="72" />
+      <strong>BurnRate</strong>
+      <span class="hint">Version ${esc(appVersion)}</span>
+    </div>
+
+    <div class="card">
+      <h2>Updates</h2>
+      <div class="row">
+        <span class="grow label">Version ${esc(appVersion)}</span>
+        <button class="action" id="check-updates">Check for Updates</button>
+      </div>
+      <p class="hint">Opens the releases page. This build does not install updates
+      itself.</p>
+    </div>
+
+    <div class="card">
+      <h2>What it does</h2>
+      ${labelled(
+        "gauge",
+        "Menu bar: per-provider % remaining, reset countdown and plan tier — no Dock icon"
+      )}
+      ${labelled(
+        "usage",
+        "Usage dashboard: remaining-% trends, daily usage by model, model ranking and token/cost breakdowns"
+      )}
+      ${labelled(
+        "bell",
+        "Notifications: plan-% milestones, burn-rate spikes, daily cost caps and window resets"
+      )}
+      ${labelled("widgets", "Optional extra menu-bar widgets, one per provider")}
+      ${labelled("download", "Built-in updates from GitHub Releases")}
+    </div>
+
+    <div class="card">
+      <h2>Data sources</h2>
+      ${labelled(
+        "seal",
+        "Vendor quota APIs — Claude and OpenCode Go percentages, reset times and plan tier, using the credentials their CLIs already stored"
+      )}
+      ${labelled(
+        "drive",
+        "Local session logs — Codex usage, plus per-model token statistics and cost estimates (LiteLLM list pricing). Nothing is sent anywhere"
+      )}
+    </div>
+
+    <div class="card">
+      <h2>Links</h2>
+      <div class="about-row">
+        <span class="row-glyph">${ICONS.github}</span>
+        <a href="#" data-open="${REPO_URL}">github.com/${REPO_SLUG}</a>
+      </div>
+      <div class="about-row">
+        ${rowIcon("bubble")}
+        <a href="#" data-open="${ISSUES_URL}">Report an issue or request a feature</a>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Build</h2>
-      <div class="row"><span class="grow label">App</span><span class="value">${esc(
-        appVersion
-      )}</span></div>
       <div class="row"><span class="grow label">Core</span><span class="value">${esc(
         coreVersion
       )}</span></div>
@@ -492,16 +578,11 @@ function renderAbout() {
         <span class="grow label">Notifications</span>
         <button class="action" id="test-notification">Send a test</button>
       </div>
-      <p class="hint">macOS asks for permission the first time a banner is posted.</p>
-    </div>
-
-    <div class="card">
-      <h2>Settings file</h2>
-      <p class="hint mono">${esc(state.settingsPath)}</p>
-      <p class="hint">Written on every change. A Swift install's settings migrate on
-      first read.</p>
-    </div>
-`;
+      <div class="row">
+        <span class="grow label">Settings file</span>
+        <span class="value mono small">${esc(state.settingsPath)}</span>
+      </div>
+    </div>`;
 }
 
 // ---------- event wiring ----------
@@ -562,7 +643,26 @@ function wireContent() {
   window.BurnRate.layoutUsage?.(state.snapshot);
   window.BurnRate.wireUsage?.(state.snapshot);
 
-  // About
+  // About. The hero icon is the shipped bundle icon, as the Swift AboutView
+  // uses it — not the live severity-tinted renderer.
+  const aboutIcon = el("about-icon");
+  if (aboutIcon) {
+    invoke("app_icon_data_url", { edge: 144 }).then((url) => {
+      aboutIcon.src = url;
+    });
+  }
+  for (const link of content.querySelectorAll("[data-open]")) {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      invoke("open_url", { url: link.dataset.open }).catch((error) => toast(String(error)));
+    });
+  }
+  const checkUpdates = el("check-updates");
+  if (checkUpdates) {
+    checkUpdates.addEventListener("click", () =>
+      invoke("open_url", { url: `${REPO_URL}/releases` }).catch((error) => toast(String(error)))
+    );
+  }
   const testNotification = el("test-notification");
   if (testNotification) {
     testNotification.addEventListener("click", async () => {
@@ -695,7 +795,6 @@ async function main() {
   // The app icon comes from the Rust renderer, not a file path: the bundled
   // icons live outside the served ui/app directory.
   el("brand-icon").src = await invoke("app_icon_data_url", { edge: 56 });
-  el("brand-sub").textContent = "menu bar";
   await refresh();
   // The shell's heartbeat is what drives the tick; mirror it here.
   setInterval(refresh, 5000);

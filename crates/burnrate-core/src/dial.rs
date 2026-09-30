@@ -261,16 +261,74 @@ pub fn needle_tip(angle_degrees: f64) -> [f64; 2] {
 /// in light and dark menu bars and when highlighted). The dial is punched out of
 /// the flame with `destinationOut`.
 pub fn menu_bar_image(remaining: Option<f64>, edge: u32) -> Canvas {
-    let mut canvas = Canvas::new(edge);
-    let angle = StatusIcon::needle_angle(remaining);
-    let black = RgbColor::new(0.0, 0.0, 0.0);
+    supersampled(edge, |large| {
+        let mut canvas = Canvas::new(large);
+        let angle = StatusIcon::needle_angle(remaining);
+        let black = RgbColor::new(0.0, 0.0, 0.0);
 
-    canvas.fill_shape(in_flame, black, black, (6.0, 60.0));
-    // Punch the dial core out.
-    clear_oval(&mut canvas, DIAL_CENTER, DIAL_RADIUS);
-    canvas.stroke_line(PIVOT, needle_tip(angle), NEEDLE_WIDTH, black);
-    canvas.fill_oval(PIVOT, PIVOT_RADIUS, black);
-    canvas
+        canvas.fill_shape(in_flame, black, black, (6.0, 60.0));
+        // Punch the dial core out.
+        clear_oval(&mut canvas, DIAL_CENTER, DIAL_RADIUS);
+        canvas.stroke_line(PIVOT, needle_tip(angle), NEEDLE_WIDTH, black);
+        canvas.fill_oval(PIVOT, PIVOT_RADIUS, black);
+        canvas
+    })
+}
+
+/// How much larger a small mark is drawn before being reduced. Four is enough
+/// for the edges to read as smooth at the 18pt the menu bar draws.
+const SUPERSAMPLE: u32 = 4;
+
+/// Below this size the mark is drawn at [`SUPERSAMPLE`]x and box-downsampled.
+/// Above it the aliasing is already invisible and the extra pixels are not worth
+/// the time — `icon-gen` renders at 1024.
+const SUPERSAMPLE_BELOW: u32 = 128;
+
+/// Draws a mark at 4x and box-downsamples it.
+///
+/// Every primitive here — `fill_oval`, `clear_oval`, `stroke_line` — tests a
+/// point against an edge and writes full alpha or nothing, so their edges are
+/// hard. That is invisible at 256px and obvious at 18: the dial's punched hole
+/// and the needle come out visibly jagged, which reads as artifacting in the
+/// menu bar. CoreGraphics, which the Swift build used, antialiased; supersampling
+/// gets the same result without giving every primitive a coverage calculation.
+fn supersampled(edge: u32, draw: impl Fn(u32) -> Canvas) -> Canvas {
+    if edge >= SUPERSAMPLE_BELOW || edge == 0 {
+        return draw(edge);
+    }
+    let large = draw(edge * SUPERSAMPLE);
+    let mut out = Canvas::new(edge);
+    let samples = (SUPERSAMPLE * SUPERSAMPLE) as f64;
+    for y in 0..edge {
+        for x in 0..edge {
+            let mut weighted = [0.0_f64; 3];
+            let mut alpha_sum = 0.0_f64;
+            for sy in 0..SUPERSAMPLE {
+                for sx in 0..SUPERSAMPLE {
+                    let lx = x * SUPERSAMPLE + sx;
+                    let ly = y * SUPERSAMPLE + sy;
+                    let index = ((ly * large.size + lx) * 4) as usize;
+                    let alpha = large.pixels[index + 3] as f64 / 255.0;
+                    for (channel, weight) in weighted.iter_mut().enumerate() {
+                        *weight += large.pixels[index + channel] as f64 / 255.0 * alpha;
+                    }
+                    alpha_sum += alpha;
+                }
+            }
+            let index = ((y * edge + x) * 4) as usize;
+            // Averaged in premultiplied space and then unpremultiplied: averaging
+            // straight colour across transparent pixels would drag every edge
+            // toward black, which is its own kind of border.
+            if alpha_sum > 0.0 {
+                for (channel, weight) in weighted.iter().enumerate() {
+                    out.pixels[index + channel] =
+                        ((weight / alpha_sum) * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+            out.pixels[index + 3] = ((alpha_sum / samples) * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
 }
 
 /// The rest pose the shipped `Resources/AppIcon.icns` was drawn at.
@@ -292,6 +350,11 @@ pub fn app_icon(edge: u32) -> Canvas {
 
 /// As [`app_icon`], with the pose the icon is drawn at.
 pub fn app_icon_at(edge: u32, remaining: Option<f64>) -> Canvas {
+    supersampled(edge, |edge| app_icon_plain(edge, remaining))
+}
+
+/// The app icon's geometry, drawn at whatever size it is handed.
+fn app_icon_plain(edge: u32, remaining: Option<f64>) -> Canvas {
     let mut canvas = Canvas::new(edge);
     let angle = StatusIcon::needle_angle(remaining);
     let tint = StatusIcon::tint(remaining);
