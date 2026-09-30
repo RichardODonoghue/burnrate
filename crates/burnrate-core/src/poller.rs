@@ -18,10 +18,7 @@ use crate::paths::AppPaths;
 use crate::providers::{ClaudeUsageApiProvider, LocalUsageProvider, OpenCodeGoApiProvider};
 use crate::settings::Settings;
 use crate::sources::{ClaudeUsageSource, CodexUsageSource, OpenCodeUsageSource};
-use crate::usage::{
-    ChartData, ChartRange, DailyModelUsage, ModelUsageAggregator, ModelUsageEntry, PricingTable,
-    RemainingSnapshot, TrendSeries,
-};
+use crate::usage::{DailyModelUsage, ModelUsageAggregator, ModelUsageEntry, PricingTable};
 
 /// Everything the window and tray need after a poll.
 #[derive(Debug, Clone, Serialize)]
@@ -31,7 +28,6 @@ pub struct PollResult {
     /// One line per provider that produced nothing, saying why.
     pub missing: Vec<String>,
     /// Remaining-% history, oldest first.
-    pub snapshots: Vec<RemainingSnapshot>,
     pub model_totals: Vec<ModelUsageEntry>,
     pub model_daily: Vec<DailyModelUsage>,
     pub spend_today: HashMap<String, f64>,
@@ -56,15 +52,13 @@ pub struct Poller {
     opencode_logs: OpenCodeUsageSource,
     notifier: MilestoneNotifier,
     pricing: Mutex<PricingTable>,
-    snapshots: Vec<RemainingSnapshot>,
-    /// Flat samples, mirrored from `snapshots` for the chart API.
+    /// Remaining-% samples across polls, oldest first. This is the trend chart's
+    /// only history.
     remaining_history: Vec<crate::charts::RemainingSample>,
     /// Thirty days of per-model daily buckets, persisted and merged with each
     /// live parse. The live parse is authoritative for the days it covers; this
     /// keeps the days whose logs have since rotated away.
     model_history: Vec<DailyModelUsage>,
-    /// 7 days of minute-resolution history is plenty for a month of charts.
-    history_limit: usize,
     last_local_poll: Option<Instant>,
     local_interval: Duration,
     poll_count: AtomicU64,
@@ -90,12 +84,8 @@ impl Poller {
             opencode_logs: OpenCodeUsageSource::new(None, None),
             notifier: MilestoneNotifier::new(),
             pricing: Mutex::new(PricingTable::default()),
-            snapshots: Vec::new(),
             remaining_history: Vec::new(),
             model_history: Vec::new(),
-            // Samples are one per window per poll; this bounds the in-memory
-            // snapshot list at the same window the flat history keeps.
-            history_limit: 30 * 24 * 60,
             last_local_poll: None,
             // The Claude log parse is expensive the first time; after that the
             // incremental cache makes it milliseconds, but there is no reason
@@ -216,31 +206,20 @@ impl Poller {
         }
 
         // --- history for the trend chart -------------------------------------
-        let snapshot = RemainingSnapshot {
-            at: now,
-            values: history_values(&usage),
-        };
-        if !snapshot.values.is_empty() {
-            for (provider, label, percent) in &snapshot.values {
-                self.remaining_history.push(crate::charts::RemainingSample {
-                    provider: provider.clone(),
-                    label: label.clone(),
-                    date: now,
-                    remaining: *percent,
-                });
-            }
-            self.snapshots.push(snapshot.clone());
+        for (provider, label, percent) in history_values(&usage) {
+            self.remaining_history.push(crate::charts::RemainingSample {
+                provider,
+                label,
+                date: now,
+                remaining: percent,
+            });
         }
-        // Retention: seven days of history. The flat list is trimmed by date
-        // rather than by count, because a five-minute poll over seven days is
-        // ~2000 entries and a burst of polls must not shorten the window.
+        // Trimmed by date, not by count: a five-minute poll over the longest
+        // window is a few thousand entries, and a burst of polls must not
+        // shorten the window.
         let history_cutoff = now - crate::migration::REMAINING_RETENTION_SECONDS;
         self.remaining_history
             .retain(|sample| sample.date >= history_cutoff);
-        if self.snapshots.len() > self.history_limit {
-            let excess = self.snapshots.len() - self.history_limit;
-            self.snapshots.drain(0..excess);
-        }
 
         // --- notifications ----------------------------------------------------
         let poll_interval = settings.poll_interval_seconds as i64;
@@ -282,7 +261,6 @@ impl Poller {
         PollResult {
             usage,
             missing,
-            snapshots: self.snapshots.clone(),
             model_totals,
             model_daily,
             spend_today,
@@ -321,9 +299,7 @@ impl Poller {
 
     /// Reloads the persisted trend history, dropping anything past retention.
     ///
-    /// Called at startup. The Swift build does the same thing from
-    /// `UserDefaults` in `ModelUsageViewModel.init`; without it the trend chart
-    /// is blank for the first hours of every launch, which is indistinguishable
+    /// Called at startup. Without it the trend chart is blank for the first hours of every launch, which is indistinguishable
     /// from a broken chart.
     pub fn load_history(&mut self, now: i64) {
         self.load_history_from(
@@ -428,22 +404,6 @@ impl Poller {
         self.remaining_history = samples;
     }
 
-    /// Trend series for a window label.
-    pub fn trend(&self, label: &str, provider: Option<&str>) -> Vec<TrendSeries> {
-        ChartData::trend_series(&self.snapshots, label, provider)
-    }
-
-    pub fn snapshots(&self) -> &[RemainingSnapshot] {
-        &self.snapshots
-    }
-
-    /// Drops the persisted chart history — a "Reset history" affordance.
-    pub fn clear_history(&mut self) {
-        self.snapshots.clear();
-        self.remaining_history.clear();
-        self.model_history.clear();
-    }
-
     /// Forces the next poll to go out immediately, skipping the throttle — used
     /// by the tray's Refresh item.
     pub fn invalidate_caches(&mut self) {
@@ -462,12 +422,9 @@ impl Default for Poller {
 /// Remaining-% readings for the trend history: one per window that reported a
 /// percentage.
 ///
-/// A window with no figure is **skipped**, not recorded as zero. The first
-/// version used `unwrap_or(0.0)`, which wrote a false 0% reading into the
-/// history — the trend chart drew it as a real drop, and it dragged the Y domain
-/// down to 0 so every genuine line was flattened against the top of the plot.
-/// Swift's `guard let remaining = window.percentRemaining else { continue }` is
-/// the same rule, and a provider that is rate-limited is exactly when this fires.
+/// A window with no figure is **skipped**, not recorded as zero. A zero would be
+/// drawn as a real drop and would drag the Y domain down with it, flattening
+/// every genuine line. A rate-limited provider is exactly when this fires.
 fn history_values(usage: &[ProviderUsage]) -> Vec<(String, String, f64)> {
     usage
         .iter()
@@ -535,26 +492,6 @@ pub fn local_start_of_day(timestamp: i64) -> i64 {
     crate::usage::start_of_day(timestamp, local_utc_offset_seconds())
 }
 
-#[cfg(unix)]
-pub fn local_offset_at(timestamp: i64) -> i64 {
-    // `localtime_r` applies the timezone rules for that instant, DST included.
-    let time = timestamp as libc::time_t;
-    let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
-    let resolved = unsafe { !libc::localtime_r(&time, &mut broken_down).is_null() };
-    if resolved {
-        broken_down.tm_gmtoff as i64
-    } else {
-        0
-    }
-}
-
-/// Off Unix there is no cheap per-instant lookup, so this is the current offset.
-/// Windows has the same DST hazard; it is not the platform this was found on.
-#[cfg(not(unix))]
-pub fn local_offset_at(_timestamp: i64) -> i64 {
-    local_utc_offset_seconds()
-}
-
 pub fn local_utc_offset_seconds() -> i64 {
     match time::UtcOffset::current_local_offset() {
         Ok(offset) => offset.whole_seconds() as i64,
@@ -588,9 +525,6 @@ fn spend_since_start_of_day(
     }
     spend
 }
-
-/// The ranges the dashboard offers, in the Swift build's order.
-pub const CHART_RANGES: [ChartRange; 3] = [ChartRange::Day, ChartRange::Week, ChartRange::Month];
 
 #[cfg(test)]
 mod tests {

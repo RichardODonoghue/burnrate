@@ -1,9 +1,9 @@
 //! Local log parsing: Claude Code, Codex CLI and OpenCode.
 //!
-//! Ported 1:1 from the Swift app's `UsageSources.swift`. No network, no
-//! auth — everything comes from the CLIs' own session logs on disk.
+//! No network, no auth — everything comes from the CLIs' own session logs on
+//! disk.
 //!
-//! Three behaviours are load-bearing and easy to lose in a port:
+//! Three behaviours are load-bearing and easy to lose:
 //!   - **Claude `requestId` dedupe.** Claude Code rewrites one request across
 //!     several lines and files as it streams, so counting every line over-counts
 //!     totals by roughly 2×. One sample per request, keeping the final reading.
@@ -13,7 +13,6 @@
 //!   - **Incremental reads.** Claude's first parse is ~20s over ~560MB, so
 //!     unchanged files are skipped and grown files are read from the last byte
 //!     offset, with a cache on disk that survives restarts.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -728,94 +727,6 @@ pub fn parse_message_json(json: &str) -> Option<UsageSample> {
     )
 }
 
-// MARK: - Aggregation
-
-/// The result of polling every source.
-#[derive(Debug, Default, Clone)]
-pub struct UsageSnapshot {
-    pub batches: Vec<(String, Vec<UsageSample>)>,
-    /// One line per source that produced nothing, saying why.
-    pub missing: Vec<String>,
-}
-
-impl UsageSnapshot {
-    /// Polls every source and tags each batch with its provider, recording why
-    /// any of them produced nothing. The diagnostics matter: a silent empty
-    /// result is indistinguishable from "not logged in".
-    pub fn collect_all(
-        claude: Option<&ClaudeUsageSource>,
-        codex: Option<&CodexUsageSource>,
-        opencode: Option<&OpenCodeUsageSource>,
-    ) -> Self {
-        let mut batches = Vec::new();
-        let mut missing = Vec::new();
-
-        if let Some(source) = claude {
-            let samples = source.collect_samples();
-            if samples.is_empty() {
-                missing.push(format!(
-                    "Claude: no session logs under {}",
-                    source.base_directory().display()
-                ));
-            }
-            batches.push(("Claude".to_string(), samples));
-        }
-        if let Some(source) = codex {
-            let samples = source.collect_samples();
-            if samples.is_empty() {
-                missing.push(format!(
-                    "Codex: no session logs under {}",
-                    source.base_directory().display()
-                ));
-            }
-            batches.push(("Codex".to_string(), samples));
-        }
-        if let Some(source) = opencode {
-            let samples = source.collect_samples();
-            if samples.is_empty() {
-                missing.push(match source.resolve_database() {
-                    Some(path) => format!(
-                        "OpenCode: {} has no assistant turns in the last 31 days",
-                        path.display()
-                    ),
-                    None => format!(
-                        "OpenCode: no database found (looked in {})",
-                        source
-                            .database_candidates()
-                            .iter()
-                            .map(|path| path.display().to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                });
-            }
-            batches.push(("OpenCode Go".to_string(), samples));
-        }
-        Self { batches, missing }
-    }
-
-    /// Every sample, tagged with the provider it came from.
-    pub fn labelled(&self) -> Vec<(&str, &UsageSample)> {
-        self.batches
-            .iter()
-            .flat_map(|(provider, samples)| {
-                samples
-                    .iter()
-                    .map(move |sample| (provider.as_str(), sample))
-            })
-            .collect()
-    }
-
-    /// Provider names that actually produced data.
-    pub fn providers(&self) -> Vec<String> {
-        self.batches
-            .iter()
-            .filter(|(_, samples)| !samples.is_empty())
-            .map(|(provider, _)| provider.clone())
-            .collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -845,7 +756,7 @@ mod tests {
         )
     }
 
-    /// `parsesClaudeAssistantLine` — the fields the app depends on.
+    /// The fields the app depends on.
     #[test]
     fn parses_claude_assistant_line() {
         let samples = parse_claude_lines(&claude_line("req-1", 100, 20));
@@ -858,21 +769,21 @@ mod tests {
         assert_eq!(sample.timestamp, 1_790_643_600);
     }
 
-    /// `skipsSyntheticClaudeTurns` — zero-usage placeholders are not a model.
+    /// Zero-usage placeholders are not a model.
     #[test]
     fn skips_synthetic_claude_turns() {
         let line = r#"{"timestamp":"2026-09-29T01:00:00Z","type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}"#;
         assert!(parse_claude_lines(line).is_empty());
     }
 
-    /// `ignoresUserLines` — only assistant turns carry usage we count.
+    /// Only assistant turns carry usage we count.
     #[test]
     fn ignores_user_lines() {
         let line = r#"{"timestamp":"2026-09-29T01:00:00Z","type":"user","message":{"usage":{"input_tokens":5}}}"#;
         assert!(parse_claude_lines(line).is_empty());
     }
 
-    /// `dedupesRepeatedRequestIdsKeepingLast` — the ~2× over-count fix.
+    /// The ~2× over-count fix.
     #[test]
     fn dedupes_repeated_request_ids_keeping_last() {
         let text = [
@@ -944,7 +855,7 @@ mod tests {
 
     // ---- Codex ----
 
-    /// `codexTakesLastCumulativeEvent` — totals are cumulative, so the last
+    /// Totals are cumulative, so the last
     /// event is the session total, and summing events would multiply it.
     #[test]
     fn codex_takes_last_cumulative_event() {
@@ -973,7 +884,7 @@ mod tests {
 
     // ---- OpenCode ----
 
-    /// `parsesNewOpenCodeSessionMessage` — v2 shape.
+    /// V2 shape.
     #[test]
     fn parses_new_opencode_session_message() {
         let json = r#"{"model":{"id":"claude-opus-5","providerID":"opencode-go"},"cost":0.42,"tokens":{"input":100,"output":20,"reasoning":5,"cache":{"read":10,"write":2}},"time":{"created":1790643600000}}"#;
@@ -988,7 +899,7 @@ mod tests {
         assert_eq!(sample.timestamp, 1_790_643_600);
     }
 
-    /// `parsesOpenCodeMessageJSON` — v1 shape.
+    /// V1 shape.
     #[test]
     fn parses_legacy_opencode_message() {
         let json = r#"{"providerID":"opencode-go","modelID":"gpt-5","cost":1.5,"tokens":{"input":10,"output":5,"cache":{"read":1,"write":0}},"time":{"created":1790643600000}}"#;
@@ -1061,7 +972,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `providerFilterAppliesWithinRange` — filtering by provider id.
+    /// Filtering by provider id.
     #[test]
     fn opencode_provider_filter_applies() {
         let rows = "a1\topencode-go\t{\"tokens\":{\"input\":1},\"time\":{\"created\":1}}\n\

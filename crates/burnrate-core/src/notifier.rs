@@ -1,17 +1,12 @@
 //! Notification decisions: milestones, window resets, burn rate and daily spend.
 //!
-//! Ported 1:1 from the Swift app's `MilestoneNotifier.swift` plus the
-//! evaluators in `Alerts.swift`.
-//!
 //! The evaluators are pure; this is the stateful part — remembering the last
 //! reading per window so a crossing can be detected, and holding the cooldowns
-//! that stop a notification repeating. The two subtleties, both from the Swift
-//! build:
+//! that stop a notification repeating. The two subtleties:
 //!   - a **plan switch** must not fire a burst of milestones, so the history is
 //!     reset when the account fingerprint changes;
 //!   - a crossing while the reading was suppressed must not fire a notification
 //!     the moment the rule is re-armed.
-
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -233,7 +228,7 @@ impl MilestoneNotifier {
                         }
 
                         if settings.notify_on_reset {
-                            // Two signals, as the Swift build has it.
+                            // Two signals, either of which counts as a reset.
                             //
                             // Primary: the vendor moved the window's reset time
                             // forward, so a fresh window began — *however much*
@@ -492,7 +487,7 @@ mod tests {
         );
     }
 
-    /// `accountSwitchSuppressesPhantomResetAndMilestones` — a new plan starts
+    /// A new plan starts
     /// clean.
     #[test]
     fn account_switch_suppresses_a_burst() {
@@ -689,7 +684,7 @@ mod tests {
         );
     }
 
-    /// `resetWithoutAccountSwitchStillAlerts` — a genuine reset still notifies.
+    /// A genuine reset still notifies.
     #[test]
     fn window_reset_notifies() {
         let mut notifier = MilestoneNotifier::new();

@@ -1,8 +1,4 @@
 //! Formatting helpers shared by every platform's menus and dashboards.
-//!
-//! Ported 1:1 from the Swift app's `Formatting.swift`. Parity tests:
-//! `UsageComputationTests.tokensFormatting`, `UsageComputationTests.relativeTimeBuckets`.
-
 /// Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t.
 pub struct TokenFormat;
 
@@ -87,7 +83,7 @@ mod tests {
 
     const NOW: i64 = 1_700_000_000;
 
-    /// `tokensFormatting` — the compact suffixes and their trimming.
+    /// The compact suffixes and their trimming.
     #[test]
     fn tokens_formatting() {
         assert_eq!(TokenFormat::format(0), "0");
@@ -102,7 +98,7 @@ mod tests {
         assert_eq!(TokenFormat::format(1_100_000_000_000), "1.1t");
     }
 
-    /// `relativeTimeBuckets` — each bucket and its rounding.
+    /// Each bucket and its rounding.
     #[test]
     fn relative_time_buckets() {
         assert_eq!(RelativeTime::format(NOW, NOW), "now");

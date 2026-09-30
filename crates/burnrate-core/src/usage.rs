@@ -1,13 +1,9 @@
-//! Per-model usage: aggregation, pricing, and the series the charts draw.
-//!
-//! Ported 1:1 from the Swift app's `ModelUsage.swift`, `Pricing.swift` and
-//! `ChartData.swift`.
+//! Per-model usage: aggregation and pricing.
 //!
 //! The dashboard needs three derived views from the same samples, and they must
 //! agree with each other: daily buckets, flat totals, and trend series. Getting
 //! the *day boundary* wrong is the classic bug here — everything is bucketed by
 //! local start-of-day, because that is what a person means by "yesterday".
-
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -400,158 +396,6 @@ impl PricingTable {
     }
 }
 
-// MARK: - Charts
-
-/// Which window the dashboard is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChartRange {
-    Day,
-    Week,
-    Month,
-}
-
-impl ChartRange {
-    /// How many days the range covers.
-    pub fn days(self) -> i64 {
-        match self {
-            ChartRange::Day => 1,
-            ChartRange::Week => 7,
-            ChartRange::Month => 30,
-        }
-    }
-}
-
-/// One provider's remaining-% series, for the trend chart.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TrendSeries {
-    pub provider: String,
-    /// `true` when this is a model-scoped window (Claude's "Fable"), which is
-    /// drawn faded so it does not read as the account total.
-    pub scoped: bool,
-    /// (epoch seconds, percent remaining) in chronological order.
-    pub points: Vec<(i64, f64)>,
-}
-
-/// A snapshot of every provider window's remaining %, appended once per poll.
-/// This is the only history the trend chart needs, and it is small enough to
-/// persist verbatim.
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemainingSnapshot {
-    /// Seconds since the Unix epoch.
-    pub at: i64,
-    /// (provider, window label, percent remaining)
-    pub values: Vec<(String, String, f64)>,
-}
-
-/// Builds the chart series from persisted snapshots.
-pub struct ChartData;
-
-impl ChartData {
-    /// Series for one window label, one line per provider, in chronological
-    /// order. `provider_filter` of `None` keeps every provider.
-    pub fn trend_series(
-        snapshots: &[RemainingSnapshot],
-        label: &str,
-        provider_filter: Option<&str>,
-    ) -> Vec<TrendSeries> {
-        let mut by_provider: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
-        for snapshot in snapshots {
-            for (provider, window_label, percent) in &snapshot.values {
-                if window_label != label {
-                    continue;
-                }
-                if let Some(filter) = provider_filter {
-                    if provider != filter {
-                        continue;
-                    }
-                }
-                by_provider
-                    .entry(provider.clone())
-                    .or_default()
-                    .push((snapshot.at, *percent));
-            }
-        }
-        let mut series: Vec<TrendSeries> = by_provider
-            .into_iter()
-            .map(|(provider, mut points)| {
-                points.sort_by_key(|(at, _)| *at);
-                // The label suffix marks model-scoped windows, which are drawn
-                // faded: "Claude (Fable)" rather than "Claude".
-                let (provider, scoped) = match provider.split_once(" (") {
-                    Some((base, scope)) => {
-                        (base.to_string(), scope.trim_end_matches(')').to_string())
-                    }
-                    None => (provider.clone(), String::new()),
-                };
-                TrendSeries {
-                    provider,
-                    scoped: !scoped.is_empty(),
-                    points,
-                }
-            })
-            .collect();
-        series.sort_by(|a, b| a.provider.cmp(&b.provider));
-        series
-    }
-
-    /// The x domain for a range: `[earliest, latest]`, or an empty series when
-    /// there is no data (the caller decides what to draw then).
-    pub fn x_domain(points: &[(i64, f64)], range: ChartRange) -> Option<(i64, i64)> {
-        if points.is_empty() {
-            return None;
-        }
-        let first = points.first()?.0;
-        let last = points.last()?.0;
-        let _ = range;
-        Some((first, last))
-    }
-
-    /// Y bounds, padded so a flat line at 100% is not drawn on the frame.
-    pub fn y_domain(series: &[TrendSeries]) -> Option<(f64, f64)> {
-        let mut min = f64::INFINITY;
-        let mut max = f64::NEG_INFINITY;
-        for line in series {
-            for (_, percent) in &line.points {
-                min = min.min(*percent);
-                max = max.max(*percent);
-            }
-        }
-        if !min.is_finite() || !max.is_finite() {
-            return None;
-        }
-        Some((min.floor().max(0.0), max.ceil().min(100.0)))
-    }
-
-    /// Nearest point to `at` in a series, for the hover tooltip. Binary search,
-    /// because a month of minute-resolution polls is a few thousand points.
-    pub fn nearest_point(points: &[(i64, f64)], at: i64) -> Option<(i64, f64)> {
-        if points.is_empty() {
-            return None;
-        }
-        let index = points
-            .binary_search_by_key(&at, |(stamp, _)| *stamp)
-            .unwrap_or_else(|insertion| insertion);
-        let index = index.min(points.len() - 1);
-        let candidate = points[index];
-        if index > 0 {
-            let previous = points[index - 1];
-            if (previous.0 - at).abs() < (candidate.0 - at).abs() {
-                return Some(previous);
-            }
-        }
-        if index + 1 < points.len() {
-            let next = points[index + 1];
-            if (next.0 - at).abs() < (candidate.0 - at).abs() {
-                return Some(next);
-            }
-        }
-        Some(candidate)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,7 +416,6 @@ mod tests {
             .maybe_source_tag(provider_tag)
     }
 
-    /// `aggregatesPerDayPerModel`.
     #[test]
     fn aggregates_per_day_per_model() {
         let buckets = vec![(
@@ -597,7 +440,6 @@ mod tests {
         assert_eq!(today.entries[0].requests, 2);
     }
 
-    /// `samplesWithoutModelGroupAsUnknown`.
     #[test]
     fn samples_without_model_group_as_unknown() {
         let buckets = vec![(
@@ -608,7 +450,7 @@ mod tests {
         assert_eq!(totals[0].model, "unknown");
     }
 
-    /// `skipsSyntheticModels` — placeholders never reach the charts.
+    /// Placeholders never reach the charts.
     #[test]
     fn skips_synthetic_models() {
         let buckets = vec![(
@@ -623,7 +465,7 @@ mod tests {
         assert_eq!(totals[0].tokens.input, 10);
     }
 
-    /// `sameModelOnDifferentSourcesStaysSeparate` — Go's and Zen's are distinct.
+    /// Go's and Zen's are distinct.
     #[test]
     fn same_model_on_different_sources_stays_separate() {
         let buckets = vec![(
@@ -640,7 +482,6 @@ mod tests {
         assert!(labels.contains(&"gpt-5 · Zen".to_string()));
     }
 
-    /// `tagLabelsReadAsServices`.
     #[test]
     fn tag_labels_read_as_services() {
         assert_eq!(ModelUsageEntry::label_for_tag("opencode-go"), "Go");
@@ -686,7 +527,7 @@ mod tests {
         }
     }
 
-    /// `dayBucketMatchesOnlySameDay` — the local start-of-day boundary.
+    /// The local start-of-day boundary.
     #[test]
     fn day_bucket_matches_only_same_day() {
         let base = start_of_day(now(), UTC);
@@ -721,7 +562,7 @@ mod tests {
 
     // ---- pricing ----
 
-    /// `costCalculationWeightsCaches` — cache channels use their own rates.
+    /// Cache channels use their own rates.
     #[test]
     fn cost_calculation_weights_caches() {
         let pricing = ModelPricing::new(3e-6, 15e-6, Some(0.3e-6), Some(3.75e-6));
@@ -824,109 +665,5 @@ mod tests {
         assert_eq!(table.lookup("gpt-5").unwrap().input, 1.25e-6, "memoised");
         assert!(table.lookup("never-heard-of-it").is_none());
         assert_eq!(table.unresolved(), &["never-heard-of-it".to_string()]);
-    }
-
-    // ---- charts ----
-
-    fn snapshots() -> Vec<RemainingSnapshot> {
-        vec![
-            RemainingSnapshot {
-                at: 1_000,
-                values: vec![
-                    ("Claude".into(), "Rolling".into(), 80.0),
-                    ("Codex".into(), "Rolling".into(), 40.0),
-                ],
-            },
-            RemainingSnapshot {
-                at: 2_000,
-                values: vec![
-                    ("Claude".into(), "Rolling".into(), 70.0),
-                    ("Codex".into(), "Rolling".into(), 38.0),
-                ],
-            },
-            RemainingSnapshot {
-                at: 3_000,
-                values: vec![
-                    ("Claude".into(), "Rolling".into(), 65.0),
-                    ("Codex".into(), "Rolling".into(), 20.0),
-                ],
-            },
-        ]
-    }
-
-    /// `rollingCardHonorsProviderFilter` and the general series build.
-    #[test]
-    fn trend_series_are_per_provider_and_chronological() {
-        let series = ChartData::trend_series(&snapshots(), "Rolling", None);
-        assert_eq!(series.len(), 2);
-        assert_eq!(series[0].provider, "Claude");
-        assert_eq!(series[0].points.len(), 3);
-        // Chronological even if the snapshots arrive out of order.
-        let reversed: Vec<RemainingSnapshot> = snapshots().into_iter().rev().collect();
-        let out_of_order = ChartData::trend_series(&reversed, "Rolling", None);
-        let first = out_of_order[0].points[0];
-        assert!(first.0 < out_of_order[0].points[1].0, "sorted by time");
-    }
-
-    #[test]
-    fn trend_series_honours_a_provider_filter() {
-        let series = ChartData::trend_series(&snapshots(), "Rolling", Some("Codex"));
-        assert_eq!(series.len(), 1);
-        assert_eq!(series[0].provider, "Codex");
-    }
-
-    /// A model-scoped window is marked so the chart can fade it.
-    #[test]
-    fn scoped_windows_are_flagged() {
-        let data = vec![RemainingSnapshot {
-            at: 1,
-            values: vec![("Claude (Fable)".into(), "Weekly".into(), 30.0)],
-        }];
-        let series = ChartData::trend_series(&data, "Weekly", None);
-        assert_eq!(series[0].provider, "Claude");
-        assert!(series[0].scoped, "a scoped window draws faded");
-    }
-
-    #[test]
-    fn unknown_window_label_yields_no_series() {
-        assert!(ChartData::trend_series(&snapshots(), "Monthly", None).is_empty());
-    }
-
-    /// `emptySeriesUsesFullDomain` / `xDomainFallsBackToFullRangeWhenEmpty`.
-    #[test]
-    fn x_domain_is_none_when_empty() {
-        assert_eq!(ChartData::x_domain(&[], ChartRange::Month), None);
-        assert_eq!(
-            ChartData::x_domain(&[(10, 50.0), (20, 60.0)], ChartRange::Month),
-            Some((10, 20))
-        );
-    }
-
-    /// `yTicksStayInsideDomain` — the domain is clamped to 0–100.
-    #[test]
-    fn y_domain_is_clamped_to_percent() {
-        let series = ChartData::trend_series(&snapshots(), "Rolling", None);
-        let (low, high) = ChartData::y_domain(&series).unwrap();
-        assert!(low >= 0.0 && high <= 100.0, "got {low}..{high}");
-        assert!(low <= 20.0 && high >= 80.0);
-        assert_eq!(ChartData::y_domain(&[]), None);
-    }
-
-    /// `nearestPointBinarySearchesSortedSamples`.
-    #[test]
-    fn nearest_point_binary_searches() {
-        let points = vec![(0, 10.0), (100, 20.0), (200, 30.0)];
-        assert_eq!(ChartData::nearest_point(&points, 95), Some((100, 20.0)));
-        assert_eq!(ChartData::nearest_point(&points, 190), Some((200, 30.0)));
-        assert_eq!(ChartData::nearest_point(&points, -50), Some((0, 10.0)));
-        assert_eq!(ChartData::nearest_point(&points, 10_000), Some((200, 30.0)));
-        assert_eq!(ChartData::nearest_point(&[], 5), None);
-    }
-
-    #[test]
-    fn chart_range_days() {
-        assert_eq!(ChartRange::Day.days(), 1);
-        assert_eq!(ChartRange::Week.days(), 7);
-        assert_eq!(ChartRange::Month.days(), 30);
     }
 }
