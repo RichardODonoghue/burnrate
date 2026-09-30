@@ -27,6 +27,9 @@ stays local.
 - **Extra menu-bar widgets** — spawn an additional status item per plan
 - **Background operation** — lives in the menu bar, no Dock icon, polls every
   5 minutes
+- **Self-updating** — checks GitHub Releases at launch and daily; on macOS it
+  verifies the download against the release's published checksum and installs it
+  in place
 
 Cost figures are list-price estimates (LiteLLM pricing table) where vendors don't
 report spend — the standard ccusage/tokscale convention.
@@ -63,6 +66,11 @@ xattr -dr com.apple.quarantine /Applications/BurnRate.app
 
 Upgrading from the old Swift build? Your history is imported automatically on
 first launch.
+
+On macOS, **BurnRate updates itself**: when a newer release exists the menu-bar
+menu offers `Update to <version>…`, which downloads it, verifies it against the
+release's own `SHA256SUMS`, replaces the app and relaunches. On Linux and Windows
+the menu offers the release page instead, so upgrades there stay manual.
 
 ## Build
 

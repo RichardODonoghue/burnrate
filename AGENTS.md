@@ -143,6 +143,25 @@ All changes go through a pull request. Do not commit or push directly to `main`.
   packaging changes. macOS checks that the bundle version equals the tag. The rpm
   target needs `rpmbuild` (`apt-get install rpm`); without it the bundler fails
   rather than skipping the target.
+- **In-app updates** (`burnrate_core::updater` + `src-tauri/src/updater.rs`,
+  ported from `Updater.swift`): the app asks GitHub for `releases/latest`, and on
+  macOS it downloads the arm64 zip, verifies it against the release's own
+  `SHA256SUMS`, unpacks it, **validates** it (bundle id, version,
+  `codesign --verify --deep`), swaps the running bundle and relaunches. An
+  unverifiable release is refused, not warned about. Checked at launch and daily;
+  the tray row becomes `Update to X…` and a click installs it.
+  - This is why `release.yml` publishes `SHA256SUMS` over every asset, and why it
+    must keep doing so: **a release whose sums do not list the arm64 zip cannot be
+    installed in place.** Changing the published asset names therefore breaks
+    updates for existing installs, because they look for the name they know.
+  - macOS only, as in Swift. Elsewhere the update is reported and the release page
+    is opened. Doing it properly on Linux means the Tauri updater plugin, which
+    needs a signing keypair and a hosted `latest.json` — and it only updates
+    AppImages, so a `.deb`/`.rpm` install would still be manual.
+  - `cargo test -p burnrate-desktop -- --ignored real_release` exercises the whole
+    chain against the real published release. Run it after a release: it is the
+    only check that the *shipped* artifact passes the validation an install
+    performs.
 - **Nothing is signed or notarised.** macOS is ad-hoc signed
   (`bundle.macOS.signingIdentity: "-"`), so Gatekeeper quarantines a downloaded
   copy; the README documents the two ways past that. Adding notarisation means a

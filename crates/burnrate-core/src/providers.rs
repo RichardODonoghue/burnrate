@@ -168,6 +168,16 @@ pub trait HttpClient: Send + Sync {
         bearer: &str,
         extra_headers: &[(&str, &str)],
     ) -> Result<String, String>;
+
+    /// Raw bytes for 2xx, `Err(message)` otherwise.
+    ///
+    /// Separate from [`HttpClient::get`] because a binary download cannot go
+    /// through a `String`; the updater fetches a release zip with this.
+    fn get_bytes(&self, _url: &str, _extra_headers: &[(&str, &str)]) -> Result<Vec<u8>, String> {
+        // The default exists so a text-only implementation — the test stubs —
+        // stays implementable. Anything that actually ships implements it.
+        Err("this HTTP client cannot download binary data".into())
+    }
 }
 
 /// Blocking HTTP over `ureq`.
@@ -195,14 +205,41 @@ impl HttpClient for UreqClient {
         extra_headers: &[(&str, &str)],
     ) -> Result<String, String> {
         let agent = ureq::AgentBuilder::new().timeout(self.timeout).build();
-        let mut request = agent
-            .get(url)
-            .set("Authorization", &format!("Bearer {bearer}"));
+        let mut request = agent.get(url);
+        // Only when there is one: GitHub answers an empty `Bearer` with 401
+        // "Bad credentials", so sending the header unconditionally makes public
+        // endpoints look broken. The quota APIs always pass a token.
+        if !bearer.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {bearer}"));
+        }
         for (name, value) in extra_headers {
             request = request.set(name, value);
         }
         match request.call() {
             Ok(response) => response.into_string().map_err(|error| error.to_string()),
+            Err(ureq::Error::Status(code, response)) => {
+                let _ = response.into_string();
+                Err(format!("HTTP {code}"))
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn get_bytes(&self, url: &str, extra_headers: &[(&str, &str)]) -> Result<Vec<u8>, String> {
+        let agent = ureq::AgentBuilder::new().timeout(self.timeout).build();
+        let mut request = agent.get(url);
+        for (name, value) in extra_headers {
+            request = request.set(name, value);
+        }
+        match request.call() {
+            Ok(response) => {
+                let mut bytes = Vec::new();
+                response
+                    .into_reader()
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+                Ok(bytes)
+            }
             Err(ureq::Error::Status(code, response)) => {
                 let _ = response.into_string();
                 Err(format!("HTTP {code}"))
