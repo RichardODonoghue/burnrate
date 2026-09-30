@@ -1,6 +1,13 @@
 .DS_Store
 dist/
 
+# Swift tooling caches. The Swift app is gone, but an editor's stale Swift
+# indexer still writes this on a machine that has built it before — and because
+# it is full of generated module caches (118 files the first time), it must never
+# reach a commit. See AGENTS.md.
+.build/
+.swiftpm/
+
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
 
