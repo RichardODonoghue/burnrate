@@ -247,22 +247,15 @@ function rowIcon(id) {
 
 function renderSidebar() {
   const list = el("pane-list");
-  const settings = state.snapshot?.settings;
-  const counts = {
-    usage: state.snapshot?.usage?.length ?? 0,
-    notifications: (settings?.milestones?.length ?? 0) + (settings?.burnAlerts?.length ?? 0),
-    widgets: settings?.widgetProviders?.length ?? 0,
-    about: null,
-  };
-
-  list.innerHTML = PANES.map((pane) => {
-    const count = counts[pane.id];
-    return `<li><button data-pane="${pane.id}" aria-current="${pane.id === state.pane}">
+  // No counts beside the names: the numbers were a running tally of how many
+  // rules or widgets each pane holds, which says nothing about whether anything
+  // needs attention.
+  list.innerHTML = PANES.map(
+    (pane) => `<li><button data-pane="${pane.id}" aria-current="${pane.id === state.pane}">
       ${paneIcon(pane.id)}
       <span>${pane.title}</span>
-      ${count === null ? "" : `<span class="count">${count}</span>`}
-    </button></li>`;
-  }).join("");
+    </button></li>`
+  ).join("");
 
   for (const button of list.querySelectorAll("button")) {
     button.addEventListener("click", () => {
@@ -550,7 +543,7 @@ function renderAbout() {
     <div class="card">
       <h2>Links</h2>
       <div class="about-row">
-        <span class="row-glyph">${ICONS.github}</span>
+        ${rowIcon("github")}
         <a href="#" data-open="${REPO_URL}">github.com/${REPO_SLUG}</a>
       </div>
       <div class="about-row">
