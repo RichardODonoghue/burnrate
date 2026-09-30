@@ -1103,6 +1103,30 @@ fn send_test_notification(app: AppHandle<Wry>) -> Result<String, String> {
     ))
 }
 
+/// Opens an external link.
+///
+/// Restricted to this project's GitHub rather than taking any URL, so the command
+/// cannot become a general-purpose launcher reachable from the webview.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    const ALLOWED: &str = "https://github.com/RichardODonoghue/burnrate";
+    if !url.starts_with(ALLOWED) {
+        return Err(format!("refusing to open {url}"));
+    }
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = "xdg-open";
+
+    std::process::Command::new(opener)
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 /// Forces an immediate poll, skipping the throttle — the tray's Refresh.
 #[tauri::command]
 fn refresh_now(app: AppHandle<Wry>) {
@@ -1559,6 +1583,7 @@ pub fn run() {
             set_notify_on_reset,
             known_providers,
             open_window,
+            open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BurnRate");

@@ -23,19 +23,84 @@ pub use macos::{authorise, permission_state, post};
 #[cfg(target_os = "macos")]
 mod macos {
     use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2_foundation::{NSBundle, NSError, NSString};
+    use objc2::rc::Retained;
+    use objc2::runtime::{Bool, ProtocolObject};
+    use objc2::{define_class, msg_send, AllocAnyThread};
+    use objc2_foundation::{NSBundle, NSError, NSObject, NSObjectProtocol, NSString};
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent,
-        UNNotificationRequest, UNNotificationSettings, UNUserNotificationCenter,
+        UNNotification, UNNotificationPresentationOptions, UNNotificationRequest,
+        UNNotificationSettings, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
     use std::ptr::NonNull;
     use std::sync::mpsc;
+    use std::sync::OnceLock;
     use std::time::Duration;
 
     /// Long enough for the permission prompt's own round trip, short enough that
     /// a wedged notification daemon cannot stall the poll loop.
     const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
+
+    // Asks the centre to show a banner even when BurnRate is the frontmost app.
+    //
+    // Without a delegate macOS drops a notification that arrives while the app is
+    // frontmost: no banner, no sound, nothing but an entry in Notification Center.
+    // That is the whole difference between the welcome banner, which fires three
+    // seconds after launch before the window takes focus, and the test button,
+    // which is pressed *in* the window.
+    define_class!(
+        // SAFETY: NSObject has no subclassing requirements and this class holds no
+        // ivars.
+        #[unsafe(super(NSObject))]
+        #[name = "BurnRateNotificationPresenter"]
+        #[ivars = ()]
+        struct ForegroundPresenter;
+
+        unsafe impl NSObjectProtocol for ForegroundPresenter {}
+
+        unsafe impl UNUserNotificationCenterDelegate for ForegroundPresenter {
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                completion_handler: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                completion_handler.call((UNNotificationPresentationOptions::Banner
+                    | UNNotificationPresentationOptions::Sound,));
+            }
+        }
+    );
+
+    impl ForegroundPresenter {
+        fn new() -> Retained<Self> {
+            let this = Self::alloc().set_ivars(());
+            // SAFETY: NSObject's init has no preconditions.
+            unsafe { msg_send![super(this), init] }
+        }
+    }
+
+    /// The centre holds a weak reference to its delegate, so the instance has to
+    /// be kept alive for the process's lifetime.
+    static PRESENTER: OnceLock<Retained<ForegroundPresenter>> = OnceLock::new();
+
+    /// Installs the presenter once. Idempotent, because every entry point calls it.
+    fn install_presenter(center: &UNUserNotificationCenter) {
+        let presenter = PRESENTER.get_or_init(ForegroundPresenter::new);
+        center.setDelegate(Some(ProtocolObject::from_ref(&**presenter)));
+        // Announced once: a delegate that did not take looks exactly like one
+        // that is never asked, and both are a blank screen with no error.
+        static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+        ANNOUNCED.call_once(|| {
+            eprintln!(
+                "burnrate: notification delegate installed: {}, responds to willPresent: {}",
+                center.delegate().is_some(),
+                presenter.respondsToSelector(objc2::sel!(
+                    userNotificationCenter:willPresentNotification:withCompletionHandler:
+                ))
+            );
+        });
+    }
 
     /// The notification centre, or `None` when this process has no bundle.
     ///
@@ -44,9 +109,11 @@ mod macos {
     /// so the check has to come first. `tauri dev` runs the bare binary, which is
     /// exactly that case.
     fn center() -> Option<objc2::rc::Retained<UNUserNotificationCenter>> {
-        NSBundle::mainBundle()
-            .bundleIdentifier()
-            .map(|_| UNUserNotificationCenter::currentNotificationCenter())
+        NSBundle::mainBundle().bundleIdentifier().map(|_| {
+            let center = UNUserNotificationCenter::currentNotificationCenter();
+            install_presenter(&center);
+            center
+        })
     }
 
     fn describe(status: UNAuthorizationStatus) -> String {

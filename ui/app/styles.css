@@ -587,6 +587,42 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 
 .empty-glyph { display: block; font-size: 26px; margin-bottom: 8px; opacity: 0.55; }
 
+/* ---------- About ---------- */
+
+/* The shipped bundle icon over the name, as the Swift AboutView opens. */
+.card.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px 16px;
+  text-align: center;
+}
+.card.hero img { border-radius: 16px; }
+.card.hero strong { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.card.hero .hint { margin: 0; }
+
+/* A `Label(text, systemImage:)` row: icon, then text. */
+.about-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.about-row .row-glyph {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  opacity: 0.85;
+}
+.about-row a { color: var(--accent); text-decoration: none; }
+.about-row a:hover { text-decoration: underline; }
+.value.small { font-size: 11px; }
+.value.mono { font-family: var(--mono); }
+
 .chart-controls { margin-bottom: 10px; }
 .chart-controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
 
