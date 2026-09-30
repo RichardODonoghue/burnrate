@@ -357,7 +357,19 @@ fn now_unix() -> u64 {
 const TRAY_EDGE: u32 = 36;
 
 fn tray_image(remaining: Option<f64>) -> Image<'static> {
+    // macOS is the only platform that recolours this: the image goes over as a
+    // *template* and the system tints it for the menu bar, so it is drawn black
+    // and comes out right in both light and dark menu bars. Windows and Linux
+    // show the pixels as drawn, where black on a dark taskbar is invisible — so
+    // they get white.
+    #[cfg(target_os = "macos")]
     let canvas = dial::menu_bar_image(remaining, TRAY_EDGE);
+    #[cfg(not(target_os = "macos"))]
+    let canvas = dial::menu_bar_image_in(
+        remaining,
+        TRAY_EDGE,
+        burnrate_core::icon::RgbColor::new(1.0, 1.0, 1.0),
+    );
     Image::new_owned(canvas.pixels, TRAY_EDGE, TRAY_EDGE)
 }
 
@@ -1135,7 +1147,7 @@ fn send_test_notification(app: AppHandle<Wry>) -> Result<String, String> {
         "If you can read this, notifications are working.",
     )?;
     Ok(format!(
-        "Sent — permission {}",
+        "Sent, permission {}",
         notification_permission(&app)
     ))
 }
@@ -1886,6 +1898,47 @@ mod tests {
             entry.contains("boot"),
             "ui/app/js/main.js is not the built entry point; run `npm run build` in ui/"
         );
+    }
+
+    /// Every icon `tauri.conf.json` declares must exist *and* be what the
+    /// generator produces.
+    ///
+    /// The Windows taskbar icon was a stale `32x32.png`: the config asked for it,
+    /// and `icon-gen` had long since renamed its output to `icon_32x32.png`, so
+    /// the file on disk was an older icon — the pre-rewrite dial on a
+    /// hard-cornered square plate, which showed up as a "horrible border" on the
+    /// taskbar. Existence alone would not have caught it. The bytes have to match
+    /// the geometry.
+    #[test]
+    fn the_declared_icons_are_the_ones_the_generator_makes() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json parses");
+        let icons = config["bundle"]["icon"]
+            .as_array()
+            .expect("bundle.icon is a list");
+        assert!(!icons.is_empty(), "no bundle icons declared");
+
+        for icon in icons {
+            let path = icon.as_str().expect("an icon path");
+            let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+            assert!(full.exists(), "{path} is declared but does not exist");
+
+            // PNG entries are a direct render, so they can be compared exactly.
+            // The .icns and .ico are containers assembled by icon-gen.
+            let size = std::path::Path::new(path)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.split('x').next())
+                .and_then(|first| first.parse::<u32>().ok());
+            let Some(size) = size else { continue };
+
+            let found = std::fs::read(&full).expect("read the icon");
+            let expected = burnrate_core::dial::app_icon(size).to_png();
+            assert!(
+                found == expected,
+                "{path} is not what the generator produces — run `cargo run -p icon-gen`"
+            );
+        }
     }
 
     /// The bundle version has exactly one source: the workspace `Cargo.toml`.

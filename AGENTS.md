@@ -92,9 +92,21 @@ compile error rather than a blank window. A fresh clone therefore needs
   the fastest signal when something looks wrong.
 - Icons are generated from one source of truth, never hand-drawn:
   `cargo run -p icon-gen` renders the flame+dial geometry in `burnrate_core::dial`
-  into `src-tauri/icons/` (PNG set, `.icns`, `.ico`, `tray.png`, and `tray.rgba`,
-  which the runtime embeds because Tauri takes raw RGBA). Change the mark in
-  `dial.rs`, re-run, and every platform follows.
+  into `src-tauri/icons/` (the PNG set, `.icns`, `.ico`). The tray mark is *not*
+  one of those files — the runtime draws it from the same geometry and hands
+  Tauri raw RGBA, because a file would be a second copy to keep in step. Change
+  the mark in `dial.rs`, re-run, and every platform follows.
+  - **Every icon path `tauri.conf.json` declares must be one the generator
+    writes.** The Windows taskbar icon was a stale `32x32.png`: the config asked
+    for it, `icon-gen` had since renamed its output, and the file left on disk was
+    an older icon with square corners and no inset, which showed up as a broken
+    border. A test now compares each declared PNG against a fresh render, because
+    "the file exists" is not the same as "the file is current".
+  - **The tray mark's colour is per-platform.** macOS gets black and hands the
+    image over as a *template*, which the system tints for the menu bar; Windows
+    and Linux show the pixels as drawn, so they get white. An invisible tray icon
+    is exactly the kind of bug macOS cannot show you, which is why the ink is
+    chosen at the call site in `tray_image` and pinned by a test.
 
 ## Contributing — PRs only (mandatory)
 
@@ -134,8 +146,10 @@ All changes go through a pull request. Do not commit or push directly to `main`.
   `workflow_dispatch`), but release-please's manifest must be updated by hand to
   match, or the next release PR computes from the wrong version.
 - `.github/workflows/ci.yml` — the only CI: frontend + `fmt`/`clippy`/`test`, a
-  build-and-bundle matrix (macOS `app`, Linux `deb,rpm`, Windows `nsis`), and
-  the Linux tray smoke.
+  build-and-bundle matrix (macOS `app`, Linux `deb,rpm`, Windows `nsis`), a
+  `cargo audit` job, and the Linux tray smoke. Audit *warnings* do not fail the
+  build on purpose — two are upstream's to fix, and a permanently red job gets
+  ignored. It exits non-zero on advisories that actually affect us.
 - `.github/workflows/release.yml` — per-OS bundles: macOS `BurnRate-<ver>-arm64.zip`
   + `.dmg`, Linux `.deb` + `.rpm` + `.AppImage`, Windows `-x64-setup.exe`, then one
   job attaching them all with a combined `SHA256SUMS`. It has a `dry_run` dispatch

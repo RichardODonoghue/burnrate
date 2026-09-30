@@ -255,7 +255,7 @@ impl MilestoneNotifier {
                                         "{} {} reset",
                                         provider.provider_name, window.label
                                     ),
-                                    body: format!("Window reset — {current:.0}% remaining."),
+                                    body: format!("Window reset: {current:.0}% remaining."),
                                     kind: "reset",
                                 });
                             }
