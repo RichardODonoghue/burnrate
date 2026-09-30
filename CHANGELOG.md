@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/RichardODonoghue/burnrate/compare/v0.8.1...v0.9.0) (2026-09-30)
+
+
+### Features
+
+* add a Fedora/RHEL .rpm package ([#112](https://github.com/RichardODonoghue/burnrate/issues/112)) ([83b8805](https://github.com/RichardODonoghue/burnrate/commit/83b88058de99f6b3fccef9e2f6a309b32dcccf5b))
+* in-app updates work again ([#114](https://github.com/RichardODonoghue/burnrate/issues/114)) ([9c510da](https://github.com/RichardODonoghue/burnrate/commit/9c510da30d174137941decf20436fcf2ced0b921))
+
+
+### Bug Fixes
+
+* escape the window labels rendered into the notifications pane ([#118](https://github.com/RichardODonoghue/burnrate/issues/118)) ([c4966dc](https://github.com/RichardODonoghue/burnrate/commit/c4966dc9ecc1c2a4bcc0b1bcee93c64a55f7cde1))
+* the Windows tray and taskbar icons, and em dashes in UI copy ([#116](https://github.com/RichardODonoghue/burnrate/issues/116)) ([9929eb0](https://github.com/RichardODonoghue/burnrate/commit/9929eb05d35a0087a06cb013a4536fc938d0a32c))
+
 ## [0.8.1](https://github.com/RichardODonoghue/burnrate/compare/v0.8.0...v0.8.1) (2026-09-30)
 
 
