@@ -43,6 +43,20 @@ Windows would not boot. Tauri gives one UI codebase, a real tray library and
 - Commands: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy
   --workspace --all-targets -- -D warnings`, `cargo fmt --all`, and
   `scripts/tauri-smoke.sh` (Docker; the Gate 0 tray check).
+- **Run the app with `tauri dev`.** Do not also launch
+  `target/debug/bundle/macos/BurnRate Tauri.app/Contents/MacOS/burnrate-desktop`:
+  both write the same `target/debug/` binary and the second instance gives you
+  two menu-bar icons, two pollers hitting the vendor quota APIs, and two writers
+  to `settings.json` and the history files. Likewise, `pkill -f
+  burnrate-desktop` kills a running `tauri dev` — the app disappears and the CLI
+  sits waiting.
+- There is no `devUrl` and no `beforeDevCommand`, so `tauri dev` serves `ui/app`
+  as a static directory: a change to `app.js`/`usage.js`/`styles.css` needs a
+  webview reload (or a dev restart) and does **not** rebuild Rust, while a change
+  under `src-tauri/` or `crates/` rebuilds and restarts on its own. Devtools are
+  available, and the app's `eprintln!` diagnostics (`pricing table N entries`,
+  `trend history N sample(s)`, `N widget(s)`) print to the terminal — that output
+  is the fastest signal when something looks wrong.
 - Icons are generated from one source of truth, never hand-drawn:
   `cargo run -p icon-gen` renders the G2 flame+dial geometry in
   `burnrate_core::dial` into `src-tauri/icons/` (PNG set, `.icns`, `.ico`,
