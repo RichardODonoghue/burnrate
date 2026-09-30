@@ -38,6 +38,21 @@ impl TokenFormat {
     }
 }
 
+/// FNV-1a over the bytes of `text`.
+///
+/// `std::hash::DefaultHasher` is seeded per process, so anything derived from it
+/// differs between launches: a model's colour would change on every start, and a
+/// token fingerprint would make every poll look like a plan switch. This is
+/// stable across processes and across platforms.
+pub fn stable_hash(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
 /// Compact relative time: "in 45m", "in 5h", "in 3d" (or "now"). Keeps menu
 /// rows narrow — a full date was the widest line in the dropdown.
 pub struct RelativeTime;

@@ -72,12 +72,12 @@ updater.
 
 ## ProviderThrottle (8)
 
-- [ ] `noWindowsNeverDue`
-- [ ] `futureResetNotDue`
-- [ ] `resetPassedAfterLastFetchIsDue`
-- [ ] `fetchedSinceResetNotDue`
-- [ ] `missingResetsAtNeverDue`
-- [ ] `anyDueWindowForcesRefresh`
+- [x] `noWindowsNeverDue`
+- [x] `futureResetNotDue`
+- [x] `resetPassedAfterLastFetchIsDue`
+- [x] `fetchedSinceResetNotDue`
+- [x] `missingResetsAtNeverDue`
+- [x] `anyDueWindowForcesRefresh`
 - [x] `quotaCacheThrottlesAndBacksOff`
 - [x] `quotaCacheSkipsThrottleWhenResetPassed`
 
@@ -101,7 +101,7 @@ updater.
 
 ## TrendSeries (20)
 
-- [ ] `cutoffIsTrailingWindow`
+- [x] `cutoffIsTrailingWindow`
 - [x] `tickStyleFollowsVisibleSpanNotSelectedRange`
 - [x] `hourlyStrideWidensWithSpan`
 - [x] `xDomainShrinksToAvailableData`
@@ -134,8 +134,8 @@ updater.
 - [x] `openCodeKeyFoundAcrossCandidatePaths`
 - [x] `parsesOpenCodeV2AccountJSON`
 - [x] `accountJSONWithoutOpenCodeReturnsNil`
-- [ ] `claudeAccountFingerprintUsesAccountAndOrg`
-- [ ] `tokenHashFallbackDiffersPerToken`
+- [x] `claudeAccountFingerprintUsesAccountAndOrg`
+- [x] `tokenHashFallbackDiffersPerToken`
 
 ## UsageComputation (7)
 
@@ -193,11 +193,22 @@ updater.
 
 ## Non-test parity work
 
-- [ ] Menu structure matches `StatusMenuBuilder` (`mainMenu`, `widgetMenu`,
-      `chartsRowIsOptIn` → `Charts…` only on Linux/Windows)
-- [ ] Icon spec/severity stops match `StatusIcon`
-- [ ] Relative-time formatting matches `RelativeTime`
-- [ ] Per-OS credential paths match `AppPaths` (`dataDirectory`/`configDirectory`
-      honouring XDG; macOS Keychain via `security`)
-- [ ] `rusqlite` (bundled, read-only) replaces shelling out to `/usr/bin/sqlite3`
-- [ ] Provider diagnostics (`lastStatus`) surfaced in the UI
+- [x] Icon spec/severity stops match `StatusIcon` (`icon.rs`, byte-identical to
+      Swift per `scripts/xcheck_core.sh`)
+- [x] Relative-time formatting matches `RelativeTime` (`formatting.rs`)
+- [x] Per-OS credential paths match `AppPaths` (XDG-honouring `dataDirectory` /
+      `configDirectory`; macOS Keychain via `security`)
+- [x] `rusqlite` (bundled, read-only) replaces shelling out to `/usr/bin/sqlite3`
+- [x] **Diverged on purpose:** the tray menu drops the `Charts…` and `Settings…`
+      rows. Both opened the same window the Usage Dashboard row opens, so they
+      were two entries to one place. `Settings.includesCharts` went with them —
+      it was a `StatusMenuBuilder` parameter, never a Swift setting.
+- [x] **Diverged on purpose:** provider diagnostics (`lastStatus`) are logged but
+      not surfaced. The "Not detected" card was removed on request.
+- [ ] **Not ported: notifier state persistence.** Swift writes `notifierState`
+      (`lastRemaining`, `costFired`, `resetsAt`, the credential fingerprint) to
+      UserDefaults, so a plan switch detected after a relaunch still suppresses
+      the phantom alerts. The Rust notifier holds that in memory only. It does not
+      bite today — the window history is empty at launch, so nothing can fire —
+      but it is a real difference and it is why the persisted fingerprint has
+      nothing to be persisted *for*.

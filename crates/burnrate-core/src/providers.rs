@@ -30,11 +30,37 @@ pub struct FetchResult {
     pub status: Option<String>,
 }
 
+/// Shared throttle policy for the vendor quota providers.
+pub struct ProviderThrottle;
+
+impl ProviderThrottle {
+    /// True when a window's reset moment passed *after* our last fetch — the
+    /// snapshot predates the reset (the machine slept through it, or fetches were
+    /// backing off), so fetch fresh rather than serving cache.
+    ///
+    /// Both halves matter. `now >= resets_at` alone would fire forever after a
+    /// reset; `last_fetch < resets_at` is what makes it a one-shot: once a fetch
+    /// has happened since the reset, the snapshot is current and the throttle
+    /// applies again.
+    pub fn reset_due(windows: &[UsageWindow], last_fetch: i64, now: i64) -> bool {
+        windows.iter().any(|window| {
+            let Some(resets_at) = window.resets_at else {
+                return false;
+            };
+            now >= resets_at && last_fetch < resets_at
+        })
+    }
+}
+
 /// Shared throttling and last-good-snapshot cache.
 pub struct QuotaCache {
     min_interval: Duration,
     backoff: Duration,
     last_fetch: Option<Instant>,
+    /// The same fetch, on the wall clock. The interval logic uses `Instant`
+    /// because it measures elapsed time, but a reset deadline is a Unix
+    /// timestamp, so comparing against it needs the wall clock too.
+    last_fetch_unix: i64,
     consecutive_failures: u32,
     windows: Vec<UsageWindow>,
     plan: Option<String>,
@@ -46,6 +72,7 @@ impl QuotaCache {
             min_interval,
             backoff,
             last_fetch: None,
+            last_fetch_unix: 0,
             consecutive_failures: 0,
             windows: Vec::new(),
             plan: None,
@@ -59,7 +86,15 @@ impl QuotaCache {
 
     /// True when enough time has passed to hit the API again. The effective
     /// interval grows with consecutive failures.
-    pub fn should_fetch(&self) -> bool {
+    ///
+    /// A window reset overrides all of that: serving a snapshot from before the
+    /// reset shows a percentage for a window that has already rolled over, and the
+    /// menu can keep showing it for a whole poll interval. `now` is seconds since
+    /// the Unix epoch.
+    pub fn should_fetch(&self, now: i64) -> bool {
+        if ProviderThrottle::reset_due(&self.windows, self.last_fetch_unix, now) {
+            return true;
+        }
         let Some(last) = self.last_fetch else {
             return true;
         };
@@ -72,8 +107,9 @@ impl QuotaCache {
         last.elapsed() >= effective
     }
 
-    pub fn note_fetch(&mut self) {
+    pub fn note_fetch(&mut self, now: i64) {
         self.last_fetch = Some(Instant::now());
+        self.last_fetch_unix = now;
     }
 
     pub fn note_success(&mut self, windows: Vec<UsageWindow>, plan: Option<String>) {
@@ -100,6 +136,7 @@ impl QuotaCache {
 
     pub fn invalidate(&mut self) {
         self.last_fetch = None;
+        self.last_fetch_unix = 0;
         self.consecutive_failures = 0;
     }
 }
@@ -111,6 +148,9 @@ const CLAUDE_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 /// Claude's OAuth usage endpoint. Percentages are **used**, not remaining.
 pub struct ClaudeUsageApiProvider {
     credentials_url: PathBuf,
+    /// Claude Code's account file, for the signed-in identity. Separate from the
+    /// credentials: the token rotates, the account uuid does not.
+    claude_json_url: PathBuf,
     credentials: Box<dyn CredentialReading>,
     cache: QuotaCache,
     client: Box<dyn HttpClient>,
@@ -189,6 +229,7 @@ impl ClaudeUsageApiProvider {
         Self {
             credentials_url: credentials_url
                 .unwrap_or_else(|| paths.home_directory().join(".claude/.credentials.json")),
+            claude_json_url: paths.home_directory().join(".claude.json"),
             credentials: credentials.unwrap_or_else(|| Box::new(NoopCredentialReader)),
             cache: QuotaCache::standard(),
             client: Box::new(UreqClient::default()),
@@ -201,20 +242,27 @@ impl ClaudeUsageApiProvider {
         self
     }
 
+    /// Points the account file somewhere else. The default is the real
+    /// `~/.claude.json`, which a test must not read.
+    pub fn with_account_file(mut self, path: PathBuf) -> Self {
+        self.claude_json_url = path;
+        self
+    }
+
     pub fn with_cache(mut self, cache: QuotaCache) -> Self {
         self.cache = cache;
         self
     }
 
-    pub fn fetch_usage(&mut self) -> FetchResult {
-        if !self.cache.should_fetch() {
+    pub fn fetch_usage(&mut self, now: i64) -> FetchResult {
+        if !self.cache.should_fetch(now) {
             let usage = self.cache.snapshot("Claude");
             return FetchResult {
                 usage,
                 status: None,
             };
         }
-        self.cache.note_fetch();
+        self.cache.note_fetch(now);
         match self.perform_fetch() {
             Ok((windows, plan)) => {
                 self.plan = plan.clone();
@@ -256,6 +304,50 @@ impl ClaudeUsageApiProvider {
     }
 
     /// The OAuth access token, from the credentials file or the Keychain.
+    /// The signed-in account's identity, for detecting a plan switch.
+    ///
+    /// `~/.claude.json`'s `oauthAccount` gives `accountUuid|organizationUuid`,
+    /// which is stable across OAuth refreshes. Falls back to hashing the token,
+    /// which is not — an OAuth refresh looks like a switch — so the uuid pair is
+    /// preferred and the token is only used when there is no account block.
+    ///
+    /// `None` when neither is available; the notifier reads that as "no change"
+    /// rather than as a switch.
+    pub fn credential_fingerprint(&self) -> Option<String> {
+        if let Ok(bytes) = std::fs::read(&self.claude_json_url) {
+            if let Some(fingerprint) = Self::account_fingerprint(&bytes) {
+                return Some(fingerprint);
+            }
+        }
+        self.access_token()
+            .map(|token| Self::fallback_fingerprint(&token))
+    }
+
+    /// `{"oauthAccount": {"accountUuid": "…", "organizationUuid": "…"}}`.
+    /// An account without an org is still an account, so the org defaults to "".
+    pub fn account_fingerprint(claude_json: &[u8]) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_slice(claude_json).ok()?;
+        let account = value.get("oauthAccount")?;
+        let uuid = account
+            .get("accountUuid")
+            .and_then(|v| v.as_str())
+            .filter(|uuid| !uuid.is_empty())?;
+        let org = account
+            .get("organizationUuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        Some(format!("{uuid}|{org}"))
+    }
+
+    /// The fallback identity: a stable hash of the token.
+    ///
+    /// `formatting::stable_hash`, not `std::hash` — the latter is seeded per
+    /// process, so the same token would fingerprint differently on every launch
+    /// and every poll would look like a plan switch.
+    pub fn fallback_fingerprint(token: &str) -> String {
+        format!("token|{}", crate::formatting::stable_hash(token))
+    }
+
     pub fn access_token(&self) -> Option<String> {
         if let Some(oauth) = self.read_credentials_file() {
             if let Some(token) = oauth
@@ -448,15 +540,15 @@ impl OpenCodeGoApiProvider {
         &self.auth_urls
     }
 
-    pub fn fetch_usage(&mut self) -> FetchResult {
-        if !self.cache.should_fetch() {
+    pub fn fetch_usage(&mut self, now: i64) -> FetchResult {
+        if !self.cache.should_fetch(now) {
             let usage = self.cache.snapshot("OpenCode Go");
             return FetchResult {
                 usage,
                 status: None,
             };
         }
-        self.cache.note_fetch();
+        self.cache.note_fetch(now);
         match self.perform_fetch() {
             Ok(windows) => {
                 self.cache.note_success(windows, Some("Go".to_string()));
@@ -673,41 +765,195 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// A fixed clock, so the throttle tests are about deadlines rather than
+    /// elapsed time and cannot go flaky on a loaded machine.
+    const NOW: i64 = 1_790_000_000;
+
     fn window(label: &str, percent: Option<f64>) -> UsageWindow {
         UsageWindow::new(label, 0, percent, None)
     }
 
     // ---- throttle ----
 
+    fn resetting(label: &str, resets_at: Option<i64>) -> UsageWindow {
+        UsageWindow::new(label, 0, Some(50.0), resets_at)
+    }
+
+    /// `noWindowsNeverDue` — nothing to be due about.
+    #[test]
+    fn no_windows_never_due() {
+        assert!(!ProviderThrottle::reset_due(&[], NOW - 600, NOW));
+    }
+
+    /// `futureResetNotDue` — a window that has not rolled over yet.
+    #[test]
+    fn future_reset_not_due() {
+        let windows = [resetting("Rolling", Some(NOW + 3600))];
+        assert!(!ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
+    }
+
+    /// `resetPassedAfterLastFetchIsDue` — the snapshot predates the reset, so it
+    /// describes a window that no longer exists.
+    #[test]
+    fn reset_passed_after_last_fetch_is_due() {
+        let windows = [resetting("Rolling", Some(NOW - 60))];
+        assert!(ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
+    }
+
+    /// `fetchedSinceResetNotDue` — what stops the previous case firing forever:
+    /// once a fetch has happened *after* the reset, the snapshot is current.
+    #[test]
+    fn fetched_since_reset_not_due() {
+        let windows = [resetting("Rolling", Some(NOW - 600))];
+        assert!(!ProviderThrottle::reset_due(&windows, NOW - 60, NOW));
+    }
+
+    /// `missingResetsAtNeverDue` — local parsing cannot know a reset time.
+    #[test]
+    fn missing_resets_at_never_due() {
+        let windows = [resetting("Rolling", None)];
+        assert!(!ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
+    }
+
+    /// `anyDueWindowForcesRefresh` — one due window is enough.
+    #[test]
+    fn any_due_window_forces_refresh() {
+        let windows = [
+            resetting("Rolling", Some(NOW + 3600)),
+            resetting("Weekly", Some(NOW - 60)),
+        ];
+        assert!(ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
+    }
+
     /// `quotaCacheThrottlesAndBacksOff` — the interval floor and the backoff.
     #[test]
     fn quota_cache_throttles_and_backs_off() {
         let mut cache = QuotaCache::new(Duration::from_millis(60), Duration::from_millis(100));
-        assert!(cache.should_fetch(), "first call always goes out");
-        cache.note_fetch();
-        assert!(!cache.should_fetch(), "then throttled");
+        assert!(cache.should_fetch(NOW), "first call always goes out");
+        cache.note_fetch(NOW);
+        assert!(!cache.should_fetch(NOW), "then throttled");
         std::thread::sleep(Duration::from_millis(80));
-        assert!(cache.should_fetch(), "past the floor");
+        assert!(cache.should_fetch(NOW), "past the floor");
 
         // Failures widen the interval.
-        cache.note_fetch();
+        cache.note_fetch(NOW);
         cache.note_failure();
         cache.note_failure();
         std::thread::sleep(Duration::from_millis(120));
         assert!(
-            !cache.should_fetch(),
+            !cache.should_fetch(NOW),
             "two failures back off past the plain floor"
         );
     }
 
-    /// `quotaCacheSkipsThrottleWhenResetPassed`.
+    /// `quotaCacheSkipsThrottleWhenResetPassed` — the reset escape hatch: inside
+    /// the interval, but a window has rolled over since the last fetch.
     #[test]
-    fn quota_cache_invalidate_forces_a_fetch() {
+    fn quota_cache_skips_throttle_when_reset_passed() {
         let mut cache = QuotaCache::new(Duration::from_secs(60), Duration::from_secs(300));
-        cache.note_fetch();
-        assert!(!cache.should_fetch());
-        cache.invalidate();
-        assert!(cache.should_fetch());
+        cache.note_success(vec![resetting("Rolling", Some(NOW + 60))], None);
+        cache.note_fetch(NOW);
+
+        // Just fetched, so throttled...
+        assert!(!cache.should_fetch(NOW));
+        // ...but the window rolls over before the floor elapses.
+        assert!(
+            cache.should_fetch(NOW + 90),
+            "a reset since the last fetch must force a fetch"
+        );
+        // Once that fetch has happened, the throttle applies again.
+        cache.note_fetch(NOW + 90);
+        assert!(!cache.should_fetch(NOW + 90));
+    }
+
+    /// A cache with no snapshot yet has nothing to be due.
+    #[test]
+    fn quota_cache_without_a_snapshot_is_never_reset_due() {
+        let cache = QuotaCache::standard();
+        assert!(!ProviderThrottle::reset_due(&[], 0, NOW));
+        assert!(cache.snapshot("Claude").is_none());
+    }
+
+    // ---- Claude account fingerprint ----
+
+    /// `claudeAccountFingerprintUsesAccountAndOrg`.
+    #[test]
+    fn claude_account_fingerprint_uses_account_and_org() {
+        let json = br#"{"oauthAccount":{"accountUuid":"acct-1","organizationUuid":"org-1"}}"#;
+        assert_eq!(
+            ClaudeUsageApiProvider::account_fingerprint(json).as_deref(),
+            Some("acct-1|org-1")
+        );
+
+        // An account with no organisation is still an account.
+        let no_org = br#"{"oauthAccount":{"accountUuid":"acct-1"}}"#;
+        assert_eq!(
+            ClaudeUsageApiProvider::account_fingerprint(no_org).as_deref(),
+            Some("acct-1|")
+        );
+
+        // Nothing usable: no account block, an empty uuid, or not JSON at all.
+        assert!(ClaudeUsageApiProvider::account_fingerprint(br#"{}"#).is_none());
+        assert!(ClaudeUsageApiProvider::account_fingerprint(
+            br#"{"oauthAccount":{"accountUuid":""}}"#
+        )
+        .is_none());
+        assert!(ClaudeUsageApiProvider::account_fingerprint(b"not json").is_none());
+    }
+
+    /// `tokenHashFallbackDiffersPerToken` — and, just as importantly, is the same
+    /// every time, because a per-process hash would make every poll look like a
+    /// plan switch.
+    #[test]
+    fn token_hash_fallback_differs_per_token() {
+        let first = ClaudeUsageApiProvider::fallback_fingerprint("token-a");
+        let second = ClaudeUsageApiProvider::fallback_fingerprint("token-b");
+        assert_ne!(first, second);
+        assert_eq!(
+            first,
+            ClaudeUsageApiProvider::fallback_fingerprint("token-a"),
+            "stable across calls, and across processes"
+        );
+        assert!(first.starts_with("token|"));
+    }
+
+    /// The uuid pair wins when the account file is readable, because a token hash
+    /// changes on every OAuth refresh and would read as a switch.
+    #[test]
+    fn the_account_file_is_preferred_over_the_token() {
+        let dir = std::env::temp_dir().join(format!("burnrate-acct-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let credentials = dir.join("credentials.json");
+        std::fs::write(&credentials, br#"{"claudeAiOauth":{"accessToken":"tok"}}"#).expect("write");
+
+        let account = dir.join("claude.json");
+        std::fs::write(
+            &account,
+            br#"{"oauthAccount":{"accountUuid":"acct-9","organizationUuid":"org-9"}}"#,
+        )
+        .expect("write");
+        let provider =
+            ClaudeUsageApiProvider::new(Some(credentials), None).with_account_file(account);
+        assert_eq!(
+            provider.credential_fingerprint().as_deref(),
+            Some("acct-9|org-9"),
+            "the account block wins: a token hash changes on every refresh"
+        );
+
+        // With no account file, the token is the only identity available.
+        let provider = ClaudeUsageApiProvider::new(Some(dir.join("credentials.json")), None)
+            .with_account_file(dir.join("absent.json"));
+        assert_eq!(
+            provider.credential_fingerprint().as_deref(),
+            Some(ClaudeUsageApiProvider::fallback_fingerprint("tok").as_str())
+        );
+
+        // And with neither, there is no identity — not an empty one.
+        let provider = ClaudeUsageApiProvider::new(Some(dir.join("absent.json")), None)
+            .with_account_file(dir.join("absent.json"));
+        assert!(provider.credential_fingerprint().is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A failed fetch still serves the last good snapshot.
@@ -862,7 +1108,7 @@ mod tests {
     fn missing_credentials_are_reported() {
         let dir = temp_dir("nocreds");
         let mut provider = ClaudeUsageApiProvider::new(Some(dir.join(".credentials.json")), None);
-        let result = provider.fetch_usage();
+        let result = provider.fetch_usage(NOW);
         assert!(result.usage.is_none());
         let status = result.status.unwrap();
         assert!(status.contains("no Claude credentials"), "got {status}");
@@ -882,7 +1128,7 @@ mod tests {
             .with_client(Box::new(StubClient {
                 response: Err("HTTP 401".into()),
             }));
-        let result = provider.fetch_usage();
+        let result = provider.fetch_usage(NOW);
         assert_eq!(result.status.as_deref(), Some("HTTP 401"));
         assert!(result.usage.is_none());
     }
@@ -904,7 +1150,7 @@ mod tests {
                 Duration::from_millis(1),
                 Duration::from_millis(1),
             ));
-        let result = provider.fetch_usage();
+        let result = provider.fetch_usage(NOW);
         assert_eq!(result.status, None);
         let usage = result.usage.expect("usage");
         assert_eq!(usage.plan.as_deref(), Some("Max 20x"));
@@ -933,7 +1179,7 @@ mod tests {
             Duration::from_millis(1),
             Duration::from_millis(1),
         ));
-        let result = provider.fetch_usage();
+        let result = provider.fetch_usage(NOW);
         assert!(result.usage.is_some(), "keychain token was used");
     }
 
