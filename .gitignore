@@ -1,15 +1,24 @@
-.build/
-dist/
 .DS_Store
-*.xcodeproj
+dist/
+
+# Swift tooling caches. The Swift app is gone, but an editor's stale Swift
+# indexer still writes these on a machine that has built it before, and they are
+# full of generated module caches — 118 files reached a commit that way once.
+# See AGENTS.md.
+.build/
 .swiftpm/
-build/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
 
-# Rust build output, if the Tauri rewrite (branch: rewrite/tauri) has been built
-# in this working tree. On main this is belt-and-braces: without it a stray
-# `git add -A` tries to commit a 300 MB target/ and the push is rejected.
+# Rust. Building in this working tree leaves a few hundred MB under target/, and a
+# careless `git add -A` will try to commit it. That has happened: check `git
+# status` for generated paths before staging, not after.
 /target/
 /src-tauri/target/
+/src-tauri/gen/
+
+# Frontend build output and dependencies. The sources are ui/app/src; `tsc`
+# emits native ES modules into ui/app/js, which the webview loads directly.
+ui/node_modules/
+ui/app/js/

@@ -1,0 +1,15 @@
+{
+  "name": "burnrate-ui",
+  "private": true,
+  "type": "module",
+  "description": "BurnRate's webview UI. TypeScript, emitted as native ES modules — no bundler, so the webview resolves the imports itself.",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/harness.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
