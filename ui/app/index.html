@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BurnRate</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Sections">
+        <div class="brand">
+          <img id="brand-icon" alt="" width="28" height="28" />
+          <strong>BurnRate</strong>
+        </div>
+        <ul id="pane-list"></ul>
+        <div class="sidebar-foot">
+          <span id="platform-note"></span>
+        </div>
+      </nav>
+      <main class="content" id="content" tabindex="-1"></main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <!-- One entry point. Modules replace the old `window.BurnRate` handoff, which
+         was load-order dependent: app.js resolved the Usage pane off a namespace
+         usage.js had to populate first, and getting it wrong took the whole window
+         down with a temporal-dead-zone error. -->
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>

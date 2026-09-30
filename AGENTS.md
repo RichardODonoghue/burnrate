@@ -1,162 +1,325 @@
 # AGENTS.md
 
-## Contributing — PRs only (mandatory)
-
-All changes from now on must go through a pull request. Do not commit or push
-directly to `main`.
-
-- Branch from `main` (e.g. `fix/…`, `feat/…`), commit there, push the branch,
-  and open a PR.
-- CI must go green before merge.
-- Prefer squash/rebase merges; keep PRs focused on one change.
-- Commit messages follow conventional commits (`feat:`, `fix:`, `docs:` …) —
-  release-please parses them to version and tag releases.
-- Exception: nothing. Release-please's own "chore(main): release X.Y.Z" PR is
-  the only automated path to `main`.
-
 ## Project
 
-**BurnRate** — macOS native menu-bar app that tracks AI plan usage for OpenCode Go, Anthropic Claude, and OpenAI Codex plans. Swift + SwiftUI, Swift Package Manager only (no Xcode project file). Minimum target: macOS 15 Sequoia.
+**BurnRate** — menu-bar app that tracks AI plan usage for OpenCode Go, Anthropic
+Claude and OpenAI Codex. **Rust + Tauri v2**, one UI codebase for macOS, Linux
+and Windows.
 
-## Build & test
+It was a Swift app until Sep 2026. It was rewritten because the Swift
+cross-platform packaging failed in practice — the Windows download was 250 MB of
+bundled Swift runtime, the hand-rolled Linux GTK4 tray was ugly and fragile, and
+Windows would not boot. The Swift app and its three workflows were deleted at the
+cutover; `crates/burnrate-core`'s module comments still name the Swift file each
+module was ported from, which is provenance, not a live reference.
 
-- `swift build` from repo root.
-- `scripts/test.sh` to run tests. Plain `swift test` fails on this machine: only
-  Command Line Tools installed (no Xcode), so the Swift Testing framework needs
-  manual `-F`/`-rpath` flags, which the script supplies. Tests use `import Testing`
-  (not XCTest — also unavailable without Xcode).
-- Run the app: `swift run` — menu-bar status item appears; `Cmd+C` to stop.
-- **Linux app:** `swift build --product BurnRate` on Linux (GTK4 via `libgtk-4-dev`).
-  `scripts/linux-smoke.sh` builds and smoke-runs it in an Ubuntu container under
-  Xvfb (window + tray registration/menu/click + widget tray; requires Docker). The
-  tray is a hand-rolled StatusNotifierItem + DBusMenu over GIO in `CBurnRateTray`
-  (not libayatana-appindicator — that is GTK3 and cannot share a process with
-  GTK4); multiple tray items are supported (main + per-provider widgets).
-  Linux alerts go through `notify-send` (thread-safe `LinuxNotifier`; milestone,
-  reset, burn-rate and daily-cost rules), settings persist as JSON
-  (`LinuxSettings`) and are edited from a GTK settings window (widget toggles,
-  reset notifications, milestone step spinning). The updater opens the releases
-  page.
-  Package with `scripts/make_linux_app.sh` (tarball + `.deb` + `.desktop` + install
-  script); it **bundles the Swift runtime libraries** (not a distro package) and
-  sets an rpath of `$ORIGIN/../lib/BurnRate`, so the binary runs on distros
-  without a Swift toolchain. The install script checks `ldd` and reports missing
-  system libs (GTK4) with per-distro install commands. The Linux app logs and
-  shows which providers were not detected and why (missing credential paths,
-  HTTP failures). The **Charts…** menu item
-  opens a Cairo-rendered window
-  (remaining-% trend lines + top-model ranking bars + daily stacked usage) fed
-  from `TrendChartData`/`ModelUsage`, and the dashboard text lists per-model
-  totals. CI compiles the target; `scripts/linux-smoke.sh` verifies runtime. The
-  macOS app target and the Linux target are declared per-OS in `Package.swift`;
-  `BurnRateCore` builds on both.
-- Swift 6 strict concurrency is on: UI-touching classes are `@MainActor`.
-- **Windows app:** `swift build --product BurnRate` on Windows (CI uses the
-  Swift 6.1.2 toolchain on `windows-2022`; it also runs the core tests). The UI
-  is a Win32 C shim (`CBurnRateWin32`: window + message loop, `Shell_NotifyIcon`
-  tray with per-provider widgets, balloon notifications, GDI charts, settings
-  dialog); `BurnRateCore` builds on Windows too. Settings persist as JSON
-  (`WindowsSettings`). Package with `scripts/make_windows_app.ps1` (zip + Swift
-  runtime DLLs). It is **compile-verified only** — no Windows machine was
-  available to run it.
-- No codegen, migrations, or lint config yet; add commands here as tooling lands.
+## Layout
 
-## Bundle ID
+- `crates/burnrate-core/` — pure Rust, no Tauri or UI dependencies. All logic and
+  the tests that matter. Modules: `model`, `usage`, `providers` (vendor quota
+  APIs), `sources` (local log parsing), `alerts`, `notifier`, `charts`, `menu`,
+  `settings`, `paths`, `pricing` (in `model`), `formatting`, `icon`, `dial`,
+  `migration`, `poller`.
+- `src-tauri/` — the Tauri layer: tray, windows, commands, settings plumbing
+  (`lib.rs`), macOS notifications (`notifications.rs`), the Swift-history import
+  (`swift_import.rs`).
+- `ui/` — the frontend.
+- `crates/icon-gen/` — renders the icons from `burnrate_core::dial`.
 
-- `com.burnrate.desktop` (was `com.burnrate.app` until Sep 2026).
-- Notification Center / iconservices cache the **banner icon per bundle ID**;
-  the old ID had a blank icon cached that no icns change or cache clearing
-  could dislodge. Fresh ID fixed it. Don't change the ID casually —
-  notification permission and all UserDefaults (settings, history, notifier
-  state) are keyed on it.
-- AppDelegate runs a one-time defaults migration from the legacy
-  `com.burnrate.app` domain (guarded by the `migratedLegacyBundleID` flag).
+Keep new shared logic in `burnrate-core` with a `pub` API and tests; do not reach
+for `tauri` there.
+
+### The frontend is TypeScript emitted as native ES modules — no bundler
+
+The webview resolves the imports itself, which is why `tsconfig` uses
+`module`/`moduleResolution: NodeNext`: it *enforces* the `.js` extension in
+relative imports at compile time, and `bundler` would let `./dom` through and the
+browser would 404 on it. `ui/package.json`'s only devDependency is `typescript`;
+the point of this shape is that npm's dependency tree is one package rather than
+the several hundred a bundler plus a framework pulls in.
+
+- `ui/app/src/*.ts` → `ui/app/js/*.js` (gitignored). `ui/app/index.html` loads
+  `./js/main.js` as a module; `frontendDist` is `../ui/app`.
+- `ui/tests/harness.mjs` loads the **emitted** modules against a stubbed DOM and
+  IPC and asserts the markup. Run `npm run build` first. It replaced a DOM stub
+  that loaded the old JavaScript with `eval`, which could not see a script that
+  failed to load at all.
+- `main.ts` is the only module with load-time side effects, so the harness can
+  import everything else without booting the app.
+- Panes are leaves: they import `store`/`dom`/`ui`/`charts` and never the shell.
+  The shell passes them a `PaneContext` (`reload`, `selectWindow`) rather than the
+  modules importing each other in a cycle.
+- **The wire is camelCase.** `ProviderUsage` is
+  `#[serde(rename_all = "camelCase")]`, so it is `providerName`, not
+  `provider_name`. Reading the snake_case name finds nothing, and inside a lookup
+  with a fallback that failure is *silent* — it has been wrong three times, once
+  in `src` and twice in test fixtures. Tests pin the wire keys
+  (`model.rs::provider_usage_wire_keys_are_camel_case`); use real wire keys in
+  fixtures.
+
+### `tsc` must run before `cargo build`/`cargo test`
+
+`tauri::generate_context!` embeds `frontendDist` at compile time, so a build
+without the emitted frontend succeeds and ships a window that renders nothing.
+`tauri.conf.json` sets `beforeBuildCommand`/`beforeDevCommand`; CI builds the
+frontend before every job that compiles the app; and `src-tauri/src/lib.rs` has a
+test that `include_str!`s the emitted entry point, so a missing build is a
+compile error rather than a blank window. A fresh clone therefore needs
+`npm ci && npm run build` in `ui/` before `cargo test`.
+
+## Build, run and test
+
+- `cargo build --workspace`, `cargo test --workspace`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all`.
+- Frontend, all from `ui/`: `npm ci`, `npm run build`, `npm run typecheck`,
+  `npm test`.
+- `scripts/tauri-smoke.sh` — Docker; the runtime tray check (registration, DBusMenu
+  service, in-place menu text mutation, click dispatch). It builds the frontend on
+  the host first because the container has no node.
+- **Run the app with `tauri dev`.** Do not also launch
+  `target/debug/bundle/macos/BurnRate.app/Contents/MacOS/burnrate-desktop`: both
+  write the same `target/debug/` binary, and the second instance gives you two
+  menu-bar icons, two pollers hitting the vendor quota APIs, and two writers to
+  `settings.json` and the history files. Likewise `pkill -f burnrate-desktop`
+  kills a running `tauri dev` — the app disappears and the CLI sits waiting.
+- There is no `devUrl` and no `beforeDevCommand`, so `tauri dev` serves `ui/app` as
+  a static directory: a change under `ui/app/` needs a webview reload (or a dev
+  restart) and does **not** rebuild Rust, while a change under `src-tauri/` or
+  `crates/` rebuilds and restarts on its own. Devtools are available, and the
+  app's `eprintln!` diagnostics (`pricing table N entries`,
+  `trend history N sample(s), M day(s) of model history, K notifier window(s)`,
+  `N widget(s)`, `poll #N providers, …`) print to the terminal — that output is
+  the fastest signal when something looks wrong.
+- Icons are generated from one source of truth, never hand-drawn:
+  `cargo run -p icon-gen` renders the flame+dial geometry in `burnrate_core::dial`
+  into `src-tauri/icons/` (PNG set, `.icns`, `.ico`, `tray.png`, and `tray.rgba`,
+  which the runtime embeds because Tauri takes raw RGBA). Change the mark in
+  `dial.rs`, re-run, and every platform follows.
+
+## Contributing — PRs only (mandatory)
+
+All changes go through a pull request. Do not commit or push directly to `main`.
+
+- Branch from `main` (e.g. `fix/…`, `feat/…`), commit there, push, open a PR.
+- CI must go green before merge.
+- Prefer squash/rebase merges; keep PRs focused on one change.
+- Conventional commits (`feat:`, `fix:`, `docs:` …) — release-please parses them
+  to version and tag releases.
+- Exception: nothing. Release-please's own `chore(main): release X.Y.Z` PR is the
+  only automated path to `main`.
+
+## Release and versioning
+
+- **One version**, in `[workspace.package]` of the root `Cargo.toml`. It drives the
+  bundle (`CFBundleShortVersionString`, `package_info().version`) *and*
+  `burnrate_core::VERSION`, so the two numbers About shows cannot disagree.
+  `src-tauri/tauri.conf.json` deliberately sets **no** `version`: that field
+  overrides the crate version, and the two silently drifted to `1.0.0` while the
+  newest release was `0.8.0`. A test fails if the field returns.
+- release-please bumps it (`extra-files`, `jsonpath: $.workspace.package.version`),
+  so a release PR moves the app version alongside the changelog and the tag. The
+  toml updater leaves `Cargo.lock` stale for the local crates; cargo rewrites it on
+  the next build and nothing here builds `--locked`.
+- `.github/workflows/ci.yml` — the only CI: frontend + `fmt`/`clippy`/`test`, a
+  build-and-bundle matrix (macOS `app`, Linux `deb`, Windows `nsis`), and the
+  Linux tray smoke.
+- `.github/workflows/release.yml` — per-OS bundles: macOS `BurnRate-<ver>-arm64.zip`
+  + `.dmg`, Linux `.deb` + `.AppImage`, Windows `-x64-setup.exe`, then one job
+  attaching them all with a combined `SHA256SUMS`. It has a `dry_run` dispatch
+  input that builds every platform without touching a release — use it to check
+  packaging changes. macOS checks that the bundle version equals the tag.
+- **Nothing is signed or notarised.** macOS is ad-hoc signed
+  (`bundle.macOS.signingIdentity: "-"`), so Gatekeeper quarantines a downloaded
+  copy; the README documents the two ways past that. Adding notarisation means a
+  Developer ID, `notarytool` credentials as secrets, and an entitlements file.
 
 ## Product invariants (do not break)
 
-- Menu bar icon always present; app runs in the background. No dock window as primary UI.
-- Settings UI opens from the dropdown menu on the menu-bar icon click, not a separate flow.
-- Dropdown shows % remaining for 5hr, weekly, and monthly limits (or provider-equivalent windows) for each provider.
-- Desktop notifications fire at user-configurable usage milestones (configured in settings).
-- App can spawn additional menu-bar widgets showing per-plan usage %. Keep status-item code modular: one manager capable of multiple `NSStatusItem` instances.
+- Menu-bar icon always present; the app runs in the background. No dock window as
+  the primary UI.
+- Windows are opened from the tray menu, not a separate launcher flow. The Usage
+  Dashboard window carries the charts *and* the settings panes in its sidebar.
+- Tray menu shows % remaining per window per provider, with the plan tier in the
+  provider header (`Claude - Max 20x`).
+- Desktop notifications fire at user-configurable usage milestones.
+- The app can spawn additional menu-bar widgets, one per plan. Keep the tray code
+  modular: one manager capable of multiple items.
+- Polling continues while the app is backgrounded; milestone and burn-rate rules
+  are evaluated on every poll.
 
-## Architecture notes
+## Providers and data layers
 
-- **Targets:** `BurnRateCore` is platform-independent: models/aggregation,
-  `Pricing`, `Alerts`/evaluators, `ProviderThrottle`/`QuotaCache`, `ChartData`,
-  `StatusMenu`, `IconSpec`, and the runtime (providers `ClaudeUsageAPI` /
-  `OpenCodeGoUsageAPI`, log sources `UsageSources`, `MilestoneNotifier`).
-  `BurnRate` is the macOS app (AppKit/SwiftUI/Combine/UserNotifications). Keep
-  new shared logic in `BurnRateCore` with `public` API; do not import Apple-only
-  frameworks there. `BurnRateCore` is the first step toward a Linux/Windows port
-  (plan kept outside the repo).
-- **Platform seams** live in `BurnRateCore/Platform.swift` (`AppPaths`,
-  `CredentialReading`, `SQLiteQuerying`) and `BurnRateCore/Presentation.swift`
-  (`NotificationPresenting`, `SystemEventObserving`, `AppUpdating`); macOS
-  implementations are in `PlatformMacOS.swift`/`PresentationMacOS.swift`. The tray
-  is modelled in `BurnRateCore/StatusMenu.swift` (`StatusMenuBuilder` +
-  `StatusItemPresenting`); `StatusItemManager` is the macOS renderer and owns no
-  app state. Add new OS integrations as a protocol in core plus one implementation
-  per platform, rather than calling AppKit/`Process` paths inline.
-- Two data layers per provider, in priority order:
-  1. **Vendor quota APIs (authoritative %, resets, no calibration)** — reuse the
-     credentials the CLIs already stored at login; no auth flow of our own.
-     - Claude: `GET api.anthropic.com/api/oauth/usage`, Bearer token from
-       `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`) or, when
-       absent, macOS Keychain `security find-generic-password -s
-       "Claude Code-credentials" -w` (same JSON shape). Parse the `limits`
-       array (session / weekly_all / weekly_scoped — scoped entries carry
-       `scope.model.display_name`, e.g. Fable) and fall back to the flat
-       `five_hour`/`seven_day` keys on older shapes. Values are percent USED.
-       Rate-limits aggressively: min 60s between calls, 300s backoff on error,
-       reuse last snapshot.
-     - OpenCode Go: `GET opencode.ai/zen/go/v1/usage`, Bearer key from either
-       OpenCode version — v1 `auth.json` (`{"opencode-go":{"key":…}}`) or v2
-       `account.json` (`{"version":2,"accounts":{…serviceID:"opencode-go"…
-       credential.key}}`), searched under `$XDG_DATA_HOME`, `~/.local/share`
-       and `$XDG_CONFIG_HOME`; v2's DB `credential` table
-       (`integration_id='opencode-go'`) is a fallback. Returns
-       rolling/weekly/monthly `percent` (used) + `resetsAt`. Plan shown as "Go".
-     - Zen credit balance: NO public endpoint yet (feature request
-       anomalyco/opencode#10448, assigned). Deliberately not implemented —
-       do not scrape the web console. Check the issue, then add a
-       `zen/v1/balance` call to `OpenCodeGoUsageAPIProvider` when it ships.
-     - Codex: same pattern, `~/.codex/auth.json` — not implemented yet.
-  2. **Local log parsing (tokens/cost, fallback)** — see below.
-- Local parsing (no network): Claude `~/.claude/projects/**/*.jsonl` (append-only,
-  incremental byte-offset cache, skip files untouched for 31 days, lossy UTF-8
-  reads, **requestId dedupe** — Claude Code rewrites the same request across
-  lines/files, so each requestId counts once with its final cumulative usage;
-  without this, totals over-count ~2x); Codex
-  `~/.codex/sessions/**/*.jsonl` (last cumulative `token_count` event per file);
-  OpenCode `~/.local/share/opencode/opencode.db` (SQLite+WAL, query read-only
-  via `/usr/bin/sqlite3` with `time_created` filter — never copy the DB; drain
-  the output pipe before `waitUntilExit()` or it deadlocks). OpenCode migrated
-  storage: newer turns live in `session_message` (`model:{id,providerID}`,
-  `cost`, `tokens`, `type='assistant'`) while older ones are in `message`
-  (flat `providerID`/`modelID`); the parser detects which tables exist, reads
-  both, and dedupes by row id (the migration copied ids into both tables).
-- Sources/providers are actors (`protocol UsageSource: Actor`,
-  `protocol UsageProvider: Actor`); parsing runs off the main thread. First
-  Claude parse is ~20s (~560MB), later polls ~ms.
-- Local parsing needs capacities (`SettingsStore.planCapacities`, weighted
-  tokens: cache read ×0.1, write ×1.25) to show %; without one it shows tokens
-  only. Capacities are **predetermined** (`SettingsStore.defaultCapacities`,
-  keyed `provider|windowLabel` with labels Rolling/Weekly/Monthly) — there is no
-  UI to edit them and persisted calibration values are ignored. Claude data
-  counts cache reads, so raw token capacity guessing never matches the vendor %
-  — prefer the quota API.
-- Usage polling continues while the app is backgrounded; milestone thresholds
-  and burn-rate alerts are evaluated on each poll.
-- Burn-rate alerts (`BurnAlert`): notify when a window's remaining % drops
-  ≥ N within a trailing M-minute window. History kept per window id (6h
-  retention), baseline = oldest in-window reading, 30-min cooldown per window
-  after firing. Detection is pure (`BurnRateEvaluator`, tested).
-- Per-model usage: `UsageSample` carries `model` + `cost` (cost only from
-  OpenCode; Claude logs have costUSD null). `ModelUsageAggregator` buckets
-  into per-day per-model totals; the Models window (Charts) reads a snapshot
-  persisted to UserDefaults (`modelUsageHistory`) and refreshed each poll.
-  OpenCode local source accepts `providerIDFilter: nil` (all providers).
-- Extra alerts: `CostAlert` (daily USD spend from local logs, OpenCode only)
-  in the notifier with once-per-day logic. Model-burn alerts were removed as
-  noise — the dashboard's per-model charts cover that ground.
+Two layers per provider, in priority order.
+
+1. **Vendor quota APIs** — authoritative %, resets, no calibration. Reuses the
+   credentials the CLIs already stored at login; no auth flow of our own.
+   - **Claude**: `GET api.anthropic.com/api/oauth/usage`, Bearer token from
+     `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`) or, when absent,
+     the macOS Keychain (`security find-generic-password -s
+     "Claude Code-credentials" -w`, same JSON shape). **Both the token and the plan
+     tier go through one `read_credential_oauth`** (file, then Keychain) —
+     reading the file alone returned no plan on a Keychain-only install, which is
+     the common case. Parse the `limits` array (session / weekly_all /
+     weekly_scoped — scoped entries carry `scope.model.display_name`, e.g. Fable)
+     and fall back to the flat `five_hour`/`seven_day` keys on older shapes.
+     Values are percent **used**. Rate-limits aggressively: min 60s between calls,
+     300s backoff on error, reuse the last snapshot.
+   - **Plan tier**: `format_plan` maps the subscription type through a fixed table
+     (`max`→`Max`, `team`→`Team`, `pro`→`Pro`, `enterprise`→`Enterprise`,
+     otherwise verbatim) and takes the multiplier as the `\d+x` **suffix** of
+     `rateLimitTier`, so `default_claude_max_20x` → `Max 20x`. It is not string
+     concatenation.
+   - **OpenCode Go**: `GET opencode.ai/zen/go/v1/usage`, Bearer key from either
+     OpenCode version — v1 `auth.json` (`{"opencode-go":{"key":…}}`) or v2
+     `account.json` (`{"version":2,"accounts":{…serviceID:"opencode-go"…
+     credential.key}}`), searched under `$XDG_DATA_HOME`, `~/.local/share` and
+     `$XDG_CONFIG_HOME`; v2's DB `credential` table
+     (`integration_id='opencode-go'`) is a fallback. Returns rolling/weekly/monthly
+     `percent` (used) + `resetsAt`. Plan shown as "Go".
+   - **Zen credit balance**: no public endpoint yet (feature request
+     anomalyco/opencode#10448, assigned). Deliberately not implemented — do not
+     scrape the web console. Check the issue, then add a `zen/v1/balance` call to
+     `OpenCodeGoApiProvider` when it ships.
+   - **Codex**: same pattern, `~/.codex/auth.json` — not implemented yet.
+2. **Local log parsing** (tokens/cost, fallback) — below.
+
+## Local log parsing (no network)
+
+- **Claude** `~/.claude/projects/**/*.jsonl` — append-only, incremental
+  byte-offset cache, skip files untouched for 31 days, lossy UTF-8 reads, and
+  **requestId dedupe**: Claude Code rewrites the same request across lines and
+  files, so each requestId counts once with its final cumulative usage. Without
+  it, totals over-count ~2×.
+- **Codex** `~/.codex/sessions/**/*.jsonl` — last cumulative `token_count` event
+  per file.
+- **OpenCode** `~/.local/share/opencode/opencode.db` — SQLite+WAL, opened
+  **read-only** with `rusqlite` (bundled) and a `busy_timeout`, because the CLI is
+  actively writing it. Never copy the DB. (The Swift build shelled out to
+  `/usr/bin/sqlite3` and had to drain the pipe before `waitUntilExit()` or it
+  deadlocked; `rusqlite` removes that class of bug.) Storage was migrated
+  upstream: newer turns live in `session_message` (`model:{id,providerID}`,
+  `cost`, `tokens`, `type='assistant'`) while older ones are in `message` (flat
+  `providerID`/`modelID`); the parser detects which tables exist, reads both, and
+  dedupes by row id (the migration copied ids into both tables).
+- Local parsing needs **capacities** (weighted tokens: cache read ×0.1, write
+  ×1.25) to show %. Capacities are predetermined, keyed
+  `provider|windowLabel` with labels Rolling/Weekly/Monthly; there is no UI to
+  edit them. Claude data counts cache reads, so a raw token-capacity guess never
+  matches the vendor %, which is why the quota API is preferred.
+
+## Notifications and alerts
+
+- The notifier (`burnrate-core::notifier`) decides; delivery is platform-specific.
+  macOS posts through `UNUserNotificationCenter` (`src-tauri/src/notifications.rs`)
+  — the Tauri plugin's path builds an `NSUserNotification`, which is deprecated and
+  inert on modern macOS, so a terminal-launched app shows nothing. Everywhere else
+  uses `tauri-plugin-notification`.
+- **State persists** (`notifier-state.json`): the account fingerprint, every
+  window's last reading and reset time, and the days a spend cap already fired.
+  Restoring the baseline is what makes the saved fingerprint load-bearing —
+  without both, a switch that happens while the app is closed is invisible,
+  because the first poll has nothing to compare against.
+- **Milestones** fire on a crossing of a user-configured step.
+- **Window reset**: two signals. Primary — the vendor moved the window's reset time
+  *forward*, so a fresh window began, however much remaining moved (an old window
+  can end above 90% after hours of idle). Fallback — a ≥40-point jump, for sources
+  that report no reset time. The old 5-point threshold was not equivalent: a quiet
+  window gains 5 points from cache expiry alone.
+- **Burn-rate** (`BurnAlert`): notify when a window's remaining drops ≥ N within a
+  trailing M-minute window. Per-window history with 6h retention, baseline = oldest
+  in-window reading, 30-min cooldown per window after firing. Detection is pure
+  (`BurnRateEvaluator`, tested). Note `detect` requires the window to actually
+  *span* its minutes, so a 30-minute rule needs ~28 minutes of history.
+- **Daily cost** (`CostAlert`): once-per-day USD spend from local logs. Model-burn
+  alerts were removed as noise — the per-model charts cover that ground.
+
+## Platform specifics that cost time once
+
+Linux:
+
+- Tauri reaches the tray through **libayatana-appindicator**, so items live at
+  `/org/ayatana/NotificationItem/<id with non-alnum → _>` and the menu at
+  `<item>/Menu` (`com.canonical.dbusmenu`). There is **no** `/StatusNotifierItem`
+  object, unlike the old hand-rolled tray.
+- A watcher reports items by **unique bus name** (`:1.2`), not by the
+  `org.kde.StatusNotifierItem-<pid>-<n>` well-known name the old tray used.
+- A tray menu, once set, **cannot be replaced** — only edited. The real menu is
+  built once and its items' text is rewritten every poll; row ids are namespaced by
+  generation because the old menu's ids may still be registered.
+- `TrayIconBuilder::title` lands in the `XAyatanaLabel` property, not `Title`.
+- **Do not use `PredefinedMenuItem::quit`.** On Linux it reports itself disabled
+  through DBusMenu, so the row is greyed out and never dispatches and the app
+  cannot be quit from its own menu. Use a plain `MenuItem` — this is also why every
+  usage row is created `enabled: true` (a disabled item is greyed out on macOS too,
+  which is what the usage figures were) and the click is ignored in
+  `on_menu_event` instead.
+- WebKitGTK in a container needs `WEBKIT_DISABLE_COMPOSITING_MODE=1` and
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1`; `scripts/tauri-smoke.sh` sets them.
+- **`scripts/tauri-smoke.sh` must build into a container-local
+  `CARGO_TARGET_DIR`.** A `target/` shared between the host (macOS) and the
+  container (Linux) corrupts the proc-macro artifacts and the build dies with
+  `E0463: can't find crate` for every dependency of `tauri-build` and `gtk`.
+- Tray ids are `"tray-icon tray app <id>"` with non-alphanumerics replaced by `_`,
+  so a widget for "Claude" is at
+  `/org/ayatana/NotificationItem/tray_icon_tray_app_widget_Claude`.
+
+macOS:
+
+- `is_dev()` is `!cfg!(feature = "custom-protocol")`. Dev builds attribute
+  notifications to the launching terminal; bundles do not.
+- The bundle id is **`com.burnrate.desktop`** (was `com.burnrate.app` until Sep
+  2026, and `com.burnrate.desktop.tauri` during the rewrite). Notification Centre
+  and iconservices cache the **banner icon per bundle id**, and the old id had a
+  blank icon cached that no icns change or cache clearing could dislodge — so do
+  not change the id casually. Notification permission and any UserDefaults are
+  keyed on it, which is why the Tauri app took the Swift app's id at cutover.
+
+## Migrating from the Swift app
+
+The Swift app kept its history in `UserDefaults` under `com.burnrate.desktop`:
+`remainingHistory` (7 days of 5-minute polls) and `modelUsageHistory` (30 days of
+per-model daily buckets). `src-tauri/src/swift_import.rs` reads them once with
+`defaults export <domain> -` then `plutil -extract … raw`, and
+`burnrate-core::migration` parses them. Both dates are **seconds since
+2001-01-01**, not the Unix epoch — read without the offset, every sample lands 31
+years in the past, the retention filter drops the lot, and the migration reports
+success while importing nothing. That failure is silent, so it is worth being
+loud about.
+
+The import is skipped if either history file already exists, so it runs exactly
+once and cannot overwrite live data.
+
+## Deliberate divergences from the Swift app
+
+These were decisions, not omissions. Do not "restore" them without asking.
+
+- **No `Charts…` or `Settings…` tray rows.** The Usage Dashboard window carries
+  both the charts and the settings panes, so those rows opened the same window a
+  second time. (`StatusMenuBuilder` still models them and takes an
+  `includes_charts` flag, but `src-tauri` filters every `Action` out of the row
+  plan and builds its own rows — see the follow-up list; it is dead.)
+- **Per-provider failure reasons are logged, not surfaced.** The Usage pane lists
+  providers that were not detected; each provider's `lastStatus` detail (missing
+  credential path, HTTP code) goes to the terminal instead.
+- **Claude is not offered a Monthly window** in the milestone or burn-rule
+  pickers. Its quota has no monthly window, so the options come from the
+  provider's own reported windows (Claude: Rolling/Weekly/Fable; OpenCode Go:
+  Rolling/Weekly/Monthly). A hardcoded list survives only as a fallback for a
+  provider that has not been detected yet, and it drops Monthly for Claude there
+  too. Swift's own `windowLabels(for:)` *does* offer Monthly for Claude,
+  contradicting its own usage pane.
+- **The app-icon pose is amber**, the pose the shipped icns was drawn at, via
+  `dial::SHIPPED_ICON_POSE_REMAINING`. The Swift renderer passed `nil`, which its
+  severity ramp read as 70% and painted green.
+- **The current day's bar is not faded** in the daily chart. A part-day-opacity
+  experiment read as a wrong bar rather than an incomplete one and was removed.
+
+## Known follow-ups
+
+- `StatusMenuAction` (and `StatusMenuEntry::Action`) is **dead code**: the builder
+  creates `Charts…`/`Settings…`/`Quit` entries and `src-tauri`'s `row_plan`
+  discards every `Action`, then `build_menu` constructs those rows itself. Two
+  sources of truth for one menu.
+- `crates/burnrate-core/src/alerts.rs`'s doc comments and others name deleted
+  Swift files. Kept as provenance; delete the naming if you prefer.
+- Zen credit balance (blocked on upstream) and the Codex quota API.
