@@ -300,6 +300,9 @@ struct Snapshot {
     remaining: Option<f64>,
     app_version: String,
     core_version: String,
+    /// Where settings live. Shown in About, so it travels with the payload
+    /// rather than needing a command of its own.
+    settings_path: String,
     /// The newer version GitHub is offering, if any.
     update_available: Option<String>,
     /// One line of updater state for the About pane.
@@ -913,6 +916,7 @@ fn snapshot(
         remaining,
         app_version: app.package_info().version.to_string(),
         core_version: state.core_version.clone(),
+        settings_path: AppPaths::detect().settings_file().display().to_string(),
         update_available: update.available.clone(),
         update_state: update.state.clone(),
         update_busy: update.busy,
@@ -1257,11 +1261,6 @@ fn refresh_now(app: AppHandle<Wry>) {
         poller.invalidate_caches();
     }
     poll_once(&app);
-}
-
-#[tauri::command]
-fn settings_file_path() -> String {
-    AppPaths::detect().settings_file().display().to_string()
 }
 
 #[tauri::command]
@@ -1698,41 +1697,11 @@ pub fn run() {
             match id {
                 ID_QUIT => app.exit(0),
                 ID_DASHBOARD => open_window(app.clone(), Some(AppPane::Usage)),
-                ID_UPDATE => {
-                    let status = app.state::<Arc<AppState>>().update_status();
-                    match status.available {
-                        // Clicking the offer installs it, as the Swift menu did.
-                        Some(_) if !status.busy => {
-                            let installing = app.clone();
-                            std::thread::spawn(move || {
-                                let version = installing
-                                    .state::<Arc<AppState>>()
-                                    .update_status()
-                                    .available
-                                    .unwrap_or_default();
-                                match updater::install_version(&version) {
-                                    Ok(()) => {
-                                        eprintln!("burnrate: {version} installed; relaunching");
-                                        installing.exit(0);
-                                    }
-                                    Err(error) => {
-                                        eprintln!("burnrate: update failed: {error}");
-                                        let state = installing.state::<Arc<AppState>>();
-                                        state.set_update_status(updater::UpdateStatus {
-                                            available: Some(version),
-                                            busy: false,
-                                            state: format!("install failed: {error}"),
-                                            can_install: updater::CAN_INSTALL,
-                                        });
-                                    }
-                                }
-                            });
-                        }
-                        // Nothing on offer: show the pane, which carries the
-                        // affordance to check.
-                        _ => open_window(app.clone(), Some(AppPane::About)),
-                    }
-                }
+                // Opens the About pane rather than installing. The row says
+                // "Update to X…" either way, but one click should not replace the
+                // application: the pane shows the version and the Install button
+                // is the confirmation.
+                ID_UPDATE => open_window(app.clone(), Some(AppPane::About)),
                 other if other.starts_with(ID_WIDGET_PREFIX) => {
                     if let Some(provider) = other
                         .strip_prefix(ID_WIDGET_PREFIX)
@@ -1747,7 +1716,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             save_settings,
-            settings_file_path,
             send_test_notification,
             model_colours,
             refresh_now,
@@ -1935,6 +1903,64 @@ mod tests {
                 "{path} is not what the generator produces — run `cargo run -p icon-gen`"
             );
         }
+    }
+
+    /// The CSP has to permit exactly what the UI loads, and no more.
+    ///
+    /// Every directive is load-bearing, and a missing one blanks the window
+    /// rather than failing a build — so it is pinned here. `index.html` loads its
+    /// module and stylesheet same-origin; the palette and chart colours are set
+    /// as `style` *attributes*, which cannot be nonced or hashed, making
+    /// `'unsafe-inline'` the only way to allow them; and the About pane's icon is
+    /// a `data:` URL. Script execution stays `'self'` — that directive is what
+    /// stops an injected string from running.
+    ///
+    /// The `index.html` half keeps this honest: if the frontend starts loading
+    /// something new, or gains an inline script, this fails rather than the CSP
+    /// silently blocking it at runtime.
+    #[test]
+    fn the_csp_covers_what_the_ui_loads() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json parses");
+        let csp = config["app"]["security"]["csp"]
+            .as_str()
+            .expect("a CSP must be set: with none, an injected string can run");
+
+        for needed in [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "connect-src 'self'",
+            "object-src 'none'",
+        ] {
+            assert!(csp.contains(needed), "the UI needs `{needed}`, got: {csp}");
+        }
+        assert!(
+            !csp.contains("\'unsafe-inline\'")
+                || csp.contains("style-src \'self\' \'unsafe-inline\'"),
+            "only style attributes may be inline: {csp}"
+        );
+        assert!(
+            !csp.contains("script-src") || !csp.contains("script-src 'self' 'unsafe-inline'"),
+            "inline script must stay blocked: {csp}"
+        );
+
+        let html = include_str!("../../ui/app/index.html");
+        assert!(
+            html.contains("src=\"./js/main.js\""),
+            "the module is same-origin"
+        );
+        assert!(
+            html.contains("href=\"./styles.css\""),
+            "the stylesheet is same-origin"
+        );
+        // An inline script or handler would need 'unsafe-inline' for script-src,
+        // which this CSP deliberately does not grant.
+        assert!(
+            !html.contains("<script>") && !html.contains("onload=") && !html.contains("onclick="),
+            "index.html must not carry inline script"
+        );
     }
 
     /// The bundle version has exactly one source: the workspace `Cargo.toml`.
