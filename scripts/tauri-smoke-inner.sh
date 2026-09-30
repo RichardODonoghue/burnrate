@@ -71,8 +71,7 @@ cat > "$HOME/.config/BurnRate/settings.json" <<'SETTINGS'
   "burnAlerts": [],
   "costAlerts": [],
   "notifyOnReset": true,
-  "pollIntervalSeconds": 300,
-  "includesCharts": true
+  "pollIntervalSeconds": 300
 }
 SETTINGS
 
@@ -140,10 +139,10 @@ LAYOUT=$(layout || true)
 # credentials, so the status row is the "Loading usage…" placeholder.
 printf '%s' "$LAYOUT" | grep -q "Usage Dashboard" ||
   fail "menu missing the dashboard row: $LAYOUT"
-# Charts is opt-in per platform; the seeded settings enable it.
-printf '%s' "$LAYOUT" | grep -q "Charts" ||
-  fail "menu missing the Charts row despite includesCharts: $LAYOUT"
-printf '%s' "$LAYOUT" | grep -q "Settings" || fail "menu missing the Settings row"
+# The Charts and Settings rows are gone by request: the usage window carries
+# both, so a second entry that opens the same window is noise.
+printf '%s' "$LAYOUT" | grep -q "Charts" && fail "menu still has a Charts row: $LAYOUT"
+printf '%s' "$LAYOUT" | grep -q "Settings" && fail "menu still has a Settings row: $LAYOUT"
 printf '%s' "$LAYOUT" | grep -q "Quit" || fail "menu missing the Quit row"
 # The usage block is one row per provider and per window, as Swift renders it.
 # Folding them into a single item put every figure on one line.
@@ -151,7 +150,7 @@ printf '%s' "$LAYOUT" | grep -q "Rolling" ||
   fail "menu has no per-window row (usage block collapsed into one line?): $LAYOUT"
 printf '%s' "$LAYOUT" | grep -qE "Rolling[^']*%" ||
   fail "menu window row carries no figure: $LAYOUT"
-echo "tray: menu OK (dashboard, charts, settings, quit, per-window rows)"
+echo "tray: menu OK (dashboard, quit, per-window rows; no charts/settings)"
 
 # In-place mutation. A Linux tray menu cannot be replaced once it is set, only
 # edited, so this proves rows are rewritten rather than rebuilt. The status row

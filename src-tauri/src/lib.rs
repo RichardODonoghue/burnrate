@@ -28,7 +28,7 @@ use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
 use burnrate_core::charts::{axis_label, metric_value, ChartRange, Metric, TrendChartData};
 use burnrate_core::dial;
 use burnrate_core::formatting::TokenFormat;
-use burnrate_core::menu::{StatusMenuAction, StatusMenuBuilder, StatusMenuEntry, StatusMenuModel};
+use burnrate_core::menu::{StatusMenuBuilder, StatusMenuEntry, StatusMenuModel};
 use burnrate_core::model::ProviderUsage;
 use burnrate_core::paths::AppPaths;
 use burnrate_core::poller::{local_start_of_day, local_utc_offset_seconds};
@@ -39,9 +39,7 @@ use burnrate_core::usage::{DailyModelUsage, ModelUsageAggregator, ModelUsageEntr
 /// Menu item ids. Fixed strings, because a Linux tray menu cannot be replaced
 /// once set — rows are reused and only their text changes.
 const ID_DASHBOARD: &str = "open-dashboard";
-const ID_CHARTS: &str = "open-charts";
 const ID_UPDATE: &str = "check-updates";
-const ID_SETTINGS: &str = "open-settings";
 const ID_QUIT: &str = "quit";
 /// Widget rows are per provider, so their ids are built as `widget-<provider>`.
 const ID_WIDGET_PREFIX: &str = "widget-";
@@ -106,7 +104,6 @@ struct TrayHandles<R: tauri::Runtime> {
     /// Bumped on each rebuild, so row ids never collide.
     generation: u64,
     dashboard: MenuItem<R>,
-    charts: MenuItem<R>,
     update: MenuItem<R>,
     main: tauri::tray::TrayIcon<R>,
     /// Per provider: the tray icon plus the widget menu's status row.
@@ -335,9 +332,17 @@ fn now_unix() -> u64 {
 }
 
 /// The tray glyph as raw RGBA — Tauri wants pixels, not a PNG.
-fn tray_image(remaining: Option<f64>, edge: u32) -> Image<'static> {
-    let canvas = dial::menu_bar_image(remaining, edge);
-    Image::new_owned(canvas.pixels, edge, edge)
+/// The menu-bar mark, drawn at **2x**.
+///
+/// `tray-icon` scales whatever it is given to 18 points tall, so a 22px image was
+/// being upscaled to 36 device pixels on a Retina display — which is the
+/// pixelated icon. 36px is exactly 2x of 18pt, so macOS gets one image pixel per
+/// device pixel.
+const TRAY_EDGE: u32 = 36;
+
+fn tray_image(remaining: Option<f64>) -> Image<'static> {
+    let canvas = dial::menu_bar_image(remaining, TRAY_EDGE);
+    Image::new_owned(canvas.pixels, TRAY_EDGE, TRAY_EDGE)
 }
 
 fn widget_id(provider: &str) -> String {
@@ -392,7 +397,6 @@ struct BuiltMenu<R: tauri::Runtime> {
     menu: Menu<R>,
     rows: Vec<RowItem<R>>,
     dashboard: MenuItem<R>,
-    charts: MenuItem<R>,
     update: MenuItem<R>,
 }
 
@@ -402,10 +406,11 @@ fn build_menu<R: tauri::Runtime>(
     plan: &[(RowKind, String)],
     generation: u64,
 ) -> tauri::Result<BuiltMenu<R>> {
+    // No "Charts…" row: the usage window carries the charts, so a second entry
+    // that opens the same window is noise. No "Settings…" row either — the same
+    // window's sidebar holds the settings panes, and the dashboard row opens it.
     let dashboard = MenuItem::with_id(app, ID_DASHBOARD, "Usage Dashboard…", true, None::<&str>)?;
-    let charts = MenuItem::with_id(app, ID_CHARTS, "Charts…", true, None::<&str>)?;
     let update = MenuItem::with_id(app, ID_UPDATE, "Check for Updates…", true, None::<&str>)?;
-    let settings_item = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
     // A plain item, not PredefinedMenuItem::quit: on Linux the predefined Quit
     // reports itself disabled through DBusMenu, so the row is greyed out and
     // never dispatches — the app becomes unquittable from its own menu.
@@ -438,17 +443,14 @@ fn build_menu<R: tauri::Runtime>(
     let menu = builder
         .separator()
         .item(&dashboard)
-        .item(&charts)
         .item(&update)
         .separator()
-        .item(&settings_item)
         .item(&quit)
         .build()?;
     Ok(BuiltMenu {
         menu,
         rows,
         dashboard,
-        charts,
         update,
     })
 }
@@ -462,11 +464,10 @@ fn install_trays(app: &AppHandle<Wry>) -> tauri::Result<TrayHandles<Wry>> {
         menu,
         rows,
         dashboard,
-        charts,
         update,
     } = build_menu(app, &plan, 0)?;
     let main = TrayIconBuilder::with_id("main")
-        .icon(tray_image(None, 22))
+        .icon(tray_image(None))
         .icon_as_template(true)
         .tooltip("BurnRate")
         .menu(&menu)
@@ -477,7 +478,6 @@ fn install_trays(app: &AppHandle<Wry>) -> tauri::Result<TrayHandles<Wry>> {
         row_kinds: plan.iter().map(|(kind, _)| *kind).collect(),
         generation: 0,
         dashboard,
-        charts,
         update,
         main,
         widgets: Vec::new(),
@@ -506,7 +506,7 @@ fn install_widget(app: &AppHandle<Wry>, provider: &str) -> tauri::Result<WidgetH
         .item(&remove)
         .build()?;
     let icon = TrayIconBuilder::with_id(widget_id(provider))
-        .icon(tray_image(None, 22))
+        .icon(tray_image(None))
         .icon_as_template(true)
         .title(provider)
         .tooltip(provider)
@@ -530,10 +530,19 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let remaining = StatusMenuBuilder::worst_rolling_remaining(&usage);
     let now = now_unix() as i64;
 
-    // The icon carries the severity, so it is redrawn on every poll.
-    handles.main.set_icon(Some(tray_image(remaining, 22))).ok();
+    // The icon carries the severity, so it is redrawn on every poll. This must
+    // go through `set_icon_with_as_template`: tray-icon's plain `set_icon` passes
+    // `false` for the template flag, ignoring `icon_as_template`, so redrawing
+    // the icon silently turned it back into a fixed black image — which is why
+    // the mark stayed black in dark mode instead of being tinted white.
+    handles
+        .main
+        .set_icon_with_as_template(Some(tray_image(remaining)), true)
+        .ok();
 
-    let model = StatusMenuBuilder::main_menu(&usage, None, false, settings.includes_charts, now);
+    // `false`: this build has no separate Charts window — the usage pane is the
+    // dashboard, so the tray has no Charts row to gate.
+    let model = StatusMenuBuilder::main_menu(&usage, None, false, false, now);
     let plan = row_plan(&model);
     let kinds: Vec<RowKind> = plan.iter().map(|(kind, _)| *kind).collect();
 
@@ -549,7 +558,6 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
                     handles.row_kinds = kinds;
                     handles.generation = generation;
                     handles.dashboard = built.dashboard;
-                    handles.charts = built.charts;
                     handles.update = built.update;
                 }
             }
@@ -564,16 +572,6 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         }
     }
     let _ = handles.dashboard.set_enabled(true);
-    let has_charts = model.entries.iter().any(|entry| {
-        matches!(
-            entry,
-            StatusMenuEntry::Action {
-                action: StatusMenuAction::OpenCharts,
-                ..
-            }
-        )
-    });
-    let _ = handles.charts.set_enabled(has_charts);
     let _ = handles.update.set_enabled(true);
 
     // Widgets: only for providers this app has actually detected. A configured
@@ -1083,18 +1081,38 @@ fn state_snapshot_entries() -> Vec<String> {
 /// Model names seen in the last snapshot, filled in by `snapshot`.
 static MODELS_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// Delivers a test banner and reports whether the platform accepted it. Used to
-/// confirm notification permission, which is otherwise invisible until a real
-/// milestone fires.
+/// Delivers a test banner and reports what the platform actually did.
+///
+/// A bare `Ok(())` is not the whole truth. The plugin routes notifications
+/// through `notify-rust`, which on macOS sets the *sending* application to
+/// `com.apple.Terminal` whenever `tauri::is_dev()` is true — so under
+/// `tauri dev` a banner is attributed to Terminal rather than to BurnRate, and
+/// commonly does not appear at all. Reporting that is the difference between
+/// "notifications are broken" and "notifications cannot be tested this way".
 #[tauri::command]
-fn send_test_notification(app: AppHandle<Wry>) -> Result<(), String> {
+fn send_test_notification(app: AppHandle<Wry>) -> Result<String, String> {
     use tauri_plugin_notification::NotificationExt;
-    app.notification()
+    let notifications = app.notification();
+
+    let permission = notifications
+        .permission_state()
+        .map(|state| format!("{state:?}"))
+        .unwrap_or_else(|error| format!("unknown ({error})"));
+
+    notifications
         .builder()
         .title("BurnRate test")
         .body("If you can read this, notifications are working.")
         .show()
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("delivery failed: {error}"))?;
+
+    if tauri::is_dev() {
+        return Ok(format!(
+            "Sent (permission: {permission}), but a dev build is attributed to \
+             Terminal, not BurnRate — check the bundled app for the real banner."
+        ));
+    }
+    Ok(format!("Sent (permission: {permission})"))
 }
 
 /// Forces an immediate poll, skipping the throttle — the tray's Refresh.
@@ -1435,6 +1453,15 @@ pub fn run() {
                             Ok(()) => eprintln!("burnrate: welcome notification accepted"),
                             Err(error) => eprintln!("burnrate: welcome notification refused: {error}"),
                         }
+                        let permission = handle
+                            .notification()
+                            .permission_state()
+                            .map(|state| format!("{state:?}"))
+                            .unwrap_or_else(|error| format!("unknown ({error})"));
+                        eprintln!(
+                            "burnrate: notification permission {permission}, dev build {}",
+                            tauri::is_dev()
+                        );
                     });
                 });
             }
@@ -1472,8 +1499,6 @@ pub fn run() {
             match id {
                 ID_QUIT => app.exit(0),
                 ID_DASHBOARD => open_window(app.clone(), Some(AppPane::Usage)),
-                ID_CHARTS => open_window(app.clone(), Some(AppPane::Usage)),
-                ID_SETTINGS => open_window(app.clone(), Some(AppPane::Notifications)),
                 // The About pane carries the update affordance, as in Swift.
                 ID_UPDATE => open_window(app.clone(), Some(AppPane::About)),
                 other if other.starts_with(ID_WIDGET_PREFIX) => {
@@ -1586,6 +1611,41 @@ mod tests {
                 "consecutive slots {gap}s apart, expected 23-25h"
             );
         }
+    }
+
+    /// `TrayIcon::set_icon` passes `false` for the template flag on macOS,
+    /// ignoring `icon_as_template` — so redrawing the severity icon silently
+    /// reverted it to a fixed black image instead of a mark macOS tints white in
+    /// dark mode. Only `set_icon_with_as_template` preserves it, and nothing in
+    /// the type system stops the next person reaching for the shorter name.
+    #[test]
+    fn tray_icons_are_always_set_as_templates() {
+        // Only the shipping code: this test's own source contains the pattern.
+        let source = include_str!("lib.rs");
+        let shipping = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the file has a non-test part");
+        let offenders: Vec<&str> = shipping
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| line.contains(".set_icon("))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "use set_icon_with_as_template, not set_icon: {offenders:?}"
+        );
+        assert!(
+            shipping.contains("set_icon_with_as_template"),
+            "the tray icon is never set with the template flag"
+        );
+    }
+
+    /// The mark is drawn at 2x because tray-icon scales it to 18 points; a 22px
+    /// source was upscaled to 36 device pixels on a Retina display.
+    #[test]
+    fn the_tray_mark_is_drawn_at_two_x() {
+        assert_eq!(super::TRAY_EDGE, 36, "2x of the 18pt tray-icon target");
     }
 
     /// snake_case to the camelCase the wire uses.
