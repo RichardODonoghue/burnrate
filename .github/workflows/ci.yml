@@ -3,7 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+  # Base-branch filter: these build and test the *Swift* app, which lives on
+  # `main` until the Tauri rewrite is cut over. Without it they run on every PR,
+  # including the rewrite's own PRs into `rewrite/tauri`, and gate them on the
+  # app being replaced. The rewrite's checks are in `tauri.yml`.
   pull_request:
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}

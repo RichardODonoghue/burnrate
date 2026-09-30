@@ -433,7 +433,7 @@ function renderNotifications() {
 
 function renderWidgets() {
   const settings = state.snapshot.settings;
-  const providers = state.providers.length ? state.providers : ["Claude", "Codex", "OpenCode Go"];
+  const providers = state.providers;
   const rows = providers
     .map((provider) => {
       const on = settings.widgetProviders.includes(provider);
@@ -453,7 +453,10 @@ function renderWidgets() {
     plan's percent, with a menu to remove it again.</p>
     <div class="card">
       <h2>Per-plan items</h2>
-      ${rows || `<p class="hint">No providers known yet.</p>`}
+      ${
+        rows ||
+        `<p class="hint">No providers are active. Log in to a supported CLI to see it here.</p>`
+      }
     </div>
 `;
 }

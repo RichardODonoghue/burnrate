@@ -21,13 +21,6 @@
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "id": "main",
-      "iconPath": "icons/tray.png",
-      "iconAsTemplate": true,
-      "tooltip": "BurnRate",
-      "menuOnLeftClick": true
     }
   },
   "bundle": {

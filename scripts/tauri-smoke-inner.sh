@@ -4,7 +4,8 @@
 #
 # Asserts:
 #   1. window + webview come up under Xvfb
-#   2. three tray items register with the watcher (main + two per-plan widgets)
+#   2. tray items register with the watcher: the main item plus a widget for each
+#      *detected* provider — and none for a configured but undetected one
 #   3. the main item serves a DBusMenu layout
 #   4. menu text MUTATES in place — on Linux a tray menu cannot be swapped once
 #      set, so the real menu has to edit items, which is what the old
@@ -49,10 +50,19 @@ props() {
   fi
 }
 
-# Seed settings with two widget providers. Widgets are settings-driven now, so
-# without this the app correctly installs only the main item — and the test
-# would stop proving that per-plan tray items work at all. It also exercises the
-# XDG settings path (~/.config/BurnRate on Linux).
+# A Claude session log, so the app detects Claude and installs a widget for it.
+# Widgets are only created for providers that have actually been detected; a
+# configured provider whose CLI is absent used to get a menu-bar item that could
+# never show a figure.
+mkdir -p "$HOME/.claude/projects/smoke"
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "$HOME/.claude/projects/smoke/session.jsonl" <<LOG
+{"timestamp":"$TS","type":"assistant","requestId":"smoke-1","message":{"model":"claude-opus-5","usage":{"input_tokens":1200,"output_tokens":400,"cache_read_input_tokens":90000,"cache_creation_input_tokens":100}}}
+LOG
+
+# Seed settings with one detected provider and one that is not: Codex has no
+# credentials here, so it must not get a widget. It also exercises the XDG
+# settings path (~/.config/BurnRate on Linux).
 mkdir -p "$HOME/.config/BurnRate"
 cat > "$HOME/.config/BurnRate/settings.json" <<'SETTINGS'
 {
@@ -96,12 +106,15 @@ for _ in $(seq 1 30); do
   kill -0 "$APP_PID" 2>/dev/null || fail "app exited early"
   ITEMS=$(registered)
   COUNT=$(printf '%s' "$ITEMS" | grep -oE ':[0-9]+\.[0-9]+' | wc -l)
-  [ "$COUNT" -ge 3 ] && break
+  [ "$COUNT" -ge 2 ] && break
 done
 
 echo "window: $(kill -0 "$APP_PID" 2>/dev/null && echo OK || echo gone)"
 echo "tray count=$COUNT"
-[ "$COUNT" -ge 3 ] || fail "expected main + 2 widgets, got $COUNT ($ITEMS)"
+[ "$COUNT" -ge 2 ] || fail "expected main + a Claude widget, got $COUNT ($ITEMS)"
+if printf '%s' "$ITEMS" | grep -q "widget_Codex"; then
+  fail "a widget was installed for Codex, which was never detected: $ITEMS"
+fi
 
 # All three items come from one connection; that name is the app.
 BUS=$(printf '%s' "$ITEMS" | grep -oE ':[0-9]+\.[0-9]+' | head -1)
@@ -132,7 +145,13 @@ printf '%s' "$LAYOUT" | grep -q "Charts" ||
   fail "menu missing the Charts row despite includesCharts: $LAYOUT"
 printf '%s' "$LAYOUT" | grep -q "Settings" || fail "menu missing the Settings row"
 printf '%s' "$LAYOUT" | grep -q "Quit" || fail "menu missing the Quit row"
-echo "tray: menu OK (dashboard, charts, settings, quit)"
+# The usage block is one row per provider and per window, as Swift renders it.
+# Folding them into a single item put every figure on one line.
+printf '%s' "$LAYOUT" | grep -q "Rolling" ||
+  fail "menu has no per-window row (usage block collapsed into one line?): $LAYOUT"
+printf '%s' "$LAYOUT" | grep -qE "Rolling[^']*%" ||
+  fail "menu window row carries no figure: $LAYOUT"
+echo "tray: menu OK (dashboard, charts, settings, quit, per-window rows)"
 
 # In-place mutation. A Linux tray menu cannot be replaced once it is set, only
 # edited, so this proves rows are rewritten rather than rebuilt. The status row
