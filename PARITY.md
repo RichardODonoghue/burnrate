@@ -162,17 +162,32 @@ updater.
 - [x] `querySamplesUsesInjectedSQLiteRunner`
 - [x] `fileManagerPathsAppendsAppName`
 
+## Closed
+
+- [x] **Window-reset alerting.** Ported signal for signal: the vendor moving a
+      window's reset time forward is the primary signal, and a ≥40-point jump is
+      the fallback for sources that report no reset time. The 5-point threshold
+      this used is *not* equivalent — a quiet window gains 5 points from cache
+      expiry alone, and an old window can end at >90% so the deadline signal is
+      the only one that catches it. Tests for both signals, for a drift that must
+      *not* fire, and for the first reading having no baseline.
+- [x] **Claude account fingerprint.** `~/.claude.json`'s
+      `oauthAccount.accountUuid|organizationUuid`, falling back to a stable token
+      hash. Verified reading this machine's real account file.
+- [x] **Notifier state persistence.** `notifier-state.json` holds the account
+      fingerprint, every window's last reading and reset time, and the days a
+      spend cap already fired — the Swift build's `notifierState`. It matters
+      because restoring the baseline is what makes the saved fingerprint
+      load-bearing: without both, a switch across a relaunch is invisible.
+- [x] **Daily/ranking token-axis format.** `axis_label` is a tested core function
+      with `%g` semantics, and the daily axis labels and ticks arrive
+      pre-formatted from Rust. The frontend does no arithmetic.
+
 ## Still open
 
-- **Window-reset alerting (7 tests)** — the Swift build notifies on a reset
-  *deadline*; this port notifies on a jump in remaining. Different mechanism, not
-  equivalent. A user who sits on a window until it expires gets no alert here.
-- **Claude account fingerprint (2)** — the notifier resets its history on a
-  fingerprint change, but nothing produces a fingerprint, so a plan switch is not
-  detected and the first poll on a new plan can fire a burst of milestones.
-- **Daily/ranking token-axis format** — `axisLabel` and the daily/ranking
-  windowing are implemented in the frontend rather than ported as tested core
-  functions, so they have no parity tests of their own.
+- **Not tested end to end:** the two notification paths I cannot exercise from a
+  terminal-launched process — a foreground banner, and a real macOS banner rather
+  than a delivered request. The delegate is verified installed and responding.
 
 ## Icon and asset parity (macOS is the reference)
 
@@ -183,13 +198,17 @@ updater.
 - [x] Menu-bar image is monochrome (macOS template), dial punched out of the flame
 - [x] Assets generated from that one source: `cargo run -p icon-gen`
       (PNG set, `.icns`, `.ico`, `tray.rgba`) — no hand-drawn art anywhere
-- [ ] **Decide the app-icon pose.** The committed icns is *stale*: it predates
+- [x] **App-icon pose: amber, as shipped.** The committed icns is *stale*: it predates
       the Sep-2026 severity-ramp refactor and is **amber** (`rgb(255,149,66)`),
       while `AppIconRenderer.appIconImage` passes `nil`, which the ramp reads as
-      70% and paints **green**. The port defaults to amber (what you can see
-      today) via `dial::SHIPPED_ICON_POSE_REMAINING`; `dial::app_icon_at(_, None)`
-      gives the current Swift renderer's green. One line either way.
-- [ ] App icon radius/border and dial rim match at every size (spot-check 16px)
+      70% and paints **green**. Confirmed as shipped: the port defaults to amber
+      via `dial::SHIPPED_ICON_POSE_REMAINING`, which is what is visible today.
+- [x] App icon radius/border and dial rim match at every size
+- [x] The menu-bar mark fills its canvas. It inked 74% of the design space, and
+      `tray-icon` scales the whole canvas to 18pt, so it drew at 13.4pt; a
+      design-space zoom now puts the ink at 89% and ~16pt, centred on the ink
+      rather than on the canvas. Tests pin the fill fraction, the centring, and
+      that the app icon keeps its own framing.
 
 ## Non-test parity work
 
@@ -205,10 +224,3 @@ updater.
       it was a `StatusMenuBuilder` parameter, never a Swift setting.
 - [x] **Diverged on purpose:** provider diagnostics (`lastStatus`) are logged but
       not surfaced. The "Not detected" card was removed on request.
-- [ ] **Not ported: notifier state persistence.** Swift writes `notifierState`
-      (`lastRemaining`, `costFired`, `resetsAt`, the credential fingerprint) to
-      UserDefaults, so a plan switch detected after a relaunch still suppresses
-      the phantom alerts. The Rust notifier holds that in memory only. It does not
-      bite today — the window history is empty at launch, so nothing can fire —
-      but it is a real difference and it is why the persisted fingerprint has
-      nothing to be persisted *for*.

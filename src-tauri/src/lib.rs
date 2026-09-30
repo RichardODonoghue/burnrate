@@ -276,10 +276,6 @@ struct DailyBar {
     total: f64,
     total_text: String,
     bars: Vec<Bar>,
-    /// The day is not over yet — only ever today, since the slots stop there.
-    /// Drawn faded: a part-day beside complete days reads as a cliff, not as a
-    /// day in progress.
-    partial: bool,
 }
 
 /// The full state the frontend renders from, in one payload.
@@ -759,8 +755,7 @@ fn snapshot(
     // index-based, so a day with no samples silently closed up and looked
     // identical to a day that was fully spent, and the last slot was whatever
     // partial day the poll happened to land in. Both read as artifacting on the
-    // right-hand end of the chart. Days are calendar slots now, gaps are gaps,
-    // and today is flagged so the renderer can fade it.
+    // right-hand end of the chart. Days are calendar slots now, and gaps are gaps.
     let by_day: HashMap<i64, &DailyModelUsage> =
         daily_all.iter().map(|day| (day.day, day)).collect();
     let mut daily: Vec<DailyBar> = Vec::new();
@@ -786,7 +781,6 @@ fn snapshot(
             total,
             total_text: axis_label(total, metric),
             bars,
-            partial: cursor == today_start,
         });
     }
     let daily_max = daily.iter().map(|day| day.total).fold(0.0_f64, f64::max);
@@ -1290,6 +1284,7 @@ fn poll_once(app: &AppHandle<Wry>) {
         // hours of polling.
         poller.save_history();
         poller.save_model_history();
+        poller.save_notifier_state();
         result
     };
     state.note_providers(&result.usage);
@@ -1432,15 +1427,18 @@ pub fn run() {
                 let now = burnrate_core::poller::now_unix();
                 poller.load_history(now);
                 poller.load_model_history(now);
+                poller.load_notifier_state();
                 if let Some(summary) =
                     swift_import::import_swift_history_if_needed(&mut poller, now)
                 {
                     eprintln!("burnrate: {summary}");
                 }
                 eprintln!(
-                    "burnrate: trend history {} sample(s), {} day(s) of model history",
+                    "burnrate: trend history {} sample(s), {} day(s) of model history, \
+                     {} notifier window(s)",
                     poller.remaining_history().len(),
-                    poller.model_history_len()
+                    poller.model_history_len(),
+                    poller.notifier_windows_len()
                 );
             }
 

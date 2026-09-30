@@ -87,6 +87,14 @@ impl AppPaths {
         self.app_directory().join("remaining-history.json")
     }
 
+    /// The notifier's durable state: last reading per window, last reset time,
+    /// the account fingerprint and the days a spend cap already fired.
+    ///
+    /// The Swift build keeps this in `UserDefaults` under `notifierState`.
+    pub fn notifier_state_file(&self) -> PathBuf {
+        self.app_directory().join("notifier-state.json")
+    }
+
     /// The daily per-model buckets the dashboard charts read.
     ///
     /// The Swift build keeps these in `UserDefaults` under `modelUsageHistory`.

@@ -123,9 +123,6 @@ export interface DailyBar {
   total: number;
   totalText: string;
   bars: Bar[];
-  /** Today, or the last day in range: drawn faded, because a part-day beside
-   *  complete days reads as a cliff. */
-  partial: boolean;
 }
 
 export interface Dashboard {

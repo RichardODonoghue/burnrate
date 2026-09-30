@@ -30,6 +30,19 @@ const FLAME: [Segment; 6] = [
     ([36.0, 6.0], [48.0, 20.0], [39.0, 14.0], [52.5, 27.0]),
 ];
 
+/// The middle of the 72-unit design space.
+const DESIGN_CENTRE: f64 = 36.0;
+
+/// How much to magnify the mark for the menu bar, and about which point.
+///
+/// The flame ink spans design y 6.5…60 — deliberately padded inside the 72-unit
+/// space, because the app icon draws a plate around it. `tray-icon` scales the
+/// whole canvas to 18pt regardless, so that padding is subtracted from the drawn
+/// size. 1.25 puts the ink at ~93% of the height, just inside the canvas, for a
+/// mark of ~16pt rather than 13.4pt, with room at the flame's tip.
+const MENU_BAR_ZOOM: f64 = 1.19;
+const MENU_BAR_INK_CENTRE: [f64; 2] = [36.0, 33.25];
+
 const DIAL_CENTER: [f64; 2] = [36.0, 42.0];
 const DIAL_RADIUS: f64 = 10.5;
 const PIVOT: [f64; 2] = [36.0, 46.0];
@@ -53,6 +66,9 @@ const CREAM: RgbColor = RgbColor::new(1.0, 0xF6 as f64 / 255.0, 0xEA as f64 / 25
 pub struct Canvas {
     pub size: u32,
     pub pixels: Vec<u8>,
+    /// Design-space zoom about `focus`. See [`Canvas::zoomed`].
+    zoom: f64,
+    focus: [f64; 2],
 }
 
 impl Canvas {
@@ -60,7 +76,26 @@ impl Canvas {
         Self {
             size,
             pixels: vec![0; (size * size * 4) as usize],
+            zoom: 1.0,
+            focus: [DESIGN_CENTRE, DESIGN_CENTRE],
         }
+    }
+
+    /// Magnifies the design space, placing `focus` at the canvas centre.
+    ///
+    /// The geometry is shared between the app icon and the menu-bar mark, but
+    /// their framing is not: the app icon is a plate with deliberate padding,
+    /// while `tray-icon` scales the whole *canvas* to a fixed 18pt. Padding that
+    /// reads as margin on a 1024px icon is lost size in the menu bar — the mark
+    /// inked 74% of the canvas, so it drew at 13.4pt.
+    ///
+    /// `focus` is the design point to centre, which is the mark's own ink centre
+    /// rather than the canvas middle: the flame sits slightly above it, so
+    /// scaling about the canvas centre would leave the mark riding high.
+    pub fn zoomed(mut self, zoom: f64, focus: [f64; 2]) -> Self {
+        self.zoom = zoom;
+        self.focus = focus;
+        self
     }
 
     fn blend(&mut self, x: i64, y: i64, color: RgbColor, alpha: f64) {
@@ -199,7 +234,19 @@ impl Canvas {
     /// Maps a pixel to the y-down design space.
     fn design_point(&self, x: i64, y: i64) -> (f64, f64) {
         let scale = 72.0 / self.size as f64;
-        ((x as f64 + 0.5) * scale, (y as f64 + 0.5) * scale)
+        let px = (x as f64 + 0.5) * scale;
+        let py = (y as f64 + 0.5) * scale;
+        if self.zoom == 1.0 {
+            return (px, py);
+        }
+        // Inverted, and measured from the canvas centre: the centre pixel shows
+        // `focus`, and a pixel `zoom` times further out shows the design point
+        // that was that far from the centre, so the drawing comes out magnified
+        // and centred on the ink rather than on the canvas.
+        (
+            self.focus[0] + (px - DESIGN_CENTRE) / self.zoom,
+            self.focus[1] + (py - DESIGN_CENTRE) / self.zoom,
+        )
     }
 }
 
@@ -262,7 +309,7 @@ pub fn needle_tip(angle_degrees: f64) -> [f64; 2] {
 /// the flame with `destinationOut`.
 pub fn menu_bar_image(remaining: Option<f64>, edge: u32) -> Canvas {
     supersampled(edge, |large| {
-        let mut canvas = Canvas::new(large);
+        let mut canvas = Canvas::new(large).zoomed(MENU_BAR_ZOOM, MENU_BAR_INK_CENTRE);
         let angle = StatusIcon::needle_angle(remaining);
         let black = RgbColor::new(0.0, 0.0, 0.0);
 
@@ -525,6 +572,71 @@ mod tests {
             }
         }
         assert!(saw_opaque, "something was actually drawn");
+    }
+
+    /// The ink's vertical extent, for the framing tests.
+    fn ink_rows(canvas: &Canvas) -> (u32, u32) {
+        let (mut top, mut bottom) = (canvas.size, 0);
+        for y in 0..canvas.size {
+            for x in 0..canvas.size {
+                if canvas.pixels[((y * canvas.size + x) * 4 + 3) as usize] > 8 {
+                    top = top.min(y);
+                    bottom = bottom.max(y);
+                }
+            }
+        }
+        (top, bottom)
+    }
+
+    /// The mark has to fill its canvas.
+    ///
+    /// `tray-icon` scales the whole canvas to a fixed 18pt, so padding in the
+    /// design space is not margin in the menu bar, it is *lost size*. The flame
+    /// inked 74% of the height and drew at 13.4pt, which is visibly small; the
+    /// zoom brings it to ~89% and 16pt.
+    #[test]
+    fn the_menu_bar_mark_fills_its_canvas() {
+        let edge = 128;
+        let canvas = menu_bar_image(Some(84.0), edge);
+        let (top, bottom) = ink_rows(&canvas);
+        let height = bottom - top + 1;
+
+        assert!(
+            height as f64 / edge as f64 >= 0.85,
+            "the mark inked {:.0}% of the canvas, so it draws at {:.1}pt",
+            height as f64 / edge as f64 * 100.0,
+            18.0 * height as f64 / edge as f64
+        );
+        // Not clipped by the canvas it is drawn into.
+        assert!(top > 0, "the flame tip is flush against the top edge");
+        assert!(
+            bottom < edge - 1,
+            "the flame base is flush against the bottom"
+        );
+        // And centred: the flame's ink sits above the design centre, so zooming
+        // about the canvas instead of the ink would leave it riding high.
+        let above = top;
+        let below = edge - 1 - bottom;
+        assert!(
+            above.abs_diff(below) <= 1,
+            "not centred: {above} above, {below} below"
+        );
+    }
+
+    /// The app icon has its own framing: the plate is meant to reach its edges,
+    /// and must not inherit the menu-bar zoom — which would push it past them.
+    #[test]
+    fn the_app_icon_keeps_its_own_framing() {
+        let edge = 128;
+        let canvas = app_icon_at(edge, Some(84.0));
+        let (top, bottom) = ink_rows(&canvas);
+        let filled = (bottom - top + 1) as f64 / edge as f64;
+
+        assert!(filled > 0.9, "the plate reaches its edges, got {filled:.2}");
+        assert!(
+            top > 0 && bottom < edge - 1,
+            "and stays inside them: rows {top}..{bottom} of {edge}"
+        );
     }
 
     /// A fully-used window reddens the flame; a healthy one greens it.

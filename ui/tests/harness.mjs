@@ -178,7 +178,6 @@ const daily = [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => {
     day: day(offset),
     total,
     totalText: `${total}`,
-    partial: offset === 0,
     bars: empty ? [] : [bar("claude-opus-5", total)],
   };
 });
@@ -355,7 +354,10 @@ check("every trend coordinate is inside the plot", coords.every((y) => y >= 0 &&
 check("daily drawn", dailySvg.includes('id="daily"'));
 check("daily y labels are pre-formatted", dailySvg.includes(">8m</text>") && !dailySvg.includes("8000000"));
 check("daily draws a slot per calendar day", (dailySvg.match(/class="day"/g) ?? []).length === 8);
-check("daily partial day faded", /opacity="0.5"/.test(dailySvg));
+// No day is faded: the part-day opacity was a divergence from the Swift build
+// that nobody asked for, and it made today's bar look wrong rather than
+// incomplete.
+check("no day is faded", !/opacity="0\.5"/.test(dailySvg), dailySvg.match(/opacity="[\d.]+"/g)?.join(",") ?? "");
 const emptyGroup = `class="day"${dailySvg.split('class="day"')[4]}`;
 check("daily empty day draws no bar", (emptyGroup.match(/<rect/g) ?? []).length === 1);
 

@@ -303,6 +303,11 @@ impl Poller {
         self.model_history.len()
     }
 
+    /// How many windows the notifier restored, for the launch log.
+    pub fn notifier_windows_len(&self) -> usize {
+        self.notifier.snapshot_state().windows.len()
+    }
+
     /// How many prices the table holds, and how many models it could not price.
     ///
     /// Surfaced because an empty table is silent: every Claude row falls back to
@@ -374,6 +379,31 @@ impl Poller {
             return;
         };
         self.model_history = crate::migration::prune_daily(days, now);
+    }
+
+    /// Reloads the notifier's durable state, so a relaunch continues rather than
+    /// starting blank.
+    pub fn load_notifier_state(&mut self) {
+        let path = AppPaths::detect().notifier_state_file();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(state) = serde_json::from_str::<crate::notifier::NotifierState>(&text) else {
+            return;
+        };
+        self.notifier.restore_state(state);
+    }
+
+    /// Writes it out. Best-effort, like the histories: a full disk must not take
+    /// the poll loop down.
+    pub fn save_notifier_state(&self) {
+        let paths = AppPaths::detect();
+        if paths.ensure_app_directory().is_err() {
+            return;
+        }
+        if let Ok(text) = serde_json::to_string(&self.notifier.snapshot_state()) {
+            let _ = std::fs::write(paths.notifier_state_file(), text);
+        }
     }
 
     /// Writes the daily model history out.
@@ -652,6 +682,59 @@ mod tests {
             vec![UsageWindow::new("Rolling", 0, None, None)],
         )];
         assert!(history_values(&empty).is_empty());
+    }
+
+    /// The notifier's state has to survive a relaunch, or a plan switch that
+    /// happened while the app was closed is invisible — the first poll has no
+    /// baseline to compare against, so it cannot tell a fresh account from a
+    /// continued one.
+    #[test]
+    fn notifier_state_survives_a_restart() {
+        let dir = std::env::temp_dir().join(format!("burnrate-notify-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("notifier-state.json");
+
+        let mut poller = Poller::with_keychain(false);
+        poller
+            .notifier
+            .set_account_fingerprint(Some("acct-1".into()));
+        // Default settings are enough: this is about the recorded baseline, not
+        // about any rule firing.
+        let settings = Settings::default();
+        poller.notifier.evaluate(
+            &[crate::model::ProviderUsage::new(
+                "Claude",
+                None,
+                vec![crate::model::UsageWindow::new(
+                    "Rolling",
+                    0,
+                    Some(74.0),
+                    Some(1_800_000_000),
+                )],
+            )],
+            &settings,
+            1_799_000_000,
+            300,
+        );
+
+        let text = serde_json::to_string(&poller.notifier.snapshot_state()).expect("serialise");
+        std::fs::write(&path, text).expect("write");
+
+        let restored: crate::notifier::NotifierState =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        let mut restarted = MilestoneNotifier::new();
+        restarted.restore_state(restored);
+        assert_eq!(
+            restarted.snapshot_state().account_fingerprint.as_deref(),
+            Some("acct-1"),
+            "the fingerprint must come back"
+        );
+        assert_eq!(
+            restarted.snapshot_state().windows["Claude|Rolling"].last_remaining,
+            Some(74.0)
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
