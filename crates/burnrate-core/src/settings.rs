@@ -34,9 +34,6 @@ pub struct Settings {
     pub notify_on_reset: bool,
     /// Seconds between usage polls.
     pub poll_interval_seconds: u64,
-    /// Show the Charts row in the tray menu (Linux/Windows style; the macOS
-    /// app has the dashboard instead).
-    pub includes_charts: bool,
 }
 
 impl Default for Settings {
@@ -48,7 +45,6 @@ impl Default for Settings {
             cost_alerts: Vec::new(),
             notify_on_reset: true,
             poll_interval_seconds: 300,
-            includes_charts: cfg!(not(target_os = "macos")),
         }
     }
 }
@@ -212,13 +208,11 @@ mod tests {
         let settings = Settings {
             widget_providers: vec!["Claude".into()],
             poll_interval_seconds: 120,
-            includes_charts: true,
             ..Settings::default()
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"widgetProviders\""), "got {json}");
         assert!(json.contains("\"pollIntervalSeconds\""), "got {json}");
-        assert!(json.contains("\"includesCharts\""), "got {json}");
         assert!(
             !json.contains("widget_providers"),
             "snake_case leaked: {json}"
@@ -234,7 +228,6 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.widget_providers, vec!["Codex".to_string()]);
         assert_eq!(parsed.poll_interval_seconds, 90);
-        assert!(parsed.includes_charts);
         assert!(!parsed.notify_on_reset);
         assert_eq!(parsed.milestones[0].window_label, "Weekly");
     }
@@ -364,14 +357,5 @@ mod tests {
             None,
         );
         assert_eq!(settings.milestones[0].step, 50.0);
-    }
-
-    /// Charts is on by default off macOS, matching the Swift `includesCharts`.
-    #[test]
-    fn charts_default_follows_the_platform() {
-        assert_eq!(
-            Settings::default().includes_charts,
-            cfg!(not(target_os = "macos"))
-        );
     }
 }

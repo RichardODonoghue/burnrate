@@ -316,13 +316,16 @@ function render() {
   }
   // The Usage pane is the only one with a toolbar above it, as in the Swift build.
   content.innerHTML = (state.pane === "usage" ? toolbar : "") + renderer(state.snapshot);
-  // Restored after the new markup is in place, and clamped in case the new
-  // content is shorter than the old.
+  wireContent();
+  // Restored *after* wiring, because wiring is what draws the charts: until
+  // `layoutUsage` has filled the plot frames the page is only as tall as its
+  // cards, and clamping to that height pinned the reader back at the top on
+  // every five-second refresh. Restoring here, once the real height exists,
+  // is what makes the offset stick.
   content.scrollTop = Math.max(
     0,
     Math.min(scrollTop, content.scrollHeight - content.clientHeight)
   );
-  wireContent();
 }
 
 function renderNotifications() {
@@ -564,8 +567,7 @@ function wireContent() {
   if (testNotification) {
     testNotification.addEventListener("click", async () => {
       try {
-        await invoke("send_test_notification");
-        toast("Test notification sent");
+        toast(await invoke("send_test_notification"));
       } catch (error) {
         toast(`Notification failed: ${error}`);
       }
