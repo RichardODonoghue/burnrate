@@ -93,7 +93,9 @@ impl Poller {
             snapshots: Vec::new(),
             remaining_history: Vec::new(),
             model_history: Vec::new(),
-            history_limit: 7 * 24 * 60,
+            // Samples are one per window per poll; this bounds the in-memory
+            // snapshot list at the same window the flat history keeps.
+            history_limit: 30 * 24 * 60,
             last_local_poll: None,
             // The Claude log parse is expensive the first time; after that the
             // incremental cache makes it milliseconds, but there is no reason
@@ -232,7 +234,7 @@ impl Poller {
         // Retention: seven days of history. The flat list is trimmed by date
         // rather than by count, because a five-minute poll over seven days is
         // ~2000 entries and a burst of polls must not shorten the window.
-        let history_cutoff = now - 7 * 86_400;
+        let history_cutoff = now - crate::migration::REMAINING_RETENTION_SECONDS;
         self.remaining_history
             .retain(|sample| sample.date >= history_cutoff);
         if self.snapshots.len() > self.history_limit {
@@ -330,7 +332,7 @@ impl Poller {
             // A corrupt cache is not worth failing a poll over: start clean.
             return;
         };
-        let cutoff = now - 7 * 86_400;
+        let cutoff = now - crate::migration::REMAINING_RETENTION_SECONDS;
         self.remaining_history = samples
             .into_iter()
             .filter(|sample| sample.date >= cutoff)
@@ -587,8 +589,11 @@ mod tests {
         poller.remaining_history = vec![
             sample(now - 60, 84.0),
             sample(now - 120, 85.0),
-            // Nine days old: outside the seven-day retention.
-            sample(now - 9 * 86_400, 12.0),
+            // A day past the retention window.
+            sample(
+                now - crate::migration::REMAINING_RETENTION_SECONDS - 86_400,
+                12.0,
+            ),
         ];
         poller.save_history_to(&path);
 

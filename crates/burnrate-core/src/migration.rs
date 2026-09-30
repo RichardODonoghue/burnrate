@@ -30,8 +30,15 @@ use crate::usage::{DailyModelUsage, ModelUsageAggregator, ModelUsageEntry};
 /// Seconds between the Unix epoch and Swift's reference date, 2001-01-01.
 pub const APPLE_REFERENCE_OFFSET: i64 = 978_307_200;
 
-/// Seven days, matching `ModelUsageViewModel.remainingRetention`.
-pub const REMAINING_RETENTION_SECONDS: i64 = 7 * 86_400;
+/// How much remaining-% history to keep: the longest window the dashboard can
+/// show, so a 30-day range has 30 days to draw.
+///
+/// This was seven days, ported from `ModelUsageViewModel.remainingRetention`.
+/// Seven days is *shorter than the longest range*, and the trend chart's X domain
+/// shrinks to whatever data exists — so the 30-day view quietly drew a week and
+/// looked merely short rather than wrong. A test ties this to `ChartRange::Month`
+/// so the two cannot drift apart again.
+pub const REMAINING_RETENTION_SECONDS: i64 = 30 * 86_400;
 /// Thirty days, matching `ModelUsageAggregator.daily(days: 30)`.
 pub const MODEL_HISTORY_DAYS: i64 = 30;
 
@@ -238,6 +245,19 @@ mod tests {
             .is_empty());
     }
 
+    /// Retention has to cover the longest range the dashboard offers, or that
+    /// range draws less than it claims.
+    #[test]
+    fn remaining_history_covers_the_longest_range() {
+        use crate::charts::ChartRange;
+        assert_eq!(
+            REMAINING_RETENTION_SECONDS,
+            ChartRange::Month.span_seconds(),
+            "retention must cover the widest range the picker offers"
+        );
+        assert!(REMAINING_RETENTION_SECONDS >= ChartRange::Week.span_seconds());
+    }
+
     #[test]
     fn fractional_dates_round_to_whole_seconds() {
         // Swift stores `Date` as a Double, so the JSON has decimals.
@@ -258,7 +278,7 @@ mod tests {
                 {{"provider":"Claude","label":"Rolling","date":{},"remaining":30}},
                 {{"provider":"Claude","label":"Rolling","date":{},"remaining":40}}
             ]"#,
-            apple(NOW - 20 * 86_400), // past retention
+            apple(NOW - (REMAINING_RETENTION_SECONDS + 86_400)), // past retention
             apple(NOW - 60),
             apple(NOW - 60),     // duplicate
             apple(NOW + 86_400), // in the future
