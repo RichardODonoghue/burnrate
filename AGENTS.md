@@ -145,6 +145,11 @@ All changes go through a pull request. Do not commit or push directly to `main`.
 - Manually tagged releases also work (`release.yml` accepts a tag by
   `workflow_dispatch`), but release-please's manifest must be updated by hand to
   match, or the next release PR computes from the wrong version.
+- **A commit type release-please does not know is dropped from the changelog with
+  no error.** The same silence as an unparseable message, and the reason
+  `changelog-sections` in `release-please-config.json` lists every type in use —
+  including `sec` for security work. Adding a new type to a commit means adding
+  it there too, or the entry never appears.
 - `.github/workflows/ci.yml` — the only CI: frontend + `fmt`/`clippy`/`test`, a
   build-and-bundle matrix (macOS `app`, Linux `deb,rpm`, Windows `nsis`), a
   `cargo audit` job, and the Linux tray smoke. Audit *warnings* do not fail the
