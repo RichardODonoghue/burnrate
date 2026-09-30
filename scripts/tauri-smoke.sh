@@ -10,6 +10,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# `tauri::generate_context!` embeds `frontendDist` at compile time, so the app
+# cannot be compiled without an emitted frontend. Built on the host rather than in
+# the container so the image needs no node.
+if [ ! -d ui/node_modules ]; then
+  echo "ui/node_modules is missing — run 'npm ci' in ui/ first" >&2
+  exit 1
+fi
+npm --prefix ui run build
+
 RUST_IMAGE="${RUST_IMAGE:-rust:1.97-bookworm}"
 
 docker run --rm -v "$PWD":/work -w /work "$RUST_IMAGE" bash -c '

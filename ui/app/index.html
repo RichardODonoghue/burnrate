@@ -21,10 +21,10 @@
       <main class="content" id="content" tabindex="-1"></main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <!-- usage.js first: it registers the pane's renderer, and app.js resolves it
-         from `window.BurnRate` during its first render. Loading them the other
-         way round works only because the first paint happens after an await. -->
-    <script src="./usage.js"></script>
-    <script src="./app.js"></script>
+    <!-- One entry point. Modules replace the old `window.BurnRate` handoff, which
+         was load-order dependent: app.js resolved the Usage pane off a namespace
+         usage.js had to populate first, and getting it wrong took the whole window
+         down with a temporal-dead-zone error. -->
+    <script type="module" src="./js/main.js"></script>
   </body>
 </html>

@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "identifier": "com.burnrate.desktop.tauri",
   "build": {
-    "frontendDist": "../ui/app"
+    "frontendDist": "../ui/app",
+    "beforeDevCommand": "npm --prefix ../ui run watch",
+    "beforeBuildCommand": "npm --prefix ../ui run build"
   },
   "app": {
     "windows": [
