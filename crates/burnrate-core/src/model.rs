@@ -431,4 +431,27 @@ mod tests {
         assert!(usage.window("Rolling").is_some());
         assert!(usage.window("Weekly").is_none());
     }
+
+    /// The wire keys are camelCase and the frontend reads them by name. A
+    /// snake_case read finds nothing, and inside a lookup with a fallback that
+    /// failure is silent: the notifications pane read `provider_name`, so it
+    /// never used the provider's own window list and quietly fell through to a
+    /// hardcoded one that happened to look right.
+    #[test]
+    fn provider_usage_wire_keys_are_camel_case() {
+        let usage = ProviderUsage::new(
+            "Claude",
+            None,
+            vec![UsageWindow::new("Rolling", 0, Some(80.0), None)],
+        );
+        let json = serde_json::to_string(&usage).expect("serialises");
+        assert!(json.contains("\"providerName\""), "got {json}");
+        assert!(json.contains("\"windows\""), "got {json}");
+        assert!(!json.contains("provider_name"), "snake_case leaked: {json}");
+        assert!(!json.contains("tokens_used"), "snake_case leaked: {json}");
+        assert!(
+            !json.contains("percent_remaining"),
+            "snake_case leaked: {json}"
+        );
+    }
 }

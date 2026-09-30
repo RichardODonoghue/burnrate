@@ -38,7 +38,44 @@ const REPO_SLUG = "RichardODonoghue/burnrate";
 const REPO_URL = `https://github.com/${REPO_SLUG}`;
 const ISSUES_URL = `${REPO_URL}/issues`;
 
+/**
+ * Providers whose quota has no monthly window.
+ *
+ * Only a fallback: the options are normally read from the provider's own windows
+ * in the snapshot. Claude reports Rolling/Weekly (plus the model-scoped Fable),
+ * and the usage pane says as much in words — "Claude has no monthly limit".
+ * Offering a Monthly rule for it produced a rule that could never fire.
+ */
+const PROVIDERS_WITHOUT_MONTHLY = new Set(["Claude"]);
+
 const WINDOW_LABELS = ["Rolling", "Weekly", "Monthly"];
+
+/**
+ * The window labels a provider can actually be alerted on.
+ *
+ * Taken from the provider's reported windows so the list cannot drift from what
+ * the notifier matches on; the hardcoded fallback is only for a provider that has
+ * not been detected yet.
+ */
+function windowLabelsFor(provider) {
+  // `providerName`, not `provider_name`: the wire is camelCase
+  // (`#[serde(rename_all = "camelCase")]`). Reading the snake_case name silently
+  // found nothing and fell through to the fallback below, which happened to give
+  // Claude the right answer and hid the mistake.
+  const reported =
+    state.snapshot?.usage?.find((entry) => entry.providerName === provider)?.windows ?? [];
+  if (reported.length) {
+    return reported.map((window) => window.label);
+  }
+  return PROVIDERS_WITHOUT_MONTHLY.has(provider) ? ["Rolling", "Weekly"] : WINDOW_LABELS;
+}
+
+/** The `<option>` list for a window select. */
+function windowOptions(provider) {
+  return windowLabelsFor(provider)
+    .map((label) => `<option>${esc(label)}</option>`)
+    .join("");
+}
 
 let state = {
   pane: "usage",
@@ -402,9 +439,7 @@ function renderNotifications() {
         <select id="ms-provider">${providers
           .map((p) => `<option>${esc(p)}</option>`)
           .join("")}</select>
-        <select id="ms-window">${WINDOW_LABELS.map(
-          (label) => `<option>${label}</option>`
-        ).join("")}</select>
+        <select id="ms-window">${windowOptions(providers[0])}</select>
         <input type="number" id="ms-step" min="1" max="50" value="20" />
         <span class="label">% step</span>
         <button class="action" id="ms-add">Add or replace</button>
@@ -418,9 +453,7 @@ function renderNotifications() {
         <select id="bn-provider">${providers
           .map((p) => `<option>${esc(p)}</option>`)
           .join("")}</select>
-        <select id="bn-window">${WINDOW_LABELS.map(
-          (label) => `<option>${label}</option>`
-        ).join("")}</select>
+        <select id="bn-window">${windowOptions(providers[0])}</select>
         <input type="number" id="bn-drop" min="1" max="100" value="15" />
         <span class="label">% in</span>
         <input type="number" id="bn-minutes" min="1" max="720" value="30" />
@@ -667,7 +700,19 @@ function wireContent() {
     });
   }
 
-  // Notifications
+  // Notifications: the window list depends on the provider, so it is rebuilt when
+  // the provider changes rather than on a refresh.
+  const providerWindows = (providerId, windowId) => {
+    const provider = el(providerId);
+    const windows = el(windowId);
+    if (!provider || !windows) return;
+    provider.addEventListener("change", () => {
+      windows.innerHTML = windowOptions(provider.value);
+    });
+  };
+  providerWindows("ms-provider", "ms-window");
+  providerWindows("bn-provider", "bn-window");
+
   const msAdd = el("ms-add");
   if (msAdd) {
     msAdd.addEventListener("click", () =>
