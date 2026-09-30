@@ -236,7 +236,7 @@ pub fn download_verified(client: &dyn HttpClient, release: &Release) -> Result<V
             release.zip.name
         )),
         Checksum::Mismatch { expected, actual } => Err(format!(
-            "checksum mismatch — download refused (expected {}, got {})",
+            "checksum mismatch, so the download was refused (expected {}, got {})",
             first_12(&expected),
             first_12(&actual)
         )),

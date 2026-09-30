@@ -6,6 +6,7 @@ name: CI
 #
 #   core       frontend typecheck + tests, then fmt + clippy + cargo test
 #   build      the app compiles *and bundles* on macOS, Windows and Linux
+#   audit      RustSec advisories against Cargo.lock
 #   tray-smoke the runtime check: a real tray under a real StatusNotifierWatcher
 #              in a container (scripts/tauri-smoke.sh)
 #
@@ -107,6 +108,27 @@ jobs:
       # frontend is produced here and `tsc` cannot be forgotten.
       - name: Build and bundle
         run: ${{ env.TAURI_CLI }} build --bundles ${{ matrix.bundles }}
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Built from crates.io rather than pulled as a prebuilt binary: this job
+      # exists to check the supply chain, so it should not add a download of its
+      # own that nothing verifies. Cached, so the compile happens once.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-0.22.2
+      - name: Install cargo-audit
+        run: command -v cargo-audit || cargo install cargo-audit --locked --version 0.22.2
+      # Vulnerabilities fail the build. Warnings do not, deliberately: the two
+      # outstanding ones are a gtk-rs advisory that only an upstream Tauri bump
+      # can clear, and an abandoned macro crate that Tauri pulls in — failing on
+      # those would leave this permanently red and therefore ignored.
+      - run: cargo audit
 
   tray-smoke:
     name: tray smoke (Linux container)

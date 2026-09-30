@@ -70,7 +70,7 @@ export function render(snapshot: Snapshot): string {
 
   return `<h1>Notifications</h1>
     <p class="sub">Milestones fire each time a window drops past another increment.
-    One rule per provider and window — duplicates are collapsed on save.</p>
+    One rule per provider and window. Duplicates are collapsed on save.</p>
 
     <div class="card">
       <h2>Milestones</h2>

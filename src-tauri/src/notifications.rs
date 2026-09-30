@@ -133,7 +133,7 @@ mod macos {
     /// Asks for permission, prompting on first run. Returns what was decided.
     pub fn authorise() -> String {
         let Some(center) = center() else {
-            return "unavailable — no app bundle (a built app, not `tauri dev`)".to_string();
+            return "unavailable: no app bundle (a built app, not `tauri dev`)".to_string();
         };
         let (sender, receiver) = mpsc::channel();
         let handler = RcBlock::new(move |granted: Bool, error: *mut NSError| {
@@ -157,7 +157,7 @@ mod macos {
     /// The current setting, without prompting.
     pub fn permission_state() -> String {
         let Some(center) = center() else {
-            return "unavailable — no app bundle (a built app, not `tauri dev`)".to_string();
+            return "unavailable: no app bundle (a built app, not `tauri dev`)".to_string();
         };
         let (sender, receiver) = mpsc::channel();
         let handler = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
@@ -176,7 +176,7 @@ mod macos {
     pub fn post(title: &str, body: &str) -> Result<(), String> {
         let Some(center) = center() else {
             return Err(
-                "no app bundle — notifications only work from a built app, not `tauri dev`"
+                "no app bundle, so notifications only work from a built app, not `tauri dev`"
                     .to_string(),
             );
         };

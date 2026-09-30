@@ -161,7 +161,7 @@ pub fn install_version(version: &str) -> Result<(), String> {
     let release = updater::fetch_latest(&client)?.ok_or_else(|| "no release found".to_string())?;
     if release.version != version {
         return Err(format!(
-            "the newest release is {} now, not {version} — check again",
+            "the newest release is {} now, not {version}; check again",
             release.version
         ));
     }
@@ -256,7 +256,7 @@ pub fn replace_bundle(current: &Path, new: &Path) -> Result<(), String> {
 
     std::fs::rename(current, &backup).map_err(|error| {
         format!(
-            "cannot move the running app aside in {} — move BurnRate somewhere writable, or update manually: {error}",
+            "cannot move the running app aside in {}; move BurnRate somewhere writable, or update manually: {error}",
             parent.display()
         )
     })?;

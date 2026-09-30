@@ -24,7 +24,7 @@ export function render(snapshot: Snapshot): string {
   const deps = platforms.runtimeDependencies;
 
   return `<h1>About</h1>
-    <p class="sub">BurnRate — AI plan usage in the menu bar.</p>
+    <p class="sub">AI plan usage in the menu bar.</p>
 
     <div class="card hero">
       <img id="about-icon" alt="" width="72" height="72" />
@@ -58,7 +58,7 @@ export function render(snapshot: Snapshot): string {
       <h2>What it does</h2>
       ${labelled(
         "gauge",
-        "Menu bar: per-provider % remaining, reset countdown and plan tier — no Dock icon"
+        "Menu bar: per-provider % remaining, reset countdown and plan tier, with no Dock icon"
       )}
       ${labelled(
         "usage",
@@ -76,11 +76,11 @@ export function render(snapshot: Snapshot): string {
       <h2>Data sources</h2>
       ${labelled(
         "seal",
-        "Vendor quota APIs — Claude and OpenCode Go percentages, reset times and plan tier, using the credentials their CLIs already stored"
+        "Vendor quota APIs: Claude and OpenCode Go percentages, reset times and plan tier, using the credentials their CLIs already stored"
       )}
       ${labelled(
         "drive",
-        "Local session logs — Codex usage, plus per-model token statistics and cost estimates (LiteLLM list pricing). Nothing is sent anywhere"
+        "Local session logs: Codex usage, plus per-model token statistics and cost estimates (LiteLLM list pricing). Nothing is sent anywhere"
       )}
     </div>
 

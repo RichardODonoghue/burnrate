@@ -120,7 +120,7 @@ function breakdownTable(dashboard: Dashboard): string {
   const note = dashboard.unpricedModels.length
     ? `<p class="hint">No list price for ${dashboard.unpricedModels
         .map(esc)
-        .join(", ")} — their cost shows as “—”.</p>`
+        .join(", ")}, so their cost shows as a dash.</p>`
     : "";
   return `<div class="table"><div class="tr head">${head}</div>${rows}</div>${note}`;
 }
@@ -141,7 +141,7 @@ export function render(snapshot: Snapshot): string {
   }
   const monthlyNote =
     dashboard.windowLabel === "Monthly"
-      ? `<p class="hint note"><span class="glyph">ⓘ</span>Claude has no monthly limit — its windows are 5-hour and weekly.</p>`
+      ? `<p class="hint note"><span class="glyph">ⓘ</span>Claude has no monthly limit; its windows are 5-hour and weekly.</p>`
       : "";
   const windowPicker = segmented(
     "window-group",
@@ -154,7 +154,7 @@ export function render(snapshot: Snapshot): string {
   return [
     snapshotCards(dashboard),
     cardWithControls(
-      `Remaining over time — ${dashboard.windowLabel}`,
+      `Remaining over time (${dashboard.windowLabel})`,
       windowPicker,
       `${monthlyNote}
       <div class="chart-frame" id="trend-frame">
