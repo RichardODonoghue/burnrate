@@ -253,7 +253,7 @@ impl Poller {
             let mut pricing = self.pricing.lock().expect("pricing lock");
             let totals = ModelUsageAggregator::totals(&batches, &mut pricing);
             let daily =
-                ModelUsageAggregator::daily(&batches, 30, now, &local_offset_at, &mut pricing);
+                ModelUsageAggregator::daily(&batches, 30, now, &local_start_of_day, &mut pricing);
             let spend =
                 spend_since_start_of_day(&batches, now, local_utc_offset_seconds(), &mut pricing);
             (totals, daily, spend)
@@ -459,6 +459,45 @@ pub fn now_unix() -> i64 {
 ///
 /// Falls back to UTC when the platform cannot answer (a sandbox without
 /// timezone data, say) — which only makes the buckets UTC-aligned, not wrong.
+/// The local midnight of the calendar day containing `timestamp`.
+///
+/// This is `Calendar.startOfDay(for:)`: `localtime_r` to get the local calendar
+/// date, then `mktime` to convert that date back, which applies the offset in
+/// effect **at that midnight**.
+///
+/// Both cheaper approaches are wrong. A fixed offset is wrong for every day
+/// before a daylight-saving change. And deriving the midnight from the offset at
+/// the sample's own instant splits a transition day in two — samples before the
+/// shift land on one midnight, samples after on another — where the calendar has
+/// one day. That second form is what made the daily chart bare before 27
+/// September: the slots were built with today's offset and matched no bucket.
+#[cfg(unix)]
+pub fn local_start_of_day(timestamp: i64) -> i64 {
+    let time = timestamp as libc::time_t;
+    let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&time, &mut broken_down) }.is_null() {
+        return timestamp;
+    }
+    broken_down.tm_hour = 0;
+    broken_down.tm_min = 0;
+    broken_down.tm_sec = 0;
+    // Let mktime work out whether that midnight is in daylight time.
+    broken_down.tm_isdst = -1;
+    let midnight = unsafe { libc::mktime(&mut broken_down) };
+    if midnight == -1 {
+        timestamp
+    } else {
+        midnight as i64
+    }
+}
+
+/// Off Unix there is no cheap per-instant lookup, so this uses the current
+/// offset. Windows has the same hazard; it is not the platform this was found on.
+#[cfg(not(unix))]
+pub fn local_start_of_day(timestamp: i64) -> i64 {
+    crate::usage::start_of_day(timestamp, local_utc_offset_seconds())
+}
+
 #[cfg(unix)]
 pub fn local_offset_at(timestamp: i64) -> i64 {
     // `localtime_r` applies the timezone rules for that instant, DST included.

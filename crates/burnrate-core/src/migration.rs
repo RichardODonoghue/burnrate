@@ -127,16 +127,9 @@ pub fn import_remaining_history(
 /// Buckets older than the retention window are dropped, and synthetic models are
 /// filtered out exactly as `ModelUsageAggregator` filters them from a live parse
 /// — a persisted snapshot must not be the one place `<synthetic>` gets through.
-pub fn import_model_history(
-    json: &[u8],
-    now: i64,
-    local_offset_seconds: i64,
-) -> Result<Vec<DailyModelUsage>, MigrationError> {
+pub fn import_model_history(json: &[u8], now: i64) -> Result<Vec<DailyModelUsage>, MigrationError> {
     let raw: Vec<SwiftDailyModelUsage> = serde_json::from_slice(json)?;
-    let cutoff = crate::usage::start_of_day(
-        now - (MODEL_HISTORY_DAYS - 1) * 86_400,
-        local_offset_seconds,
-    );
+    let cutoff = crate::poller::local_start_of_day(now - (MODEL_HISTORY_DAYS - 1) * 86_400);
     let mut days: Vec<DailyModelUsage> = raw
         .into_iter()
         .map(|day| DailyModelUsage {
@@ -199,8 +192,7 @@ pub fn merge_daily(
 /// UTC-day key as the merge, so a day is never kept or dropped on the strength of
 /// an hour of boundary disagreement.
 pub fn prune_daily(days: Vec<DailyModelUsage>, now: i64) -> Vec<DailyModelUsage> {
-    let offset = crate::poller::local_offset_at(now);
-    let cutoff = crate::usage::start_of_day(now - (MODEL_HISTORY_DAYS - 1) * 86_400, offset);
+    let cutoff = crate::poller::local_start_of_day(now - (MODEL_HISTORY_DAYS - 1) * 86_400);
     let cutoff_key = cutoff.div_euclid(86_400);
     days.into_iter()
         .filter(|day| day.day.div_euclid(86_400) >= cutoff_key)
@@ -289,7 +281,7 @@ mod tests {
             ]}}]"#,
             apple(NOW - 3_600)
         );
-        let days = import_model_history(json.as_bytes(), NOW, 0).expect("parses");
+        let days = import_model_history(json.as_bytes(), NOW).expect("parses");
         assert_eq!(days.len(), 1);
         assert_eq!(
             days[0].entries.len(),
@@ -315,7 +307,7 @@ mod tests {
             apple(NOW - 3_600),       // no entries
             apple(NOW - 90 * 86_400), // outside 30 days
         );
-        assert!(import_model_history(json.as_bytes(), NOW, 0)
+        assert!(import_model_history(json.as_bytes(), NOW)
             .expect("parses")
             .is_empty());
     }
@@ -407,7 +399,7 @@ mod tests {
                 "cost":0,"requests":1}}]}}]"#,
             apple(NOW - 3_600)
         );
-        let days = import_model_history(json.as_bytes(), NOW, 0).expect("parses");
+        let days = import_model_history(json.as_bytes(), NOW).expect("parses");
         assert_eq!(days[0].entries[0].provider, "OpenCode Go");
     }
 

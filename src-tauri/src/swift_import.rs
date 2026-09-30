@@ -20,7 +20,7 @@
 use base64::Engine;
 use burnrate_core::migration;
 use burnrate_core::paths::AppPaths;
-use burnrate_core::poller::{local_utc_offset_seconds, Poller};
+use burnrate_core::poller::Poller;
 use std::io::Write;
 
 /// The Swift app's defaults domains, newest first. `com.burnrate.desktop` is
@@ -62,7 +62,7 @@ pub fn import_swift_history_if_needed(poller: &mut Poller, now: i64) -> Option<S
         }
         if want_models && imported_days == 0 {
             if let Some(bytes) = defaults_data(domain, "modelUsageHistory") {
-                match migration::import_model_history(&bytes, now, local_utc_offset_seconds()) {
+                match migration::import_model_history(&bytes, now) {
                     Ok(days) if !days.is_empty() => {
                         imported_days = days.len();
                         poller.set_model_history(days);

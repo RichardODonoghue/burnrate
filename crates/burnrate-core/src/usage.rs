@@ -85,20 +85,21 @@ impl ModelUsageAggregator {
     /// Buckets samples into per-day per-model totals over the trailing `days`,
     /// merging across providers. `now` is seconds since the Unix epoch.
     ///
-    /// `offset_at` returns the local UTC offset **in effect at a given instant**,
-    /// rather than one offset for the whole window. A single offset is wrong
-    /// across a daylight-saving change: New Zealand moves between +12 and +13, so
-    /// bucketing a month with today's offset puts the first hour of every
-    /// pre-transition day into the day before.
+    /// `day_start` maps an instant to the local midnight of the calendar day
+    /// containing it — `poller::local_start_of_day`, which is
+    /// `Calendar.startOfDay`. Taking an offset instead is not enough: a day's
+    /// midnight cannot be derived from the offset at an arbitrary instant, and
+    /// doing so splits a daylight-saving transition day into two buckets where
+    /// the calendar has one.
     pub fn daily(
         buckets: &[(String, Vec<UsageSample>)],
         days: i64,
         now: i64,
-        offset_at: &dyn Fn(i64) -> i64,
+        day_start: &dyn Fn(i64) -> i64,
         pricing: &mut PricingTable,
     ) -> Vec<DailyModelUsage> {
         let window_start = now - (days - 1) * 86_400;
-        let start = start_of_day(window_start, offset_at(window_start));
+        let start = day_start(window_start);
         let mut by_day: HashMap<i64, HashMap<String, ModelUsageEntry>> = HashMap::new();
 
         for (provider, samples) in buckets {
@@ -106,7 +107,7 @@ impl ModelUsageAggregator {
                 if sample.timestamp < start || !Self::is_displayable(sample.model.as_deref()) {
                     continue;
                 }
-                let day = start_of_day(sample.timestamp, offset_at(sample.timestamp));
+                let day = day_start(sample.timestamp);
                 let entry = by_day
                     .entry(day)
                     .or_default()
@@ -582,8 +583,13 @@ mod tests {
                 sample(None, "sonnet", 20, 1),
             ],
         )];
-        let daily =
-            ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC, &mut PricingTable::default());
+        let daily = ModelUsageAggregator::daily(
+            &buckets,
+            7,
+            now(),
+            &|ts| start_of_day(ts, UTC),
+            &mut PricingTable::default(),
+        );
         assert_eq!(daily.len(), 2, "two distinct days");
         let today = &daily[1];
         assert_eq!(today.entries.len(), 1, "two samples, same model, same day");
@@ -660,8 +666,13 @@ mod tests {
             ],
         )];
         let flat = ModelUsageAggregator::totals(&buckets, &mut PricingTable::default());
-        let daily =
-            ModelUsageAggregator::daily(&buckets, 7, now(), &|_| UTC, &mut PricingTable::default());
+        let daily = ModelUsageAggregator::daily(
+            &buckets,
+            7,
+            now(),
+            &|ts| start_of_day(ts, UTC),
+            &mut PricingTable::default(),
+        );
         let merged = ModelUsageAggregator::totals_from_daily(&daily);
 
         assert_eq!(flat.len(), merged.len());
@@ -686,8 +697,13 @@ mod tests {
                 UsageSample::new(base + DAY + 60, TokenUsage::new(20, 0, 0, 0)),
             ],
         )];
-        let daily =
-            ModelUsageAggregator::daily(&buckets, 3, now(), &|_| UTC, &mut PricingTable::default());
+        let daily = ModelUsageAggregator::daily(
+            &buckets,
+            3,
+            now(),
+            &|ts| start_of_day(ts, UTC),
+            &mut PricingTable::default(),
+        );
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].entries[0].tokens.input, 10);
         assert_eq!(daily[1].entries[0].tokens.input, 20);
@@ -768,7 +784,13 @@ mod tests {
             ..UsageSample::new(now, TokenUsage::new(1_000_000, 0, 0, 0))
         };
         let buckets = vec![("Claude".to_string(), vec![sample])];
-        let daily = ModelUsageAggregator::daily(&buckets, 7, now, &|_| UTC, &mut pricing);
+        let daily = ModelUsageAggregator::daily(
+            &buckets,
+            7,
+            now,
+            &|ts| start_of_day(ts, UTC),
+            &mut pricing,
+        );
         let entry = &daily.last().expect("a bucket").entries[0];
         assert!(
             (entry.cost - 15.0).abs() < 1e-9,
