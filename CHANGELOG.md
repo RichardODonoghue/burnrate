@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/RichardODonoghue/burnrate/compare/v0.9.0...v0.9.1) (2026-09-30)
+
+
+### Security
+
+* the review's recommendations, all five ([#119](https://github.com/RichardODonoghue/burnrate/issues/119)) ([ab8cf31](https://github.com/RichardODonoghue/burnrate/commit/ab8cf314cd9cee093e9b0946d85eb1f0aaf48762))
+
 ## [0.9.0](https://github.com/RichardODonoghue/burnrate/compare/v0.8.1...v0.9.0) (2026-09-30)
 
 
