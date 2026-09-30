@@ -308,16 +308,26 @@ pub fn needle_tip(angle_degrees: f64) -> [f64; 2] {
 /// in light and dark menu bars and when highlighted). The dial is punched out of
 /// the flame with `destinationOut`.
 pub fn menu_bar_image(remaining: Option<f64>, edge: u32) -> Canvas {
+    menu_bar_image_in(remaining, edge, RgbColor::new(0.0, 0.0, 0.0))
+}
+
+/// The same mark, drawn in `ink`.
+///
+/// The colour matters because macOS is the only platform that recolours it: the
+/// image goes over as a *template*, and the system tints it for the menu bar. Every
+/// other platform shows these pixels as drawn, so black is invisible on a dark
+/// Windows taskbar or a dark Linux panel — which is what "black instead of white"
+/// was on Windows. Those ask for white.
+pub fn menu_bar_image_in(remaining: Option<f64>, edge: u32, ink: RgbColor) -> Canvas {
     supersampled(edge, |large| {
         let mut canvas = Canvas::new(large).zoomed(MENU_BAR_ZOOM, MENU_BAR_INK_CENTRE);
         let angle = StatusIcon::needle_angle(remaining);
-        let black = RgbColor::new(0.0, 0.0, 0.0);
 
-        canvas.fill_shape(in_flame, black, black, (6.0, 60.0));
+        canvas.fill_shape(in_flame, ink, ink, (6.0, 60.0));
         // Punch the dial core out.
         clear_oval(&mut canvas, DIAL_CENTER, DIAL_RADIUS);
-        canvas.stroke_line(PIVOT, needle_tip(angle), NEEDLE_WIDTH, black);
-        canvas.fill_oval(PIVOT, PIVOT_RADIUS, black);
+        canvas.stroke_line(PIVOT, needle_tip(angle), NEEDLE_WIDTH, ink);
+        canvas.fill_oval(PIVOT, PIVOT_RADIUS, ink);
         canvas
     })
 }
@@ -507,21 +517,31 @@ fn stroke_rounded_rect(
     color: RgbColor,
     alpha: f64,
 ) {
+    // Centred on the path, the way `NSBezierPath.stroke()` is: half the width
+    // inside the edge, half outside.
+    //
+    // This used to ink only the region *outside* the path. That halved the
+    // hairline and pushed it off the plate entirely, which at taskbar sizes read
+    // as a faint smear along the straight edges and as nothing at all on the
+    // corners — there the boundary curves away, so the outward crescent's
+    // coverage rounds to zero. Hence "the border is on the edges but not the
+    // corners".
     let (lo, hi) = (inset, 72.0 - inset);
+    let centre = (lo + hi) / 2.0;
+    let half_extent = (hi - lo) / 2.0;
     let half = width / 2.0;
     for y in 0..canvas.size as i64 {
         for x in 0..canvas.size as i64 {
             let (px, py) = canvas.design_point(x, y);
-            if px < lo - half || px > hi + half || py < lo - half || py > hi + half {
-                continue;
-            }
-            let cx = px.clamp(lo + radius, hi - radius);
-            let cy = py.clamp(lo + radius, hi - radius);
-            let dx = px - cx;
-            let dy = py - cy;
-            let outside_edge =
-                (px < lo || px > hi || py < lo || py > hi) || (dx * dx + dy * dy > radius * radius);
-            if outside_edge && (dx * dx + dy * dy).sqrt() <= radius + half {
+            // Signed distance to the rounded-rect boundary: negative inside,
+            // positive outside, and `abs()` is the distance to the edge. The
+            // straight runs and the corner arcs fall out of the same expression,
+            // which is the point — they previously did not.
+            let qx = (px - centre).abs() - (half_extent - radius);
+            let qy = (py - centre).abs() - (half_extent - radius);
+            let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+            let signed = outside + qx.max(qy).min(0.0) - radius;
+            if signed.abs() <= half {
                 canvas.blend(x, y, color, alpha);
             }
         }
@@ -553,6 +573,32 @@ mod tests {
             at_sixty[1] > PIVOT[1] - NEEDLE_LENGTH,
             "and is shorter than full length"
         );
+    }
+
+    /// The mark is drawn in the ink it is given.
+    ///
+    /// Worth pinning because macOS is the one platform that never shows these
+    /// pixels as written — it tints the template — so a wrong choice here is
+    /// invisible on the machine the code is written on, and shows up only on
+    /// Windows and Linux.
+    #[test]
+    fn the_mark_is_drawn_in_the_requested_ink() {
+        for ink in [RgbColor::new(0.0, 0.0, 0.0), RgbColor::new(1.0, 1.0, 1.0)] {
+            let canvas = menu_bar_image_in(Some(70.0), 36, ink);
+            let mut saw_opaque = false;
+            for chunk in canvas.pixels.chunks_exact(4) {
+                if chunk[3] > 200 {
+                    saw_opaque = true;
+                    let want = (ink.red * 255.0).round() as u8;
+                    assert!(
+                        (chunk[0] as i16 - want as i16).abs() <= 1,
+                        "expected ink {want}, got {:?}",
+                        &chunk[0..3]
+                    );
+                }
+            }
+            assert!(saw_opaque, "something was actually drawn");
+        }
     }
 
     /// The menu-bar image is monochrome with alpha, as a template must be.
@@ -635,6 +681,65 @@ mod tests {
         assert!(
             top > 0 && bottom < edge - 1,
             "and stays inside them: rows {top}..{bottom} of {edge}"
+        );
+    }
+
+    /// The plate's border straddles the edge, straight runs and corners alike.
+    ///
+    /// It used to be inked only *outside* the path, so it was half the intended
+    /// weight and, on the corner arcs, rounded away to nothing: the border was
+    /// visible along the edges and missing at the corners, which is what was
+    /// reported on the Windows taskbar icon.
+    ///
+    /// 256 is deliberate — above `SUPERSAMPLE_BELOW`, so what is measured is the
+    /// geometry rather than the downsampler. The band is only one design unit
+    /// wide, so each probe takes the brightest pixel in a small window: a single
+    /// pixel's centre can miss a half-unit band by rounding alone.
+    #[test]
+    fn the_plate_border_straddles_the_edge() {
+        let canvas = app_icon(256);
+        let size = canvas.size;
+        let scale = size as f64 / 72.0;
+        let window_max = |px: f64, py: f64, span: f64| -> u8 {
+            let x0 = ((px - span) * scale).floor().clamp(0.0, size as f64 - 1.0) as u32;
+            let x1 = ((px + span) * scale).ceil().clamp(0.0, size as f64 - 1.0) as u32;
+            let y0 = ((py - span) * scale).floor().clamp(0.0, size as f64 - 1.0) as u32;
+            let y1 = ((py + span) * scale).ceil().clamp(0.0, size as f64 - 1.0) as u32;
+            let mut best = 0u8;
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    // Premultiplied RGBA, and the plate is opaque, so the red
+                    // channel alone says whether the white hairline is there.
+                    best = best.max(canvas.pixels[((y * size + x) * 4) as usize]);
+                }
+            }
+            best
+        };
+        let pixel = |px: f64, py: f64| -> u8 {
+            let x = (px * scale) as u32;
+            let y = (py * scale) as u32;
+            canvas.pixels[((y * size + x) * 4) as usize]
+        };
+
+        let (inset, radius) = (1.5, 16.0);
+        // Two units inside the boundary is clear of the one-unit band.
+        let straight_reference = pixel(inset + 2.0, 36.0);
+        let diagonal = radius / 2.0_f64.sqrt();
+        let corner_reference = pixel(
+            inset + radius - diagonal + 2.0,
+            inset + radius - diagonal + 2.0,
+        );
+
+        let straight = window_max(inset, 36.0, 1.0);
+        let corner = window_max(inset + radius - diagonal, inset + radius - diagonal, 1.2);
+
+        assert!(
+            straight > straight_reference + 20,
+            "no hairline across the straight edge: {straight} vs plate {straight_reference}"
+        );
+        assert!(
+            corner > corner_reference + 20,
+            "no hairline across the corner arc: {corner} vs plate {corner_reference}"
         );
     }
 

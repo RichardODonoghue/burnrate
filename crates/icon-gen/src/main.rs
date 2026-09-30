@@ -2,11 +2,14 @@
 //!
 //!     cargo run -p icon-gen            # writes src-tauri/icons/
 //!
-//! The G2 mark is defined once, in `burnrate_core::dial`, and this generator is
-//! the only thing that rasterises it. There is no hand-drawn art anywhere in the
-//! repo: the app icon, the macOS template menu-bar image, the Windows .ico and
-//! the raw RGBA the Rust runtime hands to Tauri all come from here, so they
-//! cannot drift apart.
+//! The mark is defined once, in `burnrate_core::dial`, and this generator is the
+//! only thing that rasterises it. There is no hand-drawn art anywhere in the
+//! repo: the app icon, the macOS `.icns`, the Windows `.ico` and the PNG set all
+//! come from here, so they cannot drift apart.
+//!
+//! The tray mark is *not* here: the runtime draws it from the same geometry and
+//! hands Tauri raw RGBA, so a file would be a second copy to keep in step. This
+//! used to write `tray.png`, `tray@2x.png` and `tray.rgba`, which nothing read.
 
 use std::path::{Path, PathBuf};
 
@@ -31,7 +34,10 @@ fn main() {
     for (size, bytes) in &app_pngs {
         let name = match size {
             16 => "icon_16x16.png".to_string(),
-            32 => "icon_32x32.png".to_string(),
+            // `32x32.png`, not `icon_32x32.png`: this is the name
+            // `tauri.conf.json` declares, and a mismatch here left a
+            // stale file as the Windows taskbar icon.
+            32 => "32x32.png".to_string(),
             64 => "icon_64x64.png".to_string(),
             128 => "128x128.png".to_string(),
             256 => "256x256.png".to_string(),
@@ -47,17 +53,6 @@ fn main() {
 
     write(&out_dir.join("icon.icns"), build_icns(&app_pngs));
     write(&out_dir.join("icon.ico"), build_ico(&app_pngs));
-
-    // --- Menu bar image: macOS template + the RGBA the runtime embeds -------
-    // Tauri takes raw RGBA, not a PNG, so tray.rgba is the real input.
-    for (edge, name) in [(18u32, "tray.png"), (36, "tray@2x.png")] {
-        let canvas = dial::menu_bar_image(None, edge);
-        write(&out_dir.join(name), encode_png(&canvas));
-    }
-    write(
-        &out_dir.join("tray.rgba"),
-        &dial::menu_bar_image(None, 22).pixels,
-    );
 
     println!("done");
 }
