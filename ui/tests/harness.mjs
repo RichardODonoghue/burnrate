@@ -216,6 +216,10 @@ const snapshot = {
   remaining: 73,
   appVersion: "1.0.0",
   coreVersion: "1.0.0",
+  updateAvailable: null,
+  updateState: "up to date (1.0.0)",
+  updateBusy: false,
+  canInstallUpdate: true,
   lastPollUnix: NOW,
   pollCount: 3,
   platforms: { os: "macOS", runtimeDependencies: [] },
@@ -501,6 +505,33 @@ check("about: links open through the command", (about.match(/data-open=/g) ?? []
 const linkRows = about.slice(about.indexOf("<h2>Links</h2>"));
 check("about: both link rows have an svg icon", (linkRows.match(/<svg class="row-glyph"/g) ?? []).length === 2);
 check("about: no icon severity ramp", !about.includes("Icon severity"));
+check("about: shows the updater state", about.includes("up to date (1.0.0)"));
+check(
+  "about: offers no install when there is no update",
+  !about.includes("install-update")
+);
+// The pane is the updater's only surface, so it has to offer the install when
+// one exists — and say which version, so a stale offer is visible.
+snapshot.updateAvailable = "1.1.0";
+snapshot.updateState = "1.1.0 is available";
+render();
+const withUpdate = html();
+check(
+  "about: offers to install an available update",
+  withUpdate.includes('id="install-update"') && withUpdate.includes("Install 1.1.0"),
+  withUpdate.slice(withUpdate.indexOf("<h2>Updates</h2>"), withUpdate.indexOf("<h2>What")).slice(0, 300)
+);
+check("about: names the available version in the state line", withUpdate.includes("1.1.0 is available"));
+// A platform that cannot replace itself points at the release page instead.
+snapshot.canInstallUpdate = false;
+snapshot.updateAvailable = null;
+snapshot.updateState = "up to date (1.0.0)";
+render();
+check(
+  "about: a platform that cannot self-install links the release page",
+  html().includes("releases/latest")
+);
+snapshot.canInstallUpdate = true;
 
 console.log("--- sidebar ---");
 state.pane = "usage";

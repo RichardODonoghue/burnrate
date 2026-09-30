@@ -8,6 +8,9 @@ description = "Platform-independent BurnRate logic: parsing, quota APIs, alerts,
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# The updater verifies a downloaded release zip against the release's own
+# SHA256SUMS before it is allowed near the installed bundle.
+sha2 = "0.10"
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 thiserror = "2"

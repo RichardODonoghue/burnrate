@@ -20,6 +20,7 @@ pub mod poller;
 pub mod providers;
 pub mod settings;
 pub mod sources;
+pub mod updater;
 pub mod usage;
 
 /// Crate version, surfaced in the UI so the app can report which core it runs.

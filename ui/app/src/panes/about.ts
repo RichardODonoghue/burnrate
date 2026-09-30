@@ -5,7 +5,7 @@
 import { api } from "../api.js";
 import { esc, el, must, on, onAll, targetData, toast } from "../dom.js";
 import { rowIcon, type IconName } from "../icons.js";
-import { ISSUES_URL, REPO_SLUG, REPO_URL } from "../ui.js";
+import { ISSUES_URL, RELEASES_URL, REPO_SLUG, REPO_URL } from "../ui.js";
 import { state } from "../store.js";
 import type { Snapshot } from "../types.js";
 import type { PaneContext } from "./usage.js";
@@ -17,6 +17,10 @@ function labelled(icon: IconName, text: string): string {
 
 export function render(snapshot: Snapshot): string {
   const { appVersion, coreVersion, platforms } = snapshot;
+  const { updateAvailable, updateState, updateBusy, canInstallUpdate } = snapshot;
+  // Both buttons are disabled while a check or download is in flight, so a
+  // second click cannot start a second download.
+  const busyAttrs = updateBusy ? " disabled" : "";
   const deps = platforms.runtimeDependencies;
 
   return `<h1>About</h1>
@@ -32,10 +36,22 @@ export function render(snapshot: Snapshot): string {
       <h2>Updates</h2>
       <div class="row">
         <span class="grow label">Version ${esc(appVersion)}</span>
-        <button class="action" id="check-updates">Check for Updates</button>
+        ${
+          updateAvailable && canInstallUpdate
+            ? `<button class="action primary" id="install-update"${busyAttrs}>Install ${esc(
+                updateAvailable
+              )}</button>`
+            : ""
+        }
+        <button class="action" id="check-updates"${busyAttrs}>Check for Updates</button>
       </div>
-      <p class="hint">Opens the releases page. This build does not install updates
-      itself.</p>
+      <p class="hint" id="update-state">${esc(updateState)}</p>
+      ${
+        canInstallUpdate
+          ? ""
+          : `<p class="hint">This platform installs from the
+             <a href="#" data-open="${esc(RELEASES_URL)}">releases page</a>.</p>`
+      }
     </div>
 
     <div class="card">
@@ -106,7 +122,7 @@ export function render(snapshot: Snapshot): string {
     </div>`;
 }
 
-export function wire(_snapshot: Snapshot, _context: PaneContext): void {
+export function wire(_snapshot: Snapshot, context: PaneContext): void {
   // The hero icon is the pane's marker: if it is absent this pane is not up, and
   // everything below it can be required rather than looked up loosely.
   if (!el("about-icon")) return;
@@ -124,7 +140,36 @@ export function wire(_snapshot: Snapshot, _context: PaneContext): void {
     if (url) await api.openUrl(url);
   });
 
-  on(must("check-updates"), "click", () => api.openUrl(`${REPO_URL}/releases`));
+  // Checking and installing both own their state in Rust, so the pane re-renders
+  // from a fresh snapshot rather than patching itself by hand.
+  on(must("check-updates"), "click", async () => {
+    const button = must<HTMLButtonElement>("check-updates");
+    button.disabled = true;
+    button.textContent = "Checking…";
+    try {
+      const status = await api.checkForUpdates();
+      toast(status.state);
+    } catch (error) {
+      toast(`Could not check for updates: ${String(error)}`);
+    }
+    context.reload();
+  });
+
+  const install = el("install-update");
+  if (install) {
+    on(install, "click", async () => {
+      const button = must<HTMLButtonElement>("install-update");
+      button.disabled = true;
+      button.textContent = "Downloading…";
+      try {
+        // On success the app replaces itself and exits, so this never resolves.
+        await api.installUpdate();
+      } catch (error) {
+        toast(`Update failed: ${String(error)}`);
+        context.reload();
+      }
+    });
+  }
 
   on(must("test-notification"), "click", async () => {
     // The command reports what the platform actually did, including the caveat

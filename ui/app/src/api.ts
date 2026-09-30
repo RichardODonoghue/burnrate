@@ -7,7 +7,7 @@
 // Once specta generates bindings this file becomes a thin re-export, and the
 // argument names come from the Rust signatures.
 
-import type { Snapshot, Settings } from "./types.js";
+import type { Snapshot, Settings, UpdateStatus } from "./types.js";
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -50,6 +50,8 @@ export const api = {
   refreshNow: (): Promise<void> => invoke("refresh_now"),
   openUrl: (url: string): Promise<void> => invoke("open_url", { url }),
   testNotification: (): Promise<string> => invoke("send_test_notification"),
+  checkForUpdates: (): Promise<UpdateStatus> => invoke("check_for_updates"),
+  installUpdate: (): Promise<void> => invoke("install_update"),
 
   upsertMilestone: (provider: string, windowLabel: string, step: number): Promise<void> =>
     invoke("upsert_milestone", { provider, windowLabel, step }),

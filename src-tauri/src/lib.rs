@@ -24,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 
 mod notifications;
 mod swift_import;
+mod updater;
 
 use burnrate_core::alerts::{BurnAlert, CostAlert, Milestone};
 use burnrate_core::charts::{axis_label, metric_value, ChartRange, Metric, TrendChartData};
@@ -61,11 +62,21 @@ struct AppState {
     /// *seen* rather than what is in the latest poll keeps a widget from
     /// disappearing during a transient API failure.
     seen_providers: Mutex<std::collections::BTreeSet<String>>,
+    /// The updater's last result, for the tray row and the About pane.
+    update: Mutex<updater::UpdateStatus>,
 }
 
 impl AppState {
     fn settings(&self) -> Settings {
         self.settings.lock().expect("settings lock").clone()
+    }
+
+    fn update_status(&self) -> updater::UpdateStatus {
+        self.update.lock().expect("update lock").clone()
+    }
+
+    fn set_update_status(&self, status: updater::UpdateStatus) {
+        *self.update.lock().expect("update lock") = status;
     }
 
     fn seen_providers(&self) -> std::collections::BTreeSet<String> {
@@ -290,6 +301,13 @@ struct Snapshot {
     remaining: Option<f64>,
     app_version: String,
     core_version: String,
+    /// The newer version GitHub is offering, if any.
+    update_available: Option<String>,
+    /// One line of updater state for the About pane.
+    update_state: String,
+    update_busy: bool,
+    /// False where the app cannot replace itself, so the pane offers the page.
+    can_install_update: bool,
     last_poll_unix: u64,
     poll_count: u64,
     platforms: PlatformInfo,
@@ -578,7 +596,18 @@ fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         }
     }
     let _ = handles.dashboard.set_enabled(true);
-    let _ = handles.update.set_enabled(true);
+    // The update row carries the state: an offer to install, or an invitation to
+    // check. Disabled while a check or download is in flight, so a second click
+    // cannot start a second download.
+    let status = app_state.update_status();
+    let label = match (&status.available, status.busy) {
+        (Some(version), true) => format!("Downloading {version}…"),
+        (Some(version), false) => format!("Update to {version}…"),
+        (None, true) => "Checking for Updates…".to_string(),
+        (None, false) => "Check for Updates…".to_string(),
+    };
+    let _ = handles.update.set_text(label);
+    let _ = handles.update.set_enabled(!status.busy);
 
     // Widgets: only for providers this app has actually detected. A configured
     // provider whose CLI is not installed used to get a menu-bar item that could
@@ -650,6 +679,7 @@ fn snapshot(
         .map(|result| result.missing.clone())
         .unwrap_or_default();
     let remaining = StatusMenuBuilder::worst_rolling_remaining(&usage);
+    let update = state.update_status();
     let poller = state.poller.lock().expect("poller lock");
 
     let now = now_unix() as i64;
@@ -872,6 +902,10 @@ fn snapshot(
         remaining,
         app_version: app.package_info().version.to_string(),
         core_version: state.core_version.clone(),
+        update_available: update.available.clone(),
+        update_state: update.state.clone(),
+        update_busy: update.busy,
+        can_install_update: update.can_install,
         last_poll_unix: last.as_ref().map(|result| result.at as u64).unwrap_or(0),
         poll_count: poller.poll_count(),
         platforms: platform_info(),
@@ -1131,6 +1165,80 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 /// Forces an immediate poll, skipping the throttle — the tray's Refresh.
+/// Checks GitHub for a newer release.
+///
+/// `async` deliberately: the body is a network call, and a synchronous command
+/// would run it on the UI thread and freeze the window.
+#[tauri::command]
+async fn check_for_updates(app: AppHandle<Wry>) -> Result<updater::UpdateStatus, String> {
+    {
+        let state = app.state::<Arc<AppState>>();
+        state.set_update_status(updater::UpdateStatus {
+            available: state.update_status().available,
+            busy: true,
+            state: "checking…".to_string(),
+            can_install: updater::CAN_INSTALL,
+        });
+    }
+
+    let current = updater::current_version();
+    let result = tauri::async_runtime::spawn_blocking(move || updater::check(&current))
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let state = app.state::<Arc<AppState>>();
+    state.set_update_status(result.clone());
+    render_tray(&app).ok();
+    Ok(result)
+}
+
+/// Downloads, verifies and installs the offered update, then relaunches.
+///
+/// Never returns on success: the replacement is in place and this process has to
+/// go, because the relaunch waits for its pid to disappear.
+#[tauri::command]
+async fn install_update(app: AppHandle<Wry>) -> Result<(), String> {
+    let version = {
+        let state = app.state::<Arc<AppState>>();
+        let status = state.update_status();
+        let Some(version) = status.available else {
+            return Err("no update is available".to_string());
+        };
+        state.set_update_status(updater::UpdateStatus {
+            available: Some(version.clone()),
+            busy: true,
+            state: format!("downloading {version}…"),
+            can_install: updater::CAN_INSTALL,
+        });
+        version
+    };
+
+    let target = version.clone();
+    let installed = tauri::async_runtime::spawn_blocking(move || updater::install_version(&target))
+        .await
+        .map_err(|error| error.to_string())?;
+
+    match installed {
+        Ok(()) => {
+            eprintln!("burnrate: {version} installed; relaunching");
+            app.exit(0);
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("burnrate: update failed: {error}");
+            let state = app.state::<Arc<AppState>>();
+            state.set_update_status(updater::UpdateStatus {
+                available: Some(version),
+                busy: false,
+                state: format!("install failed: {error}"),
+                can_install: updater::CAN_INSTALL,
+            });
+            render_tray(&app).ok();
+            Err(error)
+        }
+    }
+}
+
 #[tauri::command]
 fn refresh_now(app: AppHandle<Wry>) {
     {
@@ -1392,6 +1500,7 @@ pub fn run() {
             notified: AtomicU64::new(0),
             core_version: burnrate_core::VERSION.to_string(),
             seen_providers: Mutex::new(std::collections::BTreeSet::new()),
+            update: Mutex::new(updater::UpdateStatus::idle()),
         }))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -1529,6 +1638,28 @@ pub fn run() {
             // First poll immediately, so the window is never empty on open.
             poll_once(&handle);
 
+            // Updates: check once just after launch, then daily while running.
+            // The first check is what turns the tray row into "Update to X…"
+            // without the user asking.
+            {
+                let checker = handle.clone();
+                std::thread::spawn(move || loop {
+                    let status = updater::check(&updater::current_version());
+                    eprintln!("burnrate: update check: {}", status.state);
+                    checker
+                        .state::<Arc<AppState>>()
+                        .set_update_status(status);
+                    let inner = checker.clone();
+                    let runner = checker.clone();
+                    let _ = runner.run_on_main_thread(move || {
+                        render_tray(&inner).ok();
+                    });
+                    std::thread::sleep(Duration::from_secs(
+                        burnrate_core::updater::CHECK_INTERVAL_SECONDS as u64,
+                    ));
+                });
+            }
+
             // The poll loop. Interval comes from settings, re-read every tick
             // so changing it takes effect without a restart.
             {
@@ -1559,8 +1690,41 @@ pub fn run() {
             match id {
                 ID_QUIT => app.exit(0),
                 ID_DASHBOARD => open_window(app.clone(), Some(AppPane::Usage)),
-                // The About pane carries the update affordance, as in Swift.
-                ID_UPDATE => open_window(app.clone(), Some(AppPane::About)),
+                ID_UPDATE => {
+                    let status = app.state::<Arc<AppState>>().update_status();
+                    match status.available {
+                        // Clicking the offer installs it, as the Swift menu did.
+                        Some(_) if !status.busy => {
+                            let installing = app.clone();
+                            std::thread::spawn(move || {
+                                let version = installing
+                                    .state::<Arc<AppState>>()
+                                    .update_status()
+                                    .available
+                                    .unwrap_or_default();
+                                match updater::install_version(&version) {
+                                    Ok(()) => {
+                                        eprintln!("burnrate: {version} installed; relaunching");
+                                        installing.exit(0);
+                                    }
+                                    Err(error) => {
+                                        eprintln!("burnrate: update failed: {error}");
+                                        let state = installing.state::<Arc<AppState>>();
+                                        state.set_update_status(updater::UpdateStatus {
+                                            available: Some(version),
+                                            busy: false,
+                                            state: format!("install failed: {error}"),
+                                            can_install: updater::CAN_INSTALL,
+                                        });
+                                    }
+                                }
+                            });
+                        }
+                        // Nothing on offer: show the pane, which carries the
+                        // affordance to check.
+                        _ => open_window(app.clone(), Some(AppPane::About)),
+                    }
+                }
                 other if other.starts_with(ID_WIDGET_PREFIX) => {
                     if let Some(provider) = other
                         .strip_prefix(ID_WIDGET_PREFIX)
@@ -1591,6 +1755,8 @@ pub fn run() {
             known_providers,
             open_window,
             open_url,
+            check_for_updates,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BurnRate");
