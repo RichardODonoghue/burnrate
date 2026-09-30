@@ -494,6 +494,21 @@ console.log("--- panes match the Swift build ---");
 state.pane = "widgets";
 render();
 check("widgets: no Charts-row setting", !html().includes("includes-charts"));
+// The window labels are not all ours: a Claude model-scoped window is labelled
+// with the vendor API's `scope.model.display_name`. That used to reach
+// `innerHTML` raw, which is DOM XSS in a page that can call every Tauri command.
+state.pane = "notifications";
+const rolling = snapshot.usage[0].windows.find((w) => w.label === "Rolling");
+rolling.label = '<img src=x onerror="alert(1)">';
+render();
+const hostile = html();
+check(
+  "notifications: a hostile window label is escaped",
+  hostile.includes("&lt;img src=x") && !/<img src=x/.test(hostile),
+  hostile.slice(hostile.indexOf("ms-window") - 20, hostile.indexOf("ms-window") + 90)
+);
+rolling.label = "Rolling";
+
 state.pane = "about";
 render();
 const about = html();
