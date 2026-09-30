@@ -581,6 +581,24 @@ mod tests {
         assert_eq!(TrendChartData::nearest_point(&[], 5), None);
     }
 
+    /// `cutoffIsTrailingWindow` — the window behind "now", not a calendar one.
+    #[test]
+    fn cutoff_is_a_trailing_window() {
+        for range in ChartRange::ALL {
+            assert_eq!(
+                TrendChartData::trend_cutoff(range, NOW),
+                NOW - range.span_seconds(),
+                "{:?} must trail from now, not start at midnight",
+                range
+            );
+        }
+        // And the spans are the three the picker offers, in order.
+        assert_eq!(
+            ChartRange::ALL.map(ChartRange::span_seconds),
+            [24 * 3600, 7 * 86_400, 30 * 86_400]
+        );
+    }
+
     /// The picker's options come out in canonical order, not alphabetical.
     #[test]
     fn trend_labels_are_in_canonical_order_not_alphabetical() {
@@ -774,12 +792,7 @@ pub const PALETTE: [(u8, u8, u8); 8] = [
 /// deterministic, so a model's colour is the same on every launch and on every
 /// platform.
 pub fn colour_for_model(model: &str) -> (u8, u8, u8) {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in model.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    PALETTE[(hash % PALETTE.len() as u64) as usize]
+    PALETTE[(crate::formatting::stable_hash(model) % PALETTE.len() as u64) as usize]
 }
 
 /// A compact axis label, ported from `ModelsView.axisLabel(_:metric:)`.

@@ -145,7 +145,7 @@ impl Poller {
         let mut usage: Vec<ProviderUsage> = Vec::new();
 
         // --- vendor quota APIs: authoritative percentages --------------------
-        let claude = self.claude_api.fetch_usage();
+        let claude = self.claude_api.fetch_usage(now);
         if let Some(result) = claude.usage.clone() {
             usage.push(result);
         }
@@ -153,7 +153,7 @@ impl Poller {
             missing.push(format!("Claude: {status}"));
         }
 
-        let opencode = self.opencode_api.fetch_usage();
+        let opencode = self.opencode_api.fetch_usage(now);
         if let Some(result) = opencode.usage.clone() {
             usage.push(result);
         }
@@ -244,7 +244,12 @@ impl Poller {
 
         // --- notifications ----------------------------------------------------
         let poll_interval = settings.poll_interval_seconds as i64;
-        self.notifier.set_account_fingerprint(None);
+        // A plan switch resets the per-window history, so a fresh account's 5%
+        // remaining does not read as "crossed 90, 80, 70…". This was passed `None`
+        // unconditionally, so the notifier's plan-switch handling was wired but
+        // never fed and a switch did fire that burst.
+        self.notifier
+            .set_account_fingerprint(self.claude_api.credential_fingerprint());
         let mut notifications = self.notifier.evaluate(&usage, settings, now, poll_interval);
 
         // --- models and cost --------------------------------------------------

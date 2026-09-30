@@ -276,8 +276,9 @@ struct DailyBar {
     total: f64,
     total_text: String,
     bars: Vec<Bar>,
-    /// Today, or yesterday if the day has not finished: drawn faded, because a
-    /// part-day beside complete days reads as a cliff.
+    /// The day is not over yet — only ever today, since the slots stop there.
+    /// Drawn faded: a part-day beside complete days reads as a cliff, not as a
+    /// day in progress.
     partial: bool,
 }
 
