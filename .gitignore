@@ -12,3 +12,8 @@ build/
 /target/
 /src-tauri/target/
 /src-tauri/gen/
+
+# Frontend build output and dependencies. The sources are app/src; `tsc`
+# emits native ES modules into app/js, which the webview loads directly.
+ui/node_modules/
+ui/app/js/

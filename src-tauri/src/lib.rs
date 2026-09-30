@@ -1710,87 +1710,25 @@ mod tests {
         assert_eq!(super::TRAY_EDGE, 36, "2x of the 18pt tray-icon target");
     }
 
-    /// snake_case to the camelCase the wire uses.
-    fn camel(name: &str) -> String {
-        let mut out = String::new();
-        let mut upper = false;
-        for character in name.chars() {
-            if character == '_' {
-                upper = true;
-            } else if upper {
-                out.extend(character.to_uppercase());
-                upper = false;
-            } else {
-                out.push(character);
-            }
-        }
-        out
-    }
-
-    /// The frontend reads `dashboard.<field>` by name, and nothing checks that
-    /// the field exists. `rangeLabel` was read for two releases while `Dashboard`
-    /// had no such field, so both charts were titled "Top models (undefined)" —
-    /// and a hand-written test fixture that *did* set `rangeLabel` hid it.
-    ///
-    /// This parses the struct's field list out of this file and every
-    /// `dashboard.<name>` out of the frontend, and fails on anything unmatched.
+    /// The window is a webview, and `tauri::generate_context!` embeds
+    /// `frontendDist` at **compile** time. Without a `tsc` run the build still
+    /// succeeds and the window renders nothing at all — so this reads the emitted
+    /// entry point, and `include_str!` fails to compile when it is absent.
     #[test]
-    fn the_frontend_only_reads_dashboard_fields_that_exist() {
-        let source = include_str!("lib.rs");
-        let start = source.find("struct Dashboard {").expect("Dashboard struct");
-        let body = &source[start..];
-        let body = &body[..body.find("\n}").expect("end of struct")];
-        let declared: Vec<String> = body
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
-            .filter_map(|line| line.split_once(':').map(|(name, _)| name.trim()))
-            .filter(|name| {
-                !name.is_empty()
-                    && name
-                        .chars()
-                        .all(|character| character.is_ascii_lowercase() || character == '_')
-            })
-            .map(camel)
-            .collect();
+    fn the_frontend_is_built() {
+        let entry = include_str!("../../ui/app/js/main.js");
         assert!(
-            declared.len() > 15,
-            "parsed only {} fields, so the parse is wrong: {declared:?}",
-            declared.len()
-        );
-
-        let mut missing: Vec<String> = Vec::new();
-        for (file, source) in [
-            ("usage.js", include_str!("../../ui/app/usage.js")),
-            ("app.js", include_str!("../../ui/app/app.js")),
-        ] {
-            for line in source.lines() {
-                // Comments talk about these names too.
-                let line = line.split("//").next().unwrap_or("");
-                let mut rest = line;
-                while let Some(at) = rest.find("dashboard.") {
-                    rest = &rest[at + "dashboard.".len()..];
-                    let name: String = rest
-                        .chars()
-                        .take_while(|c| c.is_ascii_alphanumeric())
-                        .collect();
-                    if name.is_empty() {
-                        continue;
-                    }
-                    if !declared.contains(&name) {
-                        missing.push(format!("{file}: dashboard.{name}"));
-                    }
-                }
-            }
-        }
-        missing.sort();
-        missing.dedup();
-        assert!(
-            missing.is_empty(),
-            "the frontend reads dashboard fields that Dashboard does not send, which \
-             renders as `undefined`: {missing:?}"
+            entry.contains("boot"),
+            "ui/app/js/main.js is not the built entry point; run `npm run build` in ui/"
         );
     }
+
+    // The frontend's view of the wire is checked by TypeScript now
+    // (`ui/app/src/types.ts`) — the job this test did by parsing JavaScript for
+    // `dashboard.<field>` strings. A field read that Rust does not send is a
+    // compile error at every use, rather than a test kept in step by hand. It also
+    // never covered the `usage` entries, which is how `providerName` was read as
+    // `provider_name` and silently fell through to a fallback.
 
     /// The bug this replaced: a ladder of fixed small steps meant a large span
     /// landed on 500k and produced a gridline every 500k — 7,306 of them on a

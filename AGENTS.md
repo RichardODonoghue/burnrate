@@ -12,10 +12,32 @@ Windows would not boot. Tauri gives one UI codebase, a real tray library and
   `rewrite/tauri`; `main` keeps the working Swift app until parity is proven.
   Cutover = one PR from `rewrite/tauri` into `main`.
 - Layout: `crates/burnrate-core/` (pure Rust, no Tauri/UI deps, all logic and
-  tests), `src-tauri/` (tray, windows, commands, settings), `ui/app/`
-  (frontend, hand-written for now — Vite comes with the dashboard and will emit
-  into `ui/app/`; note the repo ignores any directory named `dist`, so the
-  frontend path deliberately is not called `dist`).
+  tests), `src-tauri/` (tray, windows, commands, settings), `ui/` (the frontend).
+- **The frontend is TypeScript emitted as native ES modules — no bundler.** The
+  webview resolves the imports itself, which is why `tsconfig` uses
+  `module`/`moduleResolution: NodeNext`: it *enforces* the `.js` extension in
+  relative imports at compile time, and `bundler` would let `./dom` through and
+  the browser would 404 on it. `ui/package.json`'s only devDependency is
+  `typescript`; the whole point of this shape is that npm's dependency tree is one
+  package rather than the several hundred a bundler plus a framework pulls in.
+  - `ui/app/src/*.ts` → `ui/app/js/*.js` (gitignored). `ui/app/index.html` loads
+    `./js/main.js` as a module; `frontendDist` stays `../ui/app`.
+  - `ui/tests/harness.mjs` loads the **emitted** modules against a stubbed DOM and
+    IPC and asserts the markup. Run `npm run build` first. It replaced a DOM stub
+    that loaded the old JavaScript with `eval`, which could not see a script that
+    failed to load at all.
+  - `main.ts` is the only module with load-time side effects, so the harness can
+    import everything else without booting the app.
+  - Panes are leaves: they import `store`/`dom`/`ui`/`charts` and never the shell.
+    The shell passes them a `PaneContext` (reload, selectWindow) rather than the
+    modules importing each other in a cycle.
+- **`tsc` must run before `cargo build`/`cargo test`.** `tauri::generate_context!`
+  embeds `frontendDist` at compile time, so a build without the emitted frontend
+  succeeds and ships a window that renders nothing. `tauri.conf.json` sets
+  `beforeBuildCommand`/`beforeDevCommand`; CI builds the frontend before every job
+  that compiles the app; and `src-tauri/src/lib.rs` has a test that `include_str!`s
+  the emitted entry point so a missing build is a compile error. A fresh clone
+  therefore needs `npm ci && npm run build` in `ui/` before `cargo test`.
 - The Swift `BurnRateCore` tests (111) are the parity spec: port them 1:1 and
   tick them off in `PARITY.md`. Do not "improve" behaviour while porting.
 - Linux specifics that cost us time once, recorded so they are not re-learned:
@@ -42,7 +64,10 @@ Windows would not boot. Tauri gives one UI codebase, a real tray library and
     `/org/ayatana/NotificationItem/tray_icon_tray_app_widget_Claude`.
 - Commands: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy
   --workspace --all-targets -- -D warnings`, `cargo fmt --all`, and
-  `scripts/tauri-smoke.sh` (Docker; the Gate 0 tray check).
+  `scripts/tauri-smoke.sh` (Docker; the Gate 0 tray check). Frontend:
+  `npm ci`, `npm run build`, `npm run typecheck`, `npm test` — all from `ui/`.
+  `scripts/tauri-smoke.sh` builds the frontend on the host first, because the
+  container has no node.
 - **Run the app with `tauri dev`.** Do not also launch
   `target/debug/bundle/macos/BurnRate Tauri.app/Contents/MacOS/burnrate-desktop`:
   both write the same `target/debug/` binary and the second instance gives you

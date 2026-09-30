@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // No bundler: the webview resolves every import itself, so specifiers must be
+    // real paths with real extensions. `NodeNext` is what enforces that at
+    // compile time — `bundler` would happily let `./dom` through, and the browser
+    // would 404 on it.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "app/src",
+    "outDir": "app/js",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["app/src/**/*.ts"]
+}
