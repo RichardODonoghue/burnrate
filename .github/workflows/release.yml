@@ -1,10 +1,11 @@
 name: Release
 
 # Three entry points:
-#  - push of a semver tag (manual tags)
-#  - workflow_dispatch with an explicit tag, for backfilling an existing release
-#    (and with `dry_run` to build every platform's bundles without touching the
-#    release at all — the way to check packaging changes)
+#  - push of a semver tag
+#  - workflow_dispatch, for backfilling an existing release (pass its tag) or for
+#    checking packaging (leave the tag blank and set `dry_run` — the dispatched
+#    ref is then what gets built, so a release change can be exercised on a
+#    branch without creating a release)
 #  - workflow_call from release-please.yml
 #
 # Why the explicit call: release-please creates its tag with GITHUB_TOKEN, and
@@ -12,9 +13,17 @@ name: Release
 # fires this workflow, which is why v0.2.0 shipped with no assets.
 # release-please.yml therefore invokes this workflow directly.
 #
+# The version comes from `[workspace.package] version` in Cargo.toml — the single
+# source, which release-please bumps — and never from the tag. Naming the
+# artifacts after what was actually built means a dry run on a branch still
+# produces sensibly named files, and the tag is then checked *against* the
+# version rather than trusted. A macOS check additionally confirms the built
+# bundle agrees, which is what catches `tauri.conf.json` growing a `version` field
+# back and silently overriding the crate version.
+#
 # Builds are split per OS and a final job publishes every artifact plus one
 # combined SHA256SUMS. The macOS app is **ad-hoc signed and not notarised**, so
-# Gatekeeper quarantines it on first launch — README explains the two ways past
+# Gatekeeper quarantines it on first launch; README explains the two ways past
 # that. Nothing here needs a signing identity, and no secrets are required.
 
 on:
@@ -23,8 +32,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and attach assets to (e.g. v0.9.0)"
-        required: true
+        description: "Tag to build and attach assets to. Blank builds the dispatched ref instead."
+        required: false
         type: string
       dry_run:
         description: "Build the bundles but do not touch the release"
@@ -52,13 +61,6 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve tag and version
-        id: v
-        run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -69,6 +71,22 @@ jobs:
         with:
           workspaces: . -> target
 
+      - &resolve-version
+        name: Resolve the version, and check the tag against it
+        id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=$(cargo metadata --no-deps --format-version 1 --quiet \
+                 | jq -r '.packages[] | select(.name == "burnrate-desktop") | .version')
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          TAG="${{ inputs.tag }}"
+          if [ -n "$TAG" ] && [ "${TAG#v}" != "$VER" ]; then
+            echo "::error::tag $TAG does not match the Cargo.toml version $VER"
+            exit 1
+          fi
+          echo "building version $VER (tag '${TAG:-none}')"
+
       - name: Install the frontend
         working-directory: ui
         run: npm ci
@@ -76,19 +94,17 @@ jobs:
       - name: Build and bundle
         run: ${{ env.TAURI_CLI }} build --bundles app,dmg
 
-      # The app's version comes from `[workspace.package] version`, which is what
-      # release-please bumps — so the tagged tree must already carry the tag's
-      # version. Check rather than assume: a mismatch here means the release would
-      # ship a bundle whose version disagrees with its own tag.
-      - name: Check the bundle version matches the tag
+      # The bundle's version must be the crate's. It is, unless `version` has been
+      # put back into tauri.conf.json, which overrides it.
+      - name: Check the bundle carries that version
         env:
           VER: ${{ steps.v.outputs.version }}
         run: |
           APP=$(ls -d target/release/bundle/macos/*.app)
           BUNDLE_VER=$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")
-          echo "tag=$VER  bundle=$BUNDLE_VER"
+          echo "cargo=$VER  bundle=$BUNDLE_VER"
           [ "$BUNDLE_VER" = "$VER" ] || {
-            echo "::error::$APP says $BUNDLE_VER but the tag is $VER"
+            echo "::error::$APP says $BUNDLE_VER but Cargo.toml says $VER"
             exit 1
           }
 
@@ -116,12 +132,6 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve version
-        id: v
-        run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -131,6 +141,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+
+      - *resolve-version
 
       # WebKitGTK for the webview; GTK3 + libayatana for the tray-icon backend.
       - name: Install system deps
@@ -169,14 +181,6 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve version
-        id: v
-        shell: pwsh
-        run: |
-          $tag = "${{ inputs.tag }}"
-          if ([string]::IsNullOrEmpty($tag)) { $tag = "${{ github.ref_name }}" }
-          "version=$($tag.TrimStart('v'))" >> $env:GITHUB_OUTPUT
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -186,6 +190,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+
+      - *resolve-version
 
       - name: Install the frontend
         working-directory: ui

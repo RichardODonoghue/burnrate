@@ -1,0 +1,83 @@
+{
+  "": {
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/primary.swiftdeps"
+  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/AppDelegate.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/AppDelegate.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/AppDelegate.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/AppDelegate~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/AppDelegate.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/AppDelegate.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/Card.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Card.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Card.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Card~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Card.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Card.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/GitHubMark.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/GitHubMark.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/GitHubMark.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/GitHubMark~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/GitHubMark.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/GitHubMark.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/Icons.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Icons.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Icons.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Icons~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Icons.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Icons.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/ModelsView.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/ModelsView.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/ModelsView.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/ModelsView~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/ModelsView.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/ModelsView.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/PlatformMacOS.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PlatformMacOS.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PlatformMacOS.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PlatformMacOS~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PlatformMacOS.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PlatformMacOS.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/PresentationMacOS.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PresentationMacOS.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PresentationMacOS.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PresentationMacOS~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PresentationMacOS.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/PresentationMacOS.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/Settings.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Settings.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Settings.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Settings~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Settings.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Settings.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/SettingsView.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/SettingsView.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/SettingsView.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/SettingsView~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/SettingsView.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/SettingsView.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/StatusItemManager.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/StatusItemManager.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/StatusItemManager.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/StatusItemManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/StatusItemManager.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/StatusItemManager.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/Updater.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Updater.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Updater.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Updater~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Updater.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/Updater.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/UsageStore.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/UsageStore.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/UsageStore.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/UsageStore~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/UsageStore.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/UsageStore.dia"  },
+  "/Users/richard/Development/ai-usage-tracker-mac-osx/Sources/BurnRate/main.swift": {
+    "dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/main.d",
+    "object": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/main.swift.o",
+    "swiftmodule": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/main.swiftdeps",
+    "diagnostics": "/Users/richard/Development/ai-usage-tracker-mac-osx/.build/index-build/arm64-apple-macosx/debug/BurnRate.build/main.dia"  }
+}
