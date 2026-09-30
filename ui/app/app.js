@@ -795,7 +795,6 @@ async function main() {
   // The app icon comes from the Rust renderer, not a file path: the bundled
   // icons live outside the served ui/app directory.
   el("brand-icon").src = await invoke("app_icon_data_url", { edge: 56 });
-  el("brand-sub").textContent = "menu bar";
   await refresh();
   // The shell's heartbeat is what drives the tick; mirror it here.
   setInterval(refresh, 5000);

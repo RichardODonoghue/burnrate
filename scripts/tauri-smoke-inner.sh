@@ -97,6 +97,15 @@ registered() {
     "$WATCHER_NAME" RegisteredStatusNotifierItems 2>/dev/null || true
 }
 
+# Counting must not be able to fail. `grep` exits 1 when nothing matches, and
+# this runs under `set -e` with `pipefail`, so an empty watcher list — which is
+# what the very first poll always sees — killed the script outright instead of
+# letting the wait loop try again. It went unnoticed because the tray used to
+# register inside the first second.
+count_items() {
+  printf '%s' "$1" | grep -oE ':[0-9]+\.[0-9]+' | wc -l || true
+}
+
 # Wait for the three registrations instead of sleeping blindly.
 ITEMS=""
 COUNT=0
@@ -104,7 +113,7 @@ for _ in $(seq 1 30); do
   sleep 1
   kill -0 "$APP_PID" 2>/dev/null || fail "app exited early"
   ITEMS=$(registered)
-  COUNT=$(printf '%s' "$ITEMS" | grep -oE ':[0-9]+\.[0-9]+' | wc -l)
+  COUNT=$(count_items "$ITEMS")
   [ "$COUNT" -ge 2 ] && break
 done
 
