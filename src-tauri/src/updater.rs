@@ -274,20 +274,29 @@ pub fn replace_bundle(current: &Path, new: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-/// Relaunches once this process is gone.
+/// The script that waits for this process to exit and then reopens the app.
 ///
-/// The wait matters: launching immediately would leave two copies running, and
-/// the single-instance guard would kill the new one.
+/// The bundle path is **not** interpolated into it. It arrives as `$1`, so a path
+/// containing a quote, `$( )` or a semicolon is ordinary text to the shell rather
+/// than syntax — interpolating it would make the install directory a command
+/// injection, since the updater runs this on the way out.
+///
+/// The wait itself matters: opening immediately would leave two copies running,
+/// and the single-instance guard would then kill the new one.
+#[cfg(any(target_os = "macos", test))]
+fn relaunch_script(pid: u32) -> String {
+    format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$1\"")
+}
+
+/// Relaunches once this process is gone.
+#[cfg(target_os = "macos")]
 fn relaunch_after_exit(bundle: &Path) -> Result<(), String> {
-    let pid = std::process::id();
-    let script = format!(
-        "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"{}\"",
-        bundle.display()
-    );
     Command::new("/bin/sh")
         .arg("-c")
-        .arg(script)
+        .arg(relaunch_script(std::process::id()))
+        // `$0` for the shell, then the path as `$1`.
+        .arg("sh")
+        .arg(bundle)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -375,6 +384,44 @@ mod tests {
             std::fs::read_to_string(current.join("Contents/version")).expect("read"),
             "old",
             "the original bundle must be back in place"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bundle path is passed as `$1`, so a hostile install directory is
+    /// inert. This exercises the real mechanism through `sh`, with the wait and
+    /// the `open` replaced by something harmless.
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_bundle_path_is_not_executed() {
+        let dir = std::env::temp_dir().join(format!("burnrate-hostile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let marker = dir.join("marker");
+        let hostile = dir.join(format!(
+            "$(touch {m})`touch {m}`;touch {m}",
+            m = marker.display()
+        ));
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("printf %s \"$1\"")
+            .arg("sh")
+            .arg(&hostile)
+            .output()
+            .expect("sh runs");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            hostile.to_string_lossy(),
+            "the path must arrive verbatim"
+        );
+        assert!(!marker.exists(), "the path was executed as shell text");
+
+        let script = relaunch_script(4242);
+        assert!(script.contains("kill -0 4242"), "{script}");
+        assert!(
+            script.contains("\"$1\""),
+            "the path arrives as an argument: {script}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

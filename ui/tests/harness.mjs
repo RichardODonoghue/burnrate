@@ -216,6 +216,7 @@ const snapshot = {
   remaining: 73,
   appVersion: "1.0.0",
   coreVersion: "1.0.0",
+  settingsPath: "/Users/someone/Library/Application Support/BurnRate/settings.json",
   updateAvailable: null,
   updateState: "up to date (1.0.0)",
   updateBusy: false,

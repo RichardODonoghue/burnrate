@@ -11,7 +11,12 @@
 //!
 //! Nothing is installed unless the checksum matches: a release that publishes no
 //! `SHA256SUMS`, or does not list the file being installed, is refused rather
-//! than trusted.
+//! than trusted. Asset URLs are additionally pinned to GitHub's hosts, so a
+//! manipulated API response cannot redirect the download.
+//!
+//! A checksum served by the same release is not a signature. The anchor is HTTPS
+//! to GitHub, so a compromised account or release could still ship a malicious
+//! update — see the release notes in AGENTS.md for what closing that needs.
 
 use std::collections::HashMap;
 
@@ -26,6 +31,33 @@ pub const LATEST_RELEASE_API: &str =
 pub const RELEASES_PAGE: &str = "https://github.com/RichardODonoghue/burnrate/releases/latest";
 /// The asset the download is checked against.
 pub const CHECKSUM_ASSET: &str = "SHA256SUMS";
+/// Where a release asset may be fetched from.
+///
+/// Pinning the host means a manipulated API response cannot redirect the download
+/// elsewhere. The checksum would still have to match, so this is defence in
+/// depth rather than the load-bearing check — but there is no reason to fetch a
+/// release from anywhere else.
+const ASSET_HOSTS: [&str; 2] = ["github.com", "objects.githubusercontent.com"];
+
+/// The host of an `https` URL, or `None` if it is not one or carries userinfo.
+///
+/// Deliberately not a full URL parser: what matters is that the authority is
+/// taken from before the first `/`, `?` or `#` — an `@` later in the string is
+/// part of the *path*, not a different host.
+fn host_of(url: &str) -> Option<&str> {
+    let authority = url
+        .strip_prefix("https://")?
+        .split(['/', '?', '#'])
+        .next()?;
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    Some(authority)
+}
+
+fn is_github_url(url: &str) -> bool {
+    host_of(url).is_some_and(|host| ASSET_HOSTS.contains(&host))
+}
 /// Re-check at most this often while running.
 pub const CHECK_INTERVAL_SECONDS: i64 = 24 * 3600;
 
@@ -146,9 +178,19 @@ pub fn parse_release(json: &[u8]) -> Option<Release> {
         .collect();
 
     let zip = select_zip_asset(&assets)?;
+    // A release whose assets are not served by GitHub is not offered at all.
+    if !is_github_url(&zip.url) {
+        return None;
+    }
     let checksums = assets
         .into_iter()
         .find(|asset| asset.name == CHECKSUM_ASSET);
+    if checksums
+        .as_ref()
+        .is_some_and(|asset| !is_github_url(&asset.url))
+    {
+        return None;
+    }
     Some(Release {
         version: normalized_version(&tag),
         tag,
@@ -347,9 +389,9 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *BurnRate-0.2.0
             "tag_name": "v0.8.1",
             "html_url": "https://github.com/RichardODonoghue/burnrate/releases/tag/v0.8.1",
             "assets": [
-                {"name": "BurnRate-0.8.1-amd64.deb", "browser_download_url": "https://example.com/a.deb"},
-                {"name": "BurnRate-0.8.1-arm64.zip", "browser_download_url": "https://example.com/a.zip"},
-                {"name": "SHA256SUMS", "browser_download_url": "https://example.com/sums"}
+                {"name": "BurnRate-0.8.1-amd64.deb", "browser_download_url": "https://github.com/RichardODonoghue/burnrate/releases/download/v0.8.1/a.deb"},
+                {"name": "BurnRate-0.8.1-arm64.zip", "browser_download_url": "https://github.com/RichardODonoghue/burnrate/releases/download/v0.8.1/a.zip"},
+                {"name": "SHA256SUMS", "browser_download_url": "https://github.com/RichardODonoghue/burnrate/releases/download/v0.8.1/sums"}
             ]
         }"#;
         let release = parse_release(json).expect("parses");
@@ -372,6 +414,36 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *BurnRate-0.2.0
     #[test]
     fn malformed_json_is_not_offered() {
         assert!(parse_release(b"not json").is_none());
+    }
+
+    /// The download URL decides where the bytes come from, so an asset pointed
+    /// anywhere but GitHub is not offered at all — even if everything else about
+    /// the release looks right.
+    #[test]
+    fn a_release_pointing_off_github_is_refused() {
+        let elsewhere = br#"{"tag_name":"v9.9.9","html_url":"https://github.com/x/y","assets":[
+            {"name":"BurnRate-9.9.9-arm64.zip","browser_download_url":"https://evil.example/z.zip"},
+            {"name":"SHA256SUMS","browser_download_url":"https://github.com/x/y/releases/download/v9.9.9/s"}]}"#;
+        assert!(parse_release(elsewhere).is_none(), "zip off GitHub");
+
+        let sums_elsewhere = br#"{"tag_name":"v9.9.9","html_url":"https://github.com/x/y","assets":[
+            {"name":"BurnRate-9.9.9-arm64.zip","browser_download_url":"https://github.com/x/y/releases/download/v9.9.9/z.zip"},
+            {"name":"SHA256SUMS","browser_download_url":"https://evil.example/sums"}]}"#;
+        assert!(parse_release(sums_elsewhere).is_none(), "sums off GitHub");
+
+        // A plain-http or lookalike host is not GitHub either.
+        assert!(!is_github_url("http://github.com/x/y"));
+        assert!(!is_github_url("https://github.com.evil.example/x/y"));
+        // An `@` after the first slash is part of the path, not a different host.
+        assert!(is_github_url(
+            "https://github.com/RichardODonoghue/burnrate@evil.example"
+        ));
+        assert_eq!(
+            host_of("https://github.com/RichardODonoghue/burnrate@evil.example"),
+            Some("github.com")
+        );
+        // Userinfo before the host is a different host, and is refused.
+        assert!(!is_github_url("https://evil.example@github.com/x"));
     }
 
     // ---- verification ----
@@ -469,7 +541,7 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *BurnRate-0.2.0
     #[test]
     fn a_latest_release_is_parsed_through_the_client() {
         let client = Stub {
-            body: Ok(r#"{"tag_name":"v1.0.0","html_url":"https://example.com","assets":[{"name":"BurnRate-1.0.0-arm64.zip","browser_download_url":"https://example.com/z"}]}"#.into()),
+            body: Ok(r#"{"tag_name":"v1.0.0","html_url":"https://example.com","assets":[{"name":"BurnRate-1.0.0-arm64.zip","browser_download_url":"https://github.com/RichardODonoghue/burnrate/releases/download/v1.0.0/z"}]}"#.into()),
         };
         let release = fetch_latest(&client).expect("ok").expect("a release");
         assert_eq!(release.version, "1.0.0");

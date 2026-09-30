@@ -44,7 +44,6 @@ export interface SnapshotQuery {
 export const api = {
   snapshot: (query: SnapshotQuery): Promise<Snapshot> => invoke("snapshot", { ...query }),
   knownProviders: (): Promise<string[]> => invoke("known_providers"),
-  settingsFilePath: (): Promise<string> => invoke("settings_file_path"),
   modelColours: (): Promise<Record<string, string>> => invoke("model_colours"),
   appIconDataUrl: (edge: number): Promise<string> => invoke("app_icon_data_url", { edge }),
   refreshNow: (): Promise<void> => invoke("refresh_now"),
