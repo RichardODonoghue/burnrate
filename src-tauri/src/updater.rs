@@ -2,14 +2,12 @@
 //!
 //! `burnrate_core::updater` decides whether an update exists and verifies the
 //! download against the release's own `SHA256SUMS`; this is the part that touches
-//! the filesystem. Ported from `Updater.swift` in the Swift app, which did the
-//! same thing for the same reason: ad-hoc signed builds have no stable identity
-//! for a framework like Sparkle to validate against, so the release's published
-//! checksum is the trust anchor.
+//! the filesystem. Ad-hoc signed builds have no stable identity for a framework
+//! like Sparkle to validate against, so the release's published checksum is the
+//! trust anchor.
 //!
-//! In-place install is macOS only, matching the Swift build — it replaces the
-//! running `.app` and relaunches. Elsewhere the update is reported and the
-//! release page is opened instead.
+//! In-place install is macOS only: it replaces the running `.app` and relaunches.
+//! Elsewhere the update is reported and the release page is opened instead.
 //!
 //! The install is staged before anything is moved: download, verify, unpack and
 //! *validate* (bundle id, version, code signature) all have to pass before the

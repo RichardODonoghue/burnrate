@@ -1,10 +1,5 @@
 //! Alert rules and the pure evaluators behind milestone, burn-rate and daily
 //! cost notifications.
-//!
-//! Ported 1:1 from the Swift app's `Alerts.swift` and `AlertDefaults.swift`.
-//! Parity tests: `MilestoneEvaluatorTests`, `BurnRateEvaluatorTests`,
-//! `MilestoneNotifierTests`.
-
 use serde::{Deserialize, Serialize};
 
 /// One notification rule: notify each time a provider window's remaining %
@@ -269,7 +264,7 @@ mod tests {
         assert!(MilestoneEvaluator::thresholds(100.0).is_empty());
     }
 
-    /// `crossesOnExactLanding` — landing exactly on a level counts.
+    /// Landing exactly on a level counts.
     #[test]
     fn crosses_on_exact_landing() {
         assert_eq!(
@@ -278,7 +273,7 @@ mod tests {
         );
     }
 
-    /// `crossesDownPastLevel` — a big drop reports the highest level crossed.
+    /// A big drop reports the highest level crossed.
     #[test]
     fn crosses_down_past_level() {
         assert_eq!(
@@ -287,7 +282,7 @@ mod tests {
         );
     }
 
-    /// `noCrossWhenStillAbove` — staying above every level never fires.
+    /// Staying above every level never fires.
     #[test]
     fn no_cross_when_still_above() {
         assert_eq!(
@@ -296,7 +291,7 @@ mod tests {
         );
     }
 
-    /// `noCrossWhenRecoveringAboveLevel` — going up is not a crossing.
+    /// Going up is not a crossing.
     #[test]
     fn no_cross_when_recovering_above_level() {
         assert_eq!(
@@ -305,13 +300,12 @@ mod tests {
         );
     }
 
-    /// `noFireOnFirstObservation` — no previous reading means no crossing.
+    /// No previous reading means no crossing.
     #[test]
     fn no_fire_on_first_observation() {
         assert_eq!(MilestoneEvaluator::crossed_threshold(None, 5.0, 10.0), None);
     }
 
-    /// `duplicatesCollapseToOneRuleKeepingSmallestStep`.
     #[test]
     fn duplicates_collapse_to_one_rule_keeping_smallest_step() {
         let merged = Milestone::coalesce(&[
@@ -324,7 +318,7 @@ mod tests {
         assert_eq!(rolling.step, 10.0);
     }
 
-    /// `burns_fires_on_fast_drop` — a 20-point drop in 30 minutes.
+    /// A 20-point drop in 30 minutes.
     #[test]
     fn fires_on_fast_drop() {
         let alert = BurnAlert::new("Claude", "Rolling", 15.0, 30);
@@ -344,7 +338,7 @@ mod tests {
         assert_eq!(found.current, 55.0);
     }
 
-    /// `noFireOnSlowBurn` — the same drop spread over too long never fires.
+    /// The same drop spread over too long never fires.
     #[test]
     fn no_fire_on_slow_burn() {
         let alert = BurnAlert::new("Claude", "Rolling", 15.0, 30);
@@ -363,7 +357,7 @@ mod tests {
         assert!(BurnRateEvaluator::detect(&history, &alert, NOW, 300).is_none());
     }
 
-    /// `noFireWithTooLittleHistory` — a fresh app has no baseline.
+    /// A fresh app has no baseline.
     #[test]
     fn no_fire_with_too_little_history() {
         let alert = BurnAlert::new("Claude", "Rolling", 15.0, 30);
@@ -375,7 +369,7 @@ mod tests {
         assert!(BurnRateEvaluator::detect(&[], &alert, NOW, 300).is_none());
     }
 
-    /// `noFireWhenRemainingIncreases` — usage going down is not a burn.
+    /// Usage going down is not a burn.
     #[test]
     fn no_fire_when_remaining_increases() {
         let alert = BurnAlert::new("Claude", "Rolling", 15.0, 30);
@@ -392,7 +386,7 @@ mod tests {
         assert!(BurnRateEvaluator::detect(&history, &alert, NOW, 300).is_none());
     }
 
-    /// `ignoresHistoryOlderThanWindow` — readings before the window are skipped.
+    /// Readings before the window are skipped.
     #[test]
     fn ignores_history_older_than_window() {
         let alert = BurnAlert::new("Claude", "Rolling", 15.0, 30);
@@ -418,7 +412,6 @@ mod tests {
         );
     }
 
-    /// `emptyHistoryNeverFires`.
     #[test]
     fn empty_history_never_fires() {
         let alert = BurnAlert::new("Claude", "Rolling", 15.0, 30);

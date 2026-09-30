@@ -1,10 +1,9 @@
 //! Finding and verifying a newer release.
 //!
-//! Ported from `Updater.swift` in the Swift app, whose behaviour is the spec:
-//! ask GitHub for the latest release, pick the arm64 zip, and verify the download
-//! against the release's own `SHA256SUMS` before it is allowed anywhere near the
-//! running bundle. Deliberately not Sparkle — we ship ad-hoc signed builds, which
-//! Sparkle cannot validate against an update feed.
+//! Asks GitHub for the latest release, picks the arm64 zip, and verifies the
+//! download against the release's own `SHA256SUMS` before it is allowed anywhere
+//! near the running bundle. Deliberately not Sparkle: these are ad-hoc signed
+//! builds, which Sparkle cannot validate against an update feed.
 //!
 //! Only the *decision* and the *verification* live here, because both are pure
 //! and worth testing. Unpacking, swapping the bundle and relaunching are OS
@@ -109,9 +108,8 @@ pub fn parse_checksums(text: &str) -> HashMap<String, String> {
 
 /// The arm64 zip, preferring an exact architecture match.
 ///
-/// The Swift build was arm64-only, so this was the whole story; it still prefers
-/// arm64 and falls back to any zip, which is what keeps a future x64 or universal
-/// asset from being ignored.
+/// Prefers the arm64 asset and falls back to any zip, so an x64 or universal
+/// asset would not be ignored.
 pub fn select_zip_asset(assets: &[Asset]) -> Option<Asset> {
     let zips: Vec<&Asset> = assets
         .iter()

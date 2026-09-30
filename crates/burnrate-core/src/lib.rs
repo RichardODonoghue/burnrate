@@ -2,9 +2,7 @@
 //!
 //! Everything here is pure Rust with no Tauri, UI or OS-framework dependency:
 //! local log parsing, vendor quota APIs, throttling, alert evaluation, chart
-//! aggregation. Ported 1:1 from the Swift `BurnRateCore` target. That app is gone
-//! (Sep 2026), so the module comments that name its files are provenance, not
-//! live references.
+//! aggregation.
 
 pub mod alerts;
 pub mod charts;
@@ -59,7 +57,7 @@ mod tests {
         assert!(!caps.keys().any(|key| key.starts_with("Claude")));
     }
 
-    /// `codexLocalProviderProducesRemainingPercent` — the end-to-end shape a
+    /// The end-to-end shape a
     /// local provider produces, which is why the capacities exist.
     #[test]
     fn codex_local_provider_produces_remaining_percent() {

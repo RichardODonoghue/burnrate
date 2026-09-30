@@ -1,9 +1,8 @@
 //! Platform seams: filesystem locations, credential reading, and SQLite.
 //!
-//! Ported 1:1 from the Swift app's `Platform.swift`, with one deliberate
-//! change: SQLite is linked (`rusqlite`, bundled) rather than shelled out to
-//! `/usr/bin/sqlite3`, because that binary is not present on a stock Fedora or
-//! Debian install and its absence used to look like "no usage found".
+//! SQLite is linked (`rusqlite`, bundled) rather than shelled out to
+//! `/usr/bin/sqlite3`: that binary is absent on a stock Fedora or Debian
+//! install, and its absence reads as "no usage found" rather than as an error.
 
 use std::path::{Path, PathBuf};
 
@@ -272,7 +271,7 @@ mod tests {
         dir
     }
 
-    /// `fileManagerPathsAppendsAppName` — the per-app directory is nested.
+    /// The per-app directory is nested.
     #[test]
     fn app_directory_is_under_application_support() {
         let home = temp_home("appdir");

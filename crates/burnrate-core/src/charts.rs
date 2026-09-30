@@ -1,13 +1,8 @@
 //! Chart domains, ticks and lookups for the dashboard.
 //!
-//! Ported 1:1 from the Swift app's `ChartData.swift`. This module is what
-//! the UI turns into pixels and nothing more: the Swift build drew its charts
-//! with Swift Charts, which we do not have, so the maths lives here and the
-//! frontend only lays out and strokes. Getting these rules right is the whole
-//! job — the first port drew a 0–100 line chart with five gridlines and looked
-//! nothing like the Swift app.
-//!
-//! The rules, all of which the first port got wrong:
+//! This module is what the UI turns into pixels and nothing more: the maths lives
+//! here and the frontend only lays out and strokes. Getting these rules right is
+//! the whole job:
 //!   - the X domain **scales down to the data**, so an hour of history in a
 //!     7-day range plots that hour instead of leaving 6.9 empty days;
 //!   - tick *style* follows the **visible span**, not the selected range, so a
@@ -19,7 +14,6 @@
 //!
 //! The daily and ranking windows are not here: they are computed in `src-tauri`
 //! alongside the dashboard snapshot, which is where their tick tests live.
-
 use crate::formatting::TokenFormat;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -37,7 +31,7 @@ pub enum ChartRange {
 }
 
 impl ChartRange {
-    /// The label the Swift build shows, and the order the picker uses.
+    /// The label shown to the user, and the order the picker uses.
     pub fn label(self) -> &'static str {
         match self {
             ChartRange::Today => "24h",
@@ -468,7 +462,6 @@ mod tests {
         assert_eq!(ChartRange::from_label("nope"), None);
     }
 
-    /// `tickStyleFollowsVisibleSpanNotSelectedRange`.
     #[test]
     fn tick_style_follows_the_visible_span() {
         assert!(TrendChartData::trend_x_hourly(2 * 3600));
@@ -490,7 +483,7 @@ mod tests {
         assert_eq!(TrendChartData::trend_hour_stride(3 * DAY), 12);
     }
 
-    /// `xDomainShrinksToAvailableData` — the fix for a 7d range showing six
+    /// The fix for a 7d range showing six
     /// empty days when there is an hour of history.
     #[test]
     fn x_domain_shrinks_to_available_data() {
@@ -533,8 +526,8 @@ mod tests {
         assert_eq!(ticks[0], 0.0);
         assert_eq!(ticks[ticks.len() - 1], 100.0);
 
-        // A domain too narrow for three multiples falls back to the two bounds,
-        // as the Swift build does rather than drawing a bare chart.
+        // A domain too narrow for three multiples falls back to the two bounds
+        // rather than drawing a bare chart.
         let narrow = TrendChartData::y_ticks((47.0, 53.0));
         assert_eq!(narrow, vec![47.0, 53.0]);
 
@@ -543,7 +536,6 @@ mod tests {
         assert_eq!(mid, vec![40.0, 50.0, 60.0, 70.0]);
     }
 
-    /// `tickDatesAreMidnightsAndNoonsInSpan`.
     #[test]
     fn tick_dates_are_midnights_and_noons() {
         let ticks = TrendChartData::trend_tick_dates(NOW - 3 * DAY, NOW, UTC);
@@ -566,7 +558,6 @@ mod tests {
             .contains(&TrendChartData::trend_tick_label(*midnight, UTC).as_str()));
     }
 
-    /// `nearestPointBinarySearchesSortedSamples`.
     #[test]
     fn nearest_point_binary_searches() {
         let points = vec![(0, 10.0), (100, 20.0), (200, 30.0)];
@@ -582,7 +573,7 @@ mod tests {
         assert_eq!(TrendChartData::nearest_point(&[], 5), None);
     }
 
-    /// `cutoffIsTrailingWindow` — the window behind "now", not a calendar one.
+    /// The window behind "now", not a calendar one.
     #[test]
     fn cutoff_is_a_trailing_window() {
         for range in ChartRange::ALL {
@@ -664,8 +655,8 @@ mod tests {
 
     #[test]
     fn trend_labels_offer_everything_when_there_is_no_history() {
-        // Nothing to plot yet: the Swift build offers the full set, so the
-        // picker is not empty and does not jump when the first sample lands.
+        // Nothing to plot yet: offer the full set, so the picker is not empty and
+        // does not jump when the first sample lands.
         assert_eq!(
             TrendChartData::trend_labels(&[], None, NOW - DAY),
             vec!["Rolling", "Weekly", "Monthly"]
@@ -771,7 +762,7 @@ impl Metric {
     pub const ALL: [Metric; 2] = [Metric::Tokens, Metric::Cost];
 }
 
-/// The eight-colour palette, as 0–255 RGB, in the Swift build's order.
+/// The eight-colour palette, as 0–255 RGB, in a fixed order.
 pub const PALETTE: [(u8, u8, u8); 8] = [
     (217, 120, 87),
     (64, 140, 242),
@@ -785,13 +776,10 @@ pub const PALETTE: [(u8, u8, u8); 8] = [
 
 /// A stable colour for a model name.
 ///
-/// The Swift build used `abs(model.hashValue) % palette.count`, which is
-/// seeded per process, so the same model got a different colour between launches
-/// — and a different one again here, since Rust's `Hash` is randomised too. The
-/// Swift build's chart legends and table were *consistent within a session*,
-/// which is the property that actually matters, so this is an FNV-1a hash:
-/// deterministic, so a model's colour is the same on every launch and on every
-/// platform.
+/// An FNV-1a hash rather than the language's own: `abs(model.hashValue) %
+/// palette.count` is seeded per process, so a model would change colour on every
+/// launch, and Rust's `Hash` is randomised too. Deterministic means a model's
+/// colour is the same on every launch and on every platform.
 pub fn colour_for_model(model: &str) -> (u8, u8, u8) {
     PALETTE[(crate::formatting::stable_hash(model) % PALETTE.len() as u64) as usize]
 }

@@ -1,9 +1,5 @@
 //! Usage model: token counts, samples, quota windows, and the window
 //! computation that turns samples into % remaining.
-//!
-//! Ported 1:1 from the Swift app's `UsageModel.swift`. Parity tests:
-//! `UsageComputationTests`, `UsageSourceTests` (sample decoding).
-
 use serde::{Deserialize, Serialize};
 
 /// Token counts for one usage event.
@@ -308,7 +304,7 @@ mod tests {
         pairs.iter().map(|(k, v)| ((*k).to_string(), *v)).collect()
     }
 
-    /// `percentNilWithoutCapacity` — no capacity means no percentage.
+    /// No capacity means no percentage.
     #[test]
     fn percent_nil_without_capacity() {
         let windows = UsageComputation::windows(
@@ -321,7 +317,7 @@ mod tests {
         assert_eq!(windows[0].tokens_used, 1000);
     }
 
-    /// `percentUsesConfiguredCapacity` — % is computed against the capacity.
+    /// % is computed against the capacity.
     #[test]
     fn percent_uses_configured_capacity() {
         let caps = capacities(&[("Codex|Rolling", 10_000)]);
@@ -343,7 +339,7 @@ mod tests {
             .is_none());
     }
 
-    /// `sumsOnlySamplesInsideWindow` — each window counts only its own span.
+    /// Each window counts only its own span.
     #[test]
     fn sums_only_samples_inside_window() {
         // 1h old: inside Rolling(5h) and Weekly, outside nothing.
@@ -365,7 +361,7 @@ mod tests {
         assert_eq!(get("Monthly"), 300);
     }
 
-    /// `codexRollingCapacityProducesPercent` — cache traffic is weighted, so
+    /// Cache traffic is weighted, so
     /// raw cache reads do not blow past the capacity.
     #[test]
     fn cache_reads_are_weighted_in_percent() {
@@ -395,7 +391,7 @@ mod tests {
         assert_eq!(rolling.percent_remaining, Some(0.0));
     }
 
-    /// `reasoningTokensCountTowardTotals` — reasoning counts in both totals.
+    /// Reasoning counts in both totals.
     #[test]
     fn reasoning_counts_toward_totals() {
         let tokens = TokenUsage::with_reasoning(10, 20, 0, 0, 30);
@@ -403,7 +399,7 @@ mod tests {
         assert_eq!(tokens.weighted(), 60.0);
     }
 
-    /// `weightedTokensDiscountCacheReads` — 0.1x read, 1.25x write.
+    /// 0.1x read, 1.25x write.
     #[test]
     fn weighted_tokens_discount_cache_reads() {
         let tokens = TokenUsage::new(0, 0, 1_000, 1_000);
@@ -411,7 +407,7 @@ mod tests {
         assert_eq!(tokens.total(), 2_000);
     }
 
-    /// `legacyTokenUsageDecodesWithoutReasoning` — older payloads have no
+    /// Older payloads have no
     /// `reasoning` key; serde's `default` covers it.
     #[test]
     fn legacy_token_usage_decodes_without_reasoning() {

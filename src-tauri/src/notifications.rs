@@ -5,11 +5,8 @@
 //! `mac-notification-sys`, which builds an `NSUserNotification` and hands it to
 //! `NSUserNotificationCenter` — the API deprecated in macOS 10.14 and inert on
 //! current releases. Its `show()` also spawns the delivery and discards the
-//! result, so it returns `Ok(())` while nothing is ever displayed. That is what
-//! "notifications do not work" looked like: every log line said accepted.
-//!
-//! The Swift build used `UNUserNotificationCenter`, which is why its banners
-//! worked, and this is the same framework through `objc2`.
+//! result, so it returns `Ok(())` while nothing is ever displayed: every log line
+//! says accepted and no banner appears.
 //!
 //! Every call here blocks on the completion handler with a timeout, because the
 //! whole point is to be able to report what the system actually did.

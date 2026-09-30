@@ -2,13 +2,6 @@
 //!
 //! Pure, so menu contents are testable with no OS UI. Each platform renders
 //! the model (macOS `NSMenu`, Linux DBusMenu, Windows `HMENU`).
-//!
-//! Ported 1:1 from the Swift app's `StatusMenu.swift`. Parity tests:
-//! `StatusMenuTests` — `mainMenuListsProvidersWindowsAndActions`,
-//! `widgetMenuEndsWithRemoveAction`,
-//! `widgetTitlePrefersMonthlyThenFirstWindow`,
-//! `worstRollingRemainingIsMinimumAcrossProviders`, `chartsRowIsOptIn`.
-
 use serde::{Deserialize, Serialize};
 
 use crate::formatting::RelativeTime;
@@ -238,7 +231,7 @@ mod tests {
             .collect()
     }
 
-    /// `mainMenuListsProvidersWindowsAndActions` — provider header, one row per
+    /// Provider header, one row per
     /// window, then the trailing actions.
     #[test]
     fn main_menu_lists_providers_windows_and_actions() {
@@ -282,7 +275,7 @@ mod tests {
         );
     }
 
-    /// `chartsRowIsOptIn` — no Charts row by default; Linux/Windows opt in.
+    /// No Charts row by default; Linux/Windows opt in.
     #[test]
     fn charts_row_is_opt_in() {
         let usage = vec![provider("Codex", None, vec![window("Rolling", Some(50.0))])];
@@ -340,7 +333,7 @@ mod tests {
         assert!(disabled);
     }
 
-    /// `widgetMenuEndsWithRemoveAction` — the remove row is always last.
+    /// The remove row is always last.
     #[test]
     fn widget_menu_ends_with_remove_action() {
         let usage = provider("Claude", None, vec![window("Rolling", Some(70.0))]);
@@ -370,7 +363,7 @@ mod tests {
         );
     }
 
-    /// `widgetTitlePrefersMonthlyThenFirstWindow` — Monthly wins, else the first.
+    /// Monthly wins, else the first.
     #[test]
     fn widget_title_prefers_monthly_then_first_window() {
         let both = provider(
@@ -401,7 +394,7 @@ mod tests {
         );
     }
 
-    /// `worstRollingRemainingIsMinimumAcrossProviders` — drives icon severity.
+    /// Drives icon severity.
     #[test]
     fn worst_rolling_remaining_is_minimum_across_providers() {
         let usage = vec![
