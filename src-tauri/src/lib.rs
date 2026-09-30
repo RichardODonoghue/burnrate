@@ -31,7 +31,7 @@ use burnrate_core::formatting::TokenFormat;
 use burnrate_core::menu::{StatusMenuAction, StatusMenuBuilder, StatusMenuEntry, StatusMenuModel};
 use burnrate_core::model::ProviderUsage;
 use burnrate_core::paths::AppPaths;
-use burnrate_core::poller::local_utc_offset_seconds;
+use burnrate_core::poller::{local_start_of_day, local_utc_offset_seconds};
 use burnrate_core::poller::{PollResult, Poller};
 use burnrate_core::settings::Settings;
 use burnrate_core::usage::{DailyModelUsage, ModelUsageAggregator, ModelUsageEntry};
@@ -643,7 +643,13 @@ fn snapshot(
         .map(|result| result.model_daily.clone())
         .unwrap_or_default();
     let daily_start = now - range.span_seconds();
-    let today_start = burnrate_core::usage::start_of_day(now, offset);
+    // Each slot is computed with the offset in effect **on that day**, not with
+    // today's. New Zealand moved from +12 to +13 on 27 September, so building
+    // every slot with the current offset put each earlier slot an hour off —
+    // matching no stored bucket at all. The chart showed four days of bars and
+    // five empty slots, which is the "quite bare" graph with no usage before the
+    // 26th.
+    let today_start = local_start_of_day(now);
     // A slot per calendar day in the range, up to and including today.
     //
     // The first version emitted only the days that had data. That made the axis
@@ -654,10 +660,8 @@ fn snapshot(
     // and today is flagged so the renderer can fade it.
     let by_day: HashMap<i64, &DailyModelUsage> =
         daily_all.iter().map(|day| (day.day, day)).collect();
-    let first_day = burnrate_core::usage::start_of_day(daily_start, offset);
     let mut daily: Vec<DailyBar> = Vec::new();
-    let mut cursor = first_day;
-    while cursor <= today_start {
+    for cursor in daily_slots(daily_start, now, &local_start_of_day) {
         let bars: Vec<Bar> = by_day
             .get(&cursor)
             .map(|day| {
@@ -681,7 +685,6 @@ fn snapshot(
             bars,
             partial: cursor == today_start,
         });
-        cursor += 86_400;
     }
     let daily_max = daily.iter().map(|day| day.total).fold(0.0_f64, f64::max);
     let daily_ticks = nice_ticks(0.0, daily_max);
@@ -849,6 +852,35 @@ fn bar_for(entry: &ModelUsageEntry, metric: Metric) -> Bar {
             Metric::Cost => format!("${:.2}", entry.cost),
         },
     }
+}
+
+/// One epoch per local calendar day from `daily_start` to `now`, inclusive.
+///
+/// Each slot is that day's local midnight, which is the same value the day
+/// buckets are keyed by — using today's offset for every slot is what left the
+/// chart with four bars and five empty slots, because New Zealand moved from +12
+/// to +13 on 27 September and every earlier slot was an hour off.
+///
+/// The walk steps to the *following noon* before asking for a midnight. A local
+/// day is 23 or 25 hours across a daylight-saving change, so stepping by a fixed
+/// 86,400 is ambiguous; aiming at noon is twelve hours from either midnight and
+/// cannot land in a neighbouring day or repeat one.
+///
+/// `day_start` is a parameter rather than a direct call so a transition can be
+/// tested without depending on the machine's timezone.
+fn daily_slots(daily_start: i64, now: i64, day_start: &dyn Fn(i64) -> i64) -> Vec<i64> {
+    let today_start = day_start(now);
+    let mut slots = Vec::new();
+    let mut probe = day_start(daily_start);
+    loop {
+        let day = day_start(probe);
+        if day > today_start {
+            break;
+        }
+        slots.push(day);
+        probe = day + 86_400 + 43_200;
+    }
+    slots
 }
 
 /// Gridlines for a token or cost axis, at "nice" magnitudes.
@@ -1366,7 +1398,81 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::nice_ticks;
+    use super::{daily_slots, nice_ticks};
+
+    /// A synthetic +12 → +13 transition at 03:00 local, which is when New
+    /// Zealand actually shifts, so the walk is tested against a real-shaped
+    /// boundary rather than whatever timezone the machine is in.
+    const TRANSITION: i64 = 1_790_431_200; // 2026-09-27T03:00+13:00
+    fn shifting_offset(at: i64) -> i64 {
+        if at >= TRANSITION {
+            13 * 3600
+        } else {
+            12 * 3600
+        }
+    }
+    /// A faithful stand-in for `local_start_of_day` under that rule: the local
+    /// calendar date, then that date's midnight under the offset in effect *at
+    /// the midnight*.
+    ///
+    /// Getting this model right matters — the first version guessed the midnight
+    /// from the instant's own offset, which for a time just after the shift lands
+    /// an hour back, and re-deriving from there walks back a whole day. That made
+    /// the walk stall, which is how the mistake surfaced.
+    fn shifting_day_start(at: i64) -> i64 {
+        let date = (at + shifting_offset(at)).div_euclid(86_400);
+        let candidate = date * 86_400 - shifting_offset(at);
+        date * 86_400 - shifting_offset(candidate)
+    }
+
+    /// The bug: every slot built with today's offset matched no stored bucket for
+    /// any day before the daylight-saving change, so the chart showed four days of
+    /// bars and five empty slots.
+    #[test]
+    fn daily_slots_use_each_days_own_midnight() {
+        let now = TRANSITION + 3 * 86_400;
+        let slots = daily_slots(now - 7 * 86_400, now, &shifting_day_start);
+
+        assert_eq!(slots.len(), 8, "one slot per calendar day, inclusive");
+        for slot in &slots {
+            assert_eq!(
+                *slot,
+                shifting_day_start(*slot),
+                "slot {slot} is not that day's local midnight"
+            );
+        }
+        let before: Vec<i64> = slots.iter().copied().filter(|s| *s < TRANSITION).collect();
+        let after: Vec<i64> = slots.iter().copied().filter(|s| *s >= TRANSITION).collect();
+        assert!(
+            !before.is_empty() && !after.is_empty(),
+            "both sides present"
+        );
+        // A +12 midnight lands at UTC noon (mod 43,200), a +13 one at 11:00.
+        assert!(before.iter().all(|s| s.rem_euclid(86_400) == 43_200));
+        assert!(after.iter().all(|s| s.rem_euclid(86_400) == 39_600));
+        let mut sorted = slots.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, slots, "slots ascend");
+    }
+
+    /// The walk must not repeat or skip a day across a 23-hour day.
+    #[test]
+    fn daily_slots_do_not_repeat_or_skip_across_a_transition() {
+        let now = TRANSITION + 2 * 86_400;
+        let slots = daily_slots(now - 3 * 86_400, now, &shifting_day_start);
+        let mut unique = slots.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), slots.len(), "no repeated day: {slots:?}");
+        assert_eq!(slots.len(), 4, "inclusive of both ends: {slots:?}");
+        // The day containing the transition is short, not duplicated.
+        for pair in slots.windows(2) {
+            let gap = pair[1] - pair[0];
+            assert!(
+                (82_800..=90_000).contains(&gap),
+                "consecutive slots {gap}s apart, expected 23-25h"
+            );
+        }
+    }
 
     /// snake_case to the camelCase the wire uses.
     fn camel(name: &str) -> String {
