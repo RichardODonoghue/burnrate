@@ -3,7 +3,7 @@
 //! Pure, so menu contents are testable with no OS UI. Each platform renders
 //! the model (macOS `NSMenu`, Linux DBusMenu, Windows `HMENU`).
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/StatusMenu.swift`. Parity tests:
+//! Ported 1:1 from the Swift app's `StatusMenu.swift`. Parity tests:
 //! `StatusMenuTests` — `mainMenuListsProvidersWindowsAndActions`,
 //! `widgetMenuEndsWithRemoveAction`,
 //! `widgetTitlePrefersMonthlyThenFirstWindow`,

@@ -2,25 +2,35 @@ name: Release
 
 # Three entry points:
 #  - push of a semver tag (manual tags)
-#  - workflow_dispatch with an explicit tag (backfill an existing release)
+#  - workflow_dispatch with an explicit tag, for backfilling an existing release
+#    (and with `dry_run` to build every platform's bundles without touching the
+#    release at all — the way to check packaging changes)
 #  - workflow_call from release-please.yml
 #
-# Why the explicit call: release-please creates its tag with GITHUB_TOKEN,
-# and events raised with that token do NOT trigger other workflows. The tag
-# push never fires this workflow, which is why v0.2.0 shipped without a
-# zip/dmg. release-please.yml therefore invokes this workflow directly.
+# Why the explicit call: release-please creates its tag with GITHUB_TOKEN, and
+# events raised with that token do NOT trigger other workflows. The tag push never
+# fires this workflow, which is why v0.2.0 shipped with no assets.
+# release-please.yml therefore invokes this workflow directly.
 #
 # Builds are split per OS and a final job publishes every artifact plus one
-# combined SHA256SUMS (the in-app macOS updater requires a matching entry).
+# combined SHA256SUMS. The macOS app is **ad-hoc signed and not notarised**, so
+# Gatekeeper quarantines it on first launch — README explains the two ways past
+# that. Nothing here needs a signing identity, and no secrets are required.
+
 on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and attach assets to (e.g. v0.2.0)"
+        description: "Existing tag to build and attach assets to (e.g. v0.9.0)"
         required: true
         type: string
+      dry_run:
+        description: "Build the bundles but do not touch the release"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       tag:
@@ -31,9 +41,12 @@ on:
 permissions:
   contents: write
 
+env:
+  TAURI_CLI: npx --yes "@tauri-apps/cli@^2"
+
 jobs:
   macos:
-    runs-on: macos-15
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,28 +59,47 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build bundle (arm64, version from tag)
-        run: scripts/make_app.sh "${{ steps.v.outputs.version }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
 
-      - name: Verify arm64-only binary
-        run: |
-          BIN="dist/BurnRate.app/Contents/MacOS/BurnRate"
-          file "$BIN" | grep -q "arm64" || { echo "not arm64"; exit 1; }
-          file "$BIN" | grep -q "x86_64" && { echo "universal build not allowed"; exit 1; } || true
+      - name: Install the frontend
+        working-directory: ui
+        run: npm ci
 
-      - name: Zip app
-        run: |
-          ditto -c -k --keepParent dist/BurnRate.app \
-            "BurnRate-${{ steps.v.outputs.version }}-arm64.zip"
+      - name: Build and bundle
+        run: ${{ env.TAURI_CLI }} build --bundles app,dmg
 
-      - name: Build DMG
+      # The app's version comes from `[workspace.package] version`, which is what
+      # release-please bumps — so the tagged tree must already carry the tag's
+      # version. Check rather than assume: a mismatch here means the release would
+      # ship a bundle whose version disagrees with its own tag.
+      - name: Check the bundle version matches the tag
+        env:
+          VER: ${{ steps.v.outputs.version }}
         run: |
-          VER="${{ steps.v.outputs.version }}"
-          rm -rf dmg-staging && mkdir dmg-staging
-          cp -R dist/BurnRate.app dmg-staging/
-          ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname "BurnRate $VER" -srcfolder dmg-staging \
-            -format UDZO -ov "BurnRate-$VER-arm64.dmg"
+          APP=$(ls -d target/release/bundle/macos/*.app)
+          BUNDLE_VER=$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")
+          echo "tag=$VER  bundle=$BUNDLE_VER"
+          [ "$BUNDLE_VER" = "$VER" ] || {
+            echo "::error::$APP says $BUNDLE_VER but the tag is $VER"
+            exit 1
+          }
+
+      - name: Package
+        env:
+          VER: ${{ steps.v.outputs.version }}
+        run: |
+          APP=$(ls -d target/release/bundle/macos/*.app)
+          ditto -c -k --keepParent "$APP" "BurnRate-$VER-arm64.zip"
+          cp target/release/bundle/dmg/*.dmg "BurnRate-$VER-arm64.dmg"
+          ls -la BurnRate-$VER-arm64.*
 
       - uses: actions/upload-artifact@v4
         with:
@@ -84,40 +116,60 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve tag and version
+      - name: Resolve version
         id: v
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Install GTK4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # WebKitGTK for the webview; GTK3 + libayatana for the tray-icon backend.
+      - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev
 
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.0"
+      - name: Install the frontend
+        working-directory: ui
+        run: npm ci
 
-      - name: Build Linux packages
-        run: scripts/make_linux_app.sh "${{ steps.v.outputs.version }}"
+      - name: Build and bundle
+        run: ${{ env.TAURI_CLI }} build --bundles deb,appimage
+
+      - name: Package
+        env:
+          VER: ${{ steps.v.outputs.version }}
+        run: |
+          cp target/release/bundle/deb/*.deb "BurnRate-$VER-amd64.deb"
+          cp target/release/bundle/appimage/*.AppImage "BurnRate-$VER-amd64.AppImage"
+          ls -la BurnRate-$VER-amd64.*
 
       - uses: actions/upload-artifact@v4
         with:
           name: assets-linux
           path: |
-            dist/*.tar.gz
-            dist/*.deb
+            BurnRate-*-amd64.deb
+            BurnRate-*-amd64.AppImage
           retention-days: 14
 
   windows:
-    runs-on: windows-2022
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve tag and version
+      - name: Resolve version
         id: v
         shell: pwsh
         run: |
@@ -125,23 +177,45 @@ jobs:
           if ([string]::IsNullOrEmpty($tag)) { $tag = "${{ github.ref_name }}" }
           "version=$($tag.TrimStart('v'))" >> $env:GITHUB_OUTPUT
 
-      - uses: compnerd/gha-setup-swift@main
+      - uses: actions/setup-node@v4
         with:
-          branch: swift-6.1.2-release
-          tag: 6.1.2-RELEASE
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
 
-      - name: Build Windows package
+      - name: Install the frontend
+        working-directory: ui
+        run: npm ci
+
+      # NSIS rather than MSI: no WiX toolchain to keep working, and the installer
+      # is a single file. WebView2 is bootstrapped by the installer.
+      - name: Build and bundle
+        run: ${{ env.TAURI_CLI }} build --bundles nsis
+
+      - name: Package
         shell: pwsh
-        run: scripts/make_windows_app.ps1 -Version "${{ steps.v.outputs.version }}"
+        env:
+          VER: ${{ steps.v.outputs.version }}
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*.exe
+          Copy-Item $setup "BurnRate-$env:VER-x64-setup.exe"
+          Get-ChildItem "BurnRate-$env:VER-x64-setup.exe" | Format-List Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: assets-windows
-          path: dist/*.zip
+          path: BurnRate-*-x64-setup.exe
           retention-days: 14
 
   publish:
     needs: [macos, linux, windows]
+    # `inputs.dry_run` is only ever set by workflow_dispatch, and is empty (falsy)
+    # for a tag push or a workflow_call.
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
     steps:
       # gh needs a git repository for release operations.
@@ -160,7 +234,6 @@ jobs:
           TAG="${{ inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # The in-app updater refuses a release without a matching entry.
       - name: Generate combined checksums
         run: |
           ls -la assets

@@ -1,6 +1,6 @@
 //! Chart domains, ticks and lookups for the dashboard.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/ChartData.swift`. This module is what
+//! Ported 1:1 from the Swift app's `ChartData.swift`. This module is what
 //! the UI turns into pixels and nothing more: the Swift build drew its charts
 //! with Swift Charts, which we do not have, so the maths lives here and the
 //! frontend only lays out and strokes. Getting these rules right is the whole
@@ -17,7 +17,8 @@
 //!   - Y ticks are at multiples of 10, falling back to 5 when that would leave
 //!     fewer than three lines.
 //!
-//! Still to port: the daily/ranking chart windows (see `PARITY.md`).
+//! The daily and ranking windows are not here: they are computed in `src-tauri`
+//! alongside the dashboard snapshot, which is where their tick tests live.
 
 use crate::formatting::TokenFormat;
 use serde::{Deserialize, Serialize};

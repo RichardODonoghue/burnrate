@@ -1,6 +1,6 @@
 //! Per-model usage: aggregation, pricing, and the series the charts draw.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/ModelUsage.swift`, `Pricing.swift` and
+//! Ported 1:1 from the Swift app's `ModelUsage.swift`, `Pricing.swift` and
 //! `ChartData.swift`.
 //!
 //! The dashboard needs three derived views from the same samples, and they must

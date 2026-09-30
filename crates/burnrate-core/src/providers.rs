@@ -1,6 +1,6 @@
 //! Vendor quota APIs: Claude's OAuth usage endpoint and OpenCode Go's.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/ClaudeUsageAPI.swift`,
+//! Ported 1:1 from the Swift app's `ClaudeUsageAPI.swift`,
 //! `OpenCodeGoUsageAPI.swift` and `ProviderThrottle.swift`.
 //!
 //! These are the authoritative numbers: the local parsers cannot see a plan's

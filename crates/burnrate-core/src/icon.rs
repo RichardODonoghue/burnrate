@@ -3,7 +3,7 @@
 //! Shared by every platform renderer. The geometry itself (flame path, dial
 //! hole, pivot) lives with each platform's renderer.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/IconSpec.swift`. Parity tests:
+//! Ported 1:1 from the Swift app's `IconSpec.swift`. Parity tests:
 //! `StatusIconTests` — `needleAngleRestPoseAndExtremes`, `tintHitsTheSeverityStops`,
 //! `tintInterpolatesBetweenStops`, `tintClampsOutOfRange`.
 

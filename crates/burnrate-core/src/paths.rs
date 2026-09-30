@@ -1,6 +1,6 @@
 //! Platform seams: filesystem locations, credential reading, and SQLite.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/Platform.swift`, with one deliberate
+//! Ported 1:1 from the Swift app's `Platform.swift`, with one deliberate
 //! change: SQLite is linked (`rusqlite`, bundled) rather than shelled out to
 //! `/usr/bin/sqlite3`, because that binary is not present on a stock Fedora or
 //! Debian install and its absence used to look like "no usage found".

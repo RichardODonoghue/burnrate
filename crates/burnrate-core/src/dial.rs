@@ -1,7 +1,7 @@
 //! The G2 "Dial Core" mark: a flame with a gauge dial knocked into it, the
 //! needle reading remaining usage.
 //!
-//! Ported 1:1 from `Sources/BurnRate/Icons.swift`. The mark is stateful — needle
+//! Ported 1:1 from the Swift app's `Icons.swift`. The mark is stateful — needle
 //! angle and flame tint both track remaining % — and macOS renders one
 //! monochrome template image for the menu bar plus one full-colour app icon.
 //!
@@ -378,14 +378,13 @@ fn supersampled(edge: u32, draw: impl Fn(u32) -> Canvas) -> Canvas {
     out
 }
 
-/// The rest pose the shipped `Resources/AppIcon.icns` was drawn at.
+/// The rest pose the old Swift app's shipped `AppIcon.icns` was drawn at.
 ///
-/// The committed icns predates the Sep-2026 refactor that moved the severity
-/// ramp into core, so it is **amber**, while `AppIconRenderer.appIconImage`
-/// today passes `nil`, which the ramp reads as 70% and paints **green**. The
-/// artifact the user actually sees is the amber one, so that is what the app
-/// icon defaults to here. Change to `None` to match the current Swift
-/// renderer instead — see the icon-parity note in `PARITY.md`.
+/// That icns — the artifact users actually saw — predates the Sep-2026 refactor
+/// that moved the severity ramp into core, so it is **amber**, while the Swift
+/// renderer's *current* code passes `nil`, which the ramp reads as 70% and paints
+/// **green**. The amber pose is what shipped, so it is what the app icon defaults
+/// to here. Change to `None` to follow the renderer's code instead.
 pub const SHIPPED_ICON_POSE_REMAINING: f64 = 45.0;
 
 /// Full-colour app icon: the flame on the dark plate, used for Dock,

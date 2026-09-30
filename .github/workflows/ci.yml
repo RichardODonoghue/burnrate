@@ -1,47 +1,124 @@
 name: CI
 
+# The only CI. BurnRate is a Rust + Tauri app; the Swift app and its three
+# workflows (ci, core-linux, core-windows) were removed at the cutover.
+#
+#   core       frontend typecheck + tests, then fmt + clippy + cargo test
+#   build      the app compiles *and bundles* on macOS, Windows and Linux
+#   tray-smoke the runtime check: a real tray under a real StatusNotifierWatcher
+#              in a container (scripts/tauri-smoke.sh)
+#
+# The frontend is TypeScript emitted as native ES modules, and
+# `tauri::generate_context!` embeds `frontendDist` at *compile* time. So `tsc` has
+# to run before `cargo build` in every job that compiles the app; without it the
+# build succeeds and ships a window that renders nothing. A test in
+# `src-tauri/src/lib.rs` uses `include_str!` on the emitted entry point, so a
+# missing build is a compile error rather than a blank window.
+#
+# `build` bundles rather than plain-building, because the bundle is what ships
+# and each platform's packaging fails differently (a missing `.deb` dependency, a
+# WiX/NSIS download, a DMG that will not mount). The Tauri CLI comes from `npx`
+# rather than `ui/package.json`, whose single devDependency is deliberate — see
+# AGENTS.md.
+
 on:
   push:
-    branches: [main]
-  # Base-branch filter: these build and test the *Swift* app, which lives on
-  # `main` until the Tauri rewrite is cut over. Without it they run on every PR,
-  # including the rewrite's own PRs into `rewrite/tauri`, and gate them on the
-  # app being replaced. The rewrite's checks are in `tauri.yml`.
+    branches: [main, rewrite/tauri]
   pull_request:
-    branches: [main]
+    branches: [main, rewrite/tauri]
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  TAURI_CLI: npx --yes "@tauri-apps/cli@^2"
+
 jobs:
-  build-test:
-    # Apple Silicon only (matches the shipping target); macos-15 = ARM.
-    runs-on: macos-15
+  core:
+    name: fmt, clippy and tests
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build (arm64)
-        run: swift build --arch arm64 --build-tests
-
-      - name: Test
-        run: swift test --arch arm64
-
-      - name: Bundle app
-        run: scripts/make_app.sh ci
-
-      - name: Verify arm64-only binary
-        run: |
-          BIN="dist/BurnRate.app/Contents/MacOS/BurnRate"
-          file "$BIN" | grep -q "arm64" || { echo "not arm64"; exit 1; }
-          file "$BIN" | grep -q "x86_64" && { echo "universal build not allowed"; exit 1; } || true
-
-      - name: Upload CI artifact
-        if: github.ref == 'refs/heads/main'
-        run: ditto -c -k --keepParent dist/BurnRate.app BurnRate-ci-arm64.zip
-      - uses: actions/upload-artifact@v4
-        if: github.ref == 'refs/heads/main'
+      - uses: actions/setup-node@v4
         with:
-          name: BurnRate-ci-arm64
-          path: BurnRate-ci-arm64.zip
-          retention-days: 7
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev
+      - name: Frontend
+        working-directory: ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+          npm test
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: app
+          - os: ubuntu-latest
+            bundles: deb
+          - os: windows-latest
+            bundles: nsis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev
+      - name: Install the frontend
+        working-directory: ui
+        run: npm ci
+      # `tauri build` runs `beforeBuildCommand` (`npm run build`), so the emitted
+      # frontend is produced here and `tsc` cannot be forgotten.
+      - name: Build and bundle
+        run: ${{ env.TAURI_CLI }} build --bundles ${{ matrix.bundles }}
+
+  tray-smoke:
+    name: tray smoke (Linux container)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the frontend
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - name: Build and run the tray smoke
+        run: ./scripts/tauri-smoke.sh

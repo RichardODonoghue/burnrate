@@ -1,7 +1,7 @@
 //! Alert rules and the pure evaluators behind milestone, burn-rate and daily
 //! cost notifications.
 //!
-//! Ported 1:1 from `Sources/BurnRateCore/Alerts.swift` and `AlertDefaults.swift`.
+//! Ported 1:1 from the Swift app's `Alerts.swift` and `AlertDefaults.swift`.
 //! Parity tests: `MilestoneEvaluatorTests`, `BurnRateEvaluatorTests`,
 //! `MilestoneNotifierTests`.
 
