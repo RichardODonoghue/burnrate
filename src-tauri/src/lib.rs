@@ -6,7 +6,7 @@
 //! is the "host decides how to perform an action" half of
 //! `StatusItemPresenting`.
 //!
-//! Two constraints learned the hard way, both on Linux:
+//! Two constraints on Linux tray menus:
 //!   - a tray menu cannot be swapped once set, only edited, so the menu is
 //!     built once and its items' text is rewritten every poll;
 //!   - the items must each have a menu, or the icon does not appear at all.
@@ -199,9 +199,8 @@ struct Bar {
     cache: i64,
     reasoning: i64,
     requests: i64,
-    /// `axisLabel(value, metric)` — "1.2m", "$12.5". Pre-formatted because the
-    /// frontend formatting its own copy is exactly how the axes drifted from the
-    /// Swift build the first time round.
+    /// `axisLabel(value, metric)` — "1.2m", "$12.5". Pre-formatted here so the
+    /// frontend never formats a figure of its own, which is how axes drift.
     value_text: String,
     /// The ranking chart's trailing annotation: "1.2m tok" or "$12.50".
     annotation: String,
@@ -1106,9 +1105,8 @@ fn app_icon_data_url(edge: Option<u32>) -> String {
     dial::app_icon(edge.unwrap_or(128)).to_data_url()
 }
 
-/// The model palette, so every platform colours a model the same way. The
-/// Swift build hashed with `hashValue`, which is seeded per process, so its
-/// colours changed between launches; this is a fixed FNV-1a and is stable.
+/// The model palette, so every platform colours a model the same way. A seeded
+/// hash changes colours between launches, so this is a fixed FNV-1a and is stable.
 #[tauri::command]
 fn model_colours() -> std::collections::BTreeMap<String, String> {
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -1399,9 +1397,8 @@ fn poll_once(app: &AppHandle<Wry>) {
     let result = {
         let mut poller = state.poller.lock().expect("poller lock");
         let result = poller.poll(&settings);
-        // Persist the trend history with each poll, as the Swift build does, so
-        // the chart has data immediately on the next launch rather than after
-        // hours of polling.
+        // Persist the trend history with each poll, so the chart has data
+        // immediately on the next launch rather than after hours of polling.
         poller.save_history();
         poller.save_model_history();
         poller.save_notifier_state();
@@ -1524,9 +1521,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // A menu-bar app has no Dock icon, as the Swift build's LSUIElement
-            // gives it. Without this the app shows up in the Dock and the app
-            // switcher while it is only a tray icon.
+            // A menu-bar app has no Dock icon. Without this the app shows up in
+            // the Dock and the app switcher while it is only a tray icon.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 

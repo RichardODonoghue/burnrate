@@ -1,13 +1,9 @@
 //! Vendor quota APIs: Claude's OAuth usage endpoint and OpenCode Go's.
 //!
-//! Ported 1:1 from the Swift app's `ClaudeUsageAPI.swift`,
-//! `OpenCodeGoUsageAPI.swift` and `ProviderThrottle.swift`.
-//!
 //! These are the authoritative numbers: the local parsers cannot see a plan's
 //! real limits, only the tokens spent. The trade is rate limits, so every
 //! provider goes through [`QuotaCache`] — a floor on the interval and a backoff
 //! on failure, with the last good snapshot reused meanwhile.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -434,11 +430,9 @@ impl ClaudeUsageApiProvider {
 
     /// `"max"` + `"default_claude_max_20x"` → `"Max 20x"`.
     ///
-    /// Ported from Swift's `formatPlan`, and it is *not* "join the two strings":
-    /// the subscription type goes through a fixed table, and the multiplier is
-    /// the `\d+x` at the **end of the tier** — `default_claude_max_20x` carries
-    /// the "20x", not the whole string. Joining them yielded
-    /// `"max default_claude_max_20x"`.
+    /// It is *not* "join the two strings": the subscription type goes through a
+    /// fixed table, and the multiplier is the `\d+x` at the **end of the tier** —
+    /// `default_claude_max_20x` carries the "20x", not the whole string.
     ///
     /// An empty subscription type is `None` rather than `""`, so no caller can
     /// render a provider as "Claude - ".
@@ -460,7 +454,7 @@ impl ClaudeUsageApiProvider {
     }
 
     /// The `\d+x` suffix of a rate-limit tier: `"default_claude_max_20x"` →
-    /// `"20x"`. The Swift build matches this with the regex `[0-9]+x$`.
+    /// `"20x"`.
     fn plan_multiplier(tier: &str) -> Option<String> {
         let without_x = tier.strip_suffix('x')?;
         let digits: String = without_x
@@ -851,20 +845,20 @@ mod tests {
         UsageWindow::new(label, 0, Some(50.0), resets_at)
     }
 
-    /// `noWindowsNeverDue` — nothing to be due about.
+    /// Nothing to be due about.
     #[test]
     fn no_windows_never_due() {
         assert!(!ProviderThrottle::reset_due(&[], NOW - 600, NOW));
     }
 
-    /// `futureResetNotDue` — a window that has not rolled over yet.
+    /// A window that has not rolled over yet.
     #[test]
     fn future_reset_not_due() {
         let windows = [resetting("Rolling", Some(NOW + 3600))];
         assert!(!ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
     }
 
-    /// `resetPassedAfterLastFetchIsDue` — the snapshot predates the reset, so it
+    /// The snapshot predates the reset, so it
     /// describes a window that no longer exists.
     #[test]
     fn reset_passed_after_last_fetch_is_due() {
@@ -872,7 +866,7 @@ mod tests {
         assert!(ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
     }
 
-    /// `fetchedSinceResetNotDue` — what stops the previous case firing forever:
+    /// What stops the previous case firing forever:
     /// once a fetch has happened *after* the reset, the snapshot is current.
     #[test]
     fn fetched_since_reset_not_due() {
@@ -880,14 +874,14 @@ mod tests {
         assert!(!ProviderThrottle::reset_due(&windows, NOW - 60, NOW));
     }
 
-    /// `missingResetsAtNeverDue` — local parsing cannot know a reset time.
+    /// Local parsing cannot know a reset time.
     #[test]
     fn missing_resets_at_never_due() {
         let windows = [resetting("Rolling", None)];
         assert!(!ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
     }
 
-    /// `anyDueWindowForcesRefresh` — one due window is enough.
+    /// One due window is enough.
     #[test]
     fn any_due_window_forces_refresh() {
         let windows = [
@@ -897,7 +891,7 @@ mod tests {
         assert!(ProviderThrottle::reset_due(&windows, NOW - 600, NOW));
     }
 
-    /// `quotaCacheThrottlesAndBacksOff` — the interval floor and the backoff.
+    /// The interval floor and the backoff.
     #[test]
     fn quota_cache_throttles_and_backs_off() {
         let mut cache = QuotaCache::new(Duration::from_millis(60), Duration::from_millis(100));
@@ -918,7 +912,7 @@ mod tests {
         );
     }
 
-    /// `quotaCacheSkipsThrottleWhenResetPassed` — the reset escape hatch: inside
+    /// The reset escape hatch: inside
     /// the interval, but a window has rolled over since the last fetch.
     #[test]
     fn quota_cache_skips_throttle_when_reset_passed() {
@@ -948,7 +942,6 @@ mod tests {
 
     // ---- Claude account fingerprint ----
 
-    /// `claudeAccountFingerprintUsesAccountAndOrg`.
     #[test]
     fn claude_account_fingerprint_uses_account_and_org() {
         let json = br#"{"oauthAccount":{"accountUuid":"acct-1","organizationUuid":"org-1"}}"#;
@@ -973,7 +966,7 @@ mod tests {
         assert!(ClaudeUsageApiProvider::account_fingerprint(b"not json").is_none());
     }
 
-    /// `tokenHashFallbackDiffersPerToken` — and, just as importantly, is the same
+    /// And, just as importantly, is the same
     /// every time, because a per-process hash would make every poll look like a
     /// plan switch.
     #[test]
@@ -1040,7 +1033,7 @@ mod tests {
 
     // ---- Claude parsing ----
 
-    /// `parsesClaudeLimitsArrayIncludingModelScoped` — including Fable.
+    /// Including Fable.
     #[test]
     fn parses_claude_limits_array_including_model_scoped() {
         let body = br#"{"limits":[
@@ -1061,7 +1054,7 @@ mod tests {
         assert!(windows[0].resets_at.is_some());
     }
 
-    /// `claudeFallbackParsesFlatKeysWithoutLimits` — the older response shape.
+    /// The older response shape.
     #[test]
     fn claude_fallback_parses_flat_keys_without_limits() {
         let body = br#"{"five_hour":{"utilization":25},"seven_day":{"utilization":40}}"#;
@@ -1072,7 +1065,6 @@ mod tests {
         assert_eq!(windows[1].percent_remaining, Some(60.0));
     }
 
-    /// `claudeClampsUtilizationOver100`.
     #[test]
     fn claude_clamps_utilization_over_100() {
         let body = br#"{"limits":[{"kind":"session","percent":140}]}"#;
@@ -1170,7 +1162,6 @@ mod tests {
 
     // ---- OpenCode parsing ----
 
-    /// `parsesOpenCodeGoWindows`.
     #[test]
     fn parses_opencode_go_windows() {
         let body = br#"{"usage":{"rolling":{"percent":4,"resetsAt":"2026-09-25T03:34:21Z"},
@@ -1183,7 +1174,7 @@ mod tests {
         assert_eq!(windows[2].percent_remaining, Some(99.0));
     }
 
-    /// `parsesOpenCodeGoAPIKeyFromAuthJSON` — v1.
+    /// V1.
     #[test]
     fn reads_opencode_v1_key() {
         let data = br#"{"opencode-go":{"type":"api","key":"sk-v1"}}"#;
@@ -1193,7 +1184,7 @@ mod tests {
         );
     }
 
-    /// `parsesOpenCodeV2AccountJSON` — v2, picking the right service out of many.
+    /// V2, picking the right service out of many.
     #[test]
     fn reads_opencode_v2_key() {
         let data = br#"{"version":2,"accounts":{

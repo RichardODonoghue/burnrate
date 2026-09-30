@@ -1,12 +1,7 @@
 //! The G2 "Dial Core" mark's state mapping: needle angle and severity tint.
 //!
-//! Shared by every platform renderer. The geometry itself (flame path, dial
-//! hole, pivot) lives with each platform's renderer.
-//!
-//! Ported 1:1 from the Swift app's `IconSpec.swift`. Parity tests:
-//! `StatusIconTests` — `needleAngleRestPoseAndExtremes`, `tintHitsTheSeverityStops`,
-//! `tintInterpolatesBetweenStops`, `tintClampsOutOfRange`.
-
+//! Shared by every renderer. The geometry itself (flame path, dial hole, pivot)
+//! lives in `dial`.
 /// An 8-bit-per-channel colour, the form the severity ramp works in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbColor {
@@ -125,7 +120,7 @@ fn mix(a: f64, b: f64, fraction: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// `needleAngleRestPoseAndExtremes` — 0°/18°/60° and the nil rest pose.
+    /// 0°/18°/60° and the nil rest pose.
     #[test]
     fn needle_angle_rest_pose_and_extremes() {
         assert_eq!(StatusIcon::needle_angle(Some(100.0)), 0.0);
@@ -135,7 +130,7 @@ mod tests {
         assert_eq!(StatusIcon::needle_angle(None), 18.0);
     }
 
-    /// `tintHitsTheSeverityStops` — each stop's own colour.
+    /// Each stop's own colour.
     #[test]
     fn tint_hits_the_severity_stops() {
         // ≥55: green.
@@ -148,7 +143,7 @@ mod tests {
         assert_eq!(StatusIcon::tint(Some(0.0)).bottom.to_hex(), "#e64019");
     }
 
-    /// `tintInterpolatesBetweenStops` — 50% sits between green and amber.
+    /// 50% sits between green and amber.
     #[test]
     fn tint_interpolates_between_stops() {
         let green = StatusIcon::tint(Some(55.0)).top;
@@ -160,7 +155,7 @@ mod tests {
         assert!((mid.blue - (green.blue + amber.blue) / 2.0).abs() < 0.01);
     }
 
-    /// `tintClampsOutOfRange` — values outside 0–100 clamp, and nil is the
+    /// Values outside 0–100 clamp, and nil is the
     /// rest pose rather than an error.
     #[test]
     fn tint_clamps_out_of_range() {

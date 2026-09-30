@@ -1,14 +1,13 @@
 //! The G2 "Dial Core" mark: a flame with a gauge dial knocked into it, the
 //! needle reading remaining usage.
 //!
-//! Ported 1:1 from the Swift app's `Icons.swift`. The mark is stateful — needle
-//! angle and flame tint both track remaining % — and macOS renders one
-//! monochrome template image for the menu bar plus one full-colour app icon.
+//! The mark is stateful — needle angle and flame tint both track remaining % —
+//! and macOS renders one monochrome template image for the menu bar plus one
+//! full-colour app icon.
 //!
 //! Geometry is a 72-unit design space, y-down, from the approved G2 sheet. All
 //! paths are flat RGBA the runtime can hand straight to Tauri's `Image`, which
 //! wants pixels rather than a PNG.
-
 use crate::icon::{RgbColor, StatusIcon};
 
 /// A point in the 72-unit design space.
@@ -347,8 +346,8 @@ const SUPERSAMPLE_BELOW: u32 = 128;
 /// point against an edge and writes full alpha or nothing, so their edges are
 /// hard. That is invisible at 256px and obvious at 18: the dial's punched hole
 /// and the needle come out visibly jagged, which reads as artifacting in the
-/// menu bar. CoreGraphics, which the Swift build used, antialiased; supersampling
-/// gets the same result without giving every primitive a coverage calculation.
+/// menu bar. Supersampling gets antialiased edges without giving every primitive
+/// a coverage calculation.
 fn supersampled(edge: u32, draw: impl Fn(u32) -> Canvas) -> Canvas {
     if edge >= SUPERSAMPLE_BELOW || edge == 0 {
         return draw(edge);

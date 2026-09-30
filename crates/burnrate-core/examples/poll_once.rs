@@ -3,12 +3,12 @@
 //!     cargo run -p burnrate-core --example poll_once
 //!
 //! The unit tests use fixtures; this uses the real `~/.claude`, `~/.codex` and
-//! OpenCode database, which is the only way to catch a schema that has drifted
-//! since the Swift build was written.
+//! OpenCode database, which is the only way to catch a schema that has drifted.
 
+use burnrate_core::charts::TrendChartData;
 use burnrate_core::poller::Poller;
 use burnrate_core::settings::Settings;
-use burnrate_core::usage::{ChartData, ModelUsageAggregator};
+use burnrate_core::usage::ModelUsageAggregator;
 
 fn main() {
     let mut poller = Poller::new();
@@ -73,13 +73,19 @@ fn main() {
     }
 
     println!("\n=== chart history ===");
-    println!("  snapshots: {}", result.snapshots.len());
+    println!(
+        "  remaining-history samples: {}",
+        result.remaining_history.len()
+    );
+    // The range the dashboard would draw for a 30-day view.
+    let cutoff = TrendChartData::trend_cutoff(burnrate_core::charts::ChartRange::Month, result.at);
     for label in ["Rolling", "Weekly", "Monthly"] {
-        let series = ChartData::trend_series(&result.snapshots, label, None);
+        let series =
+            TrendChartData::build_trend_series(&result.remaining_history, label, None, cutoff);
         if series.is_empty() {
             continue;
         }
-        let domain = ChartData::y_domain(&series);
+        let domain = TrendChartData::remaining_domain(&series);
         println!("  {label}: {} series, y-domain {:?}", series.len(), domain);
     }
 

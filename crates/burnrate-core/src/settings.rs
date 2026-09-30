@@ -1,9 +1,8 @@
 //! User settings, persisted as JSON.
 //!
-//! Ported 1:1 from the Swift app's `Settings.swift`, including the key names
-//! and the legacy-decoding behaviour, so a Swift install's settings migrate
-//! across untouched. Swift stored each key as a JSON blob inside UserDefaults;
-//! here they are fields of one `settings.json` in the app directory, and
+//! Key names and legacy decoding are preserved so a settings file written by the
+//! Swift build migrates untouched: it stored each key as a JSON blob in
+//! UserDefaults, these are fields of one `settings.json`, and
 //! `Settings::from_swift_defaults` converts the old blobs.
 //!
 //! Plan capacities are *not* here: they are predetermined
@@ -200,9 +199,9 @@ mod tests {
         assert!(settings.widget_providers.is_empty());
     }
 
-    /// The on-disk keys are camelCase, so a file written by hand (or by the
-    /// Swift build) is actually read. A round-trip test cannot catch this — it
-    /// writes and reads the same shape — so the keys are asserted directly.
+    /// The on-disk keys are camelCase, so a file written by hand or by an older
+    /// build is actually read. A round-trip test cannot catch this — it writes and
+    /// reads the same shape — so the keys are asserted directly.
     #[test]
     fn writes_camel_case_keys() {
         let settings = Settings {
