@@ -78,7 +78,7 @@ jobs:
           - os: macos-latest
             bundles: app
           - os: ubuntu-latest
-            bundles: deb
+            bundles: deb,rpm
           - os: windows-latest
             bundles: nsis
     steps:
@@ -92,12 +92,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+      # `rpm` brings `rpmbuild`, which the rpm bundle needs; without it the
+      # bundler fails rather than skipping the target.
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev libxdo-dev libssl-dev
+            librsvg2-dev libxdo-dev libssl-dev rpm
       - name: Install the frontend
         working-directory: ui
         run: npm ci
