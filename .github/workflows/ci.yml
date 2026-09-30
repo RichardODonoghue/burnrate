@@ -1,7 +1,8 @@
 name: CI
 
 # The only CI. BurnRate is a Rust + Tauri app; the Swift app and its three
-# workflows (ci, core-linux, core-windows) were removed at the cutover.
+# workflows (ci, core-linux, core-windows) were removed at the cutover, and so was
+# the `rewrite/tauri` branch this used to also run for.
 #
 #   core       frontend typecheck + tests, then fmt + clippy + cargo test
 #   build      the app compiles *and bundles* on macOS, Windows and Linux
@@ -23,9 +24,9 @@ name: CI
 
 on:
   push:
-    branches: [main, rewrite/tauri]
+    branches: [main]
   pull_request:
-    branches: [main, rewrite/tauri]
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}

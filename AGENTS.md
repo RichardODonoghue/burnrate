@@ -120,6 +120,19 @@ All changes go through a pull request. Do not commit or push directly to `main`.
   so a release PR moves the app version alongside the changelog and the tag. The
   toml updater leaves `Cargo.lock` stale for the local crates; cargo rewrites it on
   the next build and nothing here builds `--locked`.
+- **A commit release-please cannot parse is dropped silently** — no changelog
+  entry, no version contribution. It happened to the cutover: the squash commit
+  was skipped entirely and the release came out as a patch, because the message
+  contained `.set_icon(` — release-please reads `(` as the start of a PR reference
+  and wants a `)` before the line ends, and it aborts the whole commit on a
+  newline instead. The only trace is `commit could not be parsed` in the Action
+  log. **Squash commits concatenate every message on the branch**, so one stray
+  unbalanced bracket anywhere in a branch's history invalidates the release
+  commit. Keep brackets balanced in commit and PR bodies, and after a release
+  check that your change is actually in the changelog.
+- Manually tagged releases also work (`release.yml` accepts a tag by
+  `workflow_dispatch`), but release-please's manifest must be updated by hand to
+  match, or the next release PR computes from the wrong version.
 - `.github/workflows/ci.yml` — the only CI: frontend + `fmt`/`clippy`/`test`, a
   build-and-bundle matrix (macOS `app`, Linux `deb`, Windows `nsis`), and the
   Linux tray smoke.
