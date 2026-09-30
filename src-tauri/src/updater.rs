@@ -274,7 +274,6 @@ pub fn replace_bundle(current: &Path, new: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 /// The script that waits for this process to exit and then reopens the app.
 ///
 /// The bundle path is **not** interpolated into it. It arrives as `$1`, so a path
@@ -290,6 +289,7 @@ fn relaunch_script(pid: u32) -> String {
 }
 
 /// Relaunches once this process is gone.
+#[cfg(target_os = "macos")]
 fn relaunch_after_exit(bundle: &Path) -> Result<(), String> {
     Command::new("/bin/sh")
         .arg("-c")
