@@ -81,12 +81,11 @@ impl ModelUsageAggregator {
     /// Buckets samples into per-day per-model totals over the trailing `days`,
     /// merging across providers. `now` is seconds since the Unix epoch.
     ///
-    /// `day_start` maps an instant to the local midnight of the calendar day
-    /// containing it — `poller::local_start_of_day`, which is
-    /// `Calendar.startOfDay`. Taking an offset instead is not enough: a day's
+    /// `day_start` must map an instant to the local midnight of its calendar day
+    /// — `poller::local_start_of_day`. An offset alone is not enough: a day's
     /// midnight cannot be derived from the offset at an arbitrary instant, and
-    /// doing so splits a daylight-saving transition day into two buckets where
-    /// the calendar has one.
+    /// doing so splits a daylight-saving transition day into two buckets where the
+    /// calendar has one.
     pub fn daily(
         buckets: &[(String, Vec<UsageSample>)],
         days: i64,

@@ -1031,14 +1031,10 @@ fn daily_slots(daily_start: i64, now: i64, day_start: &dyn Fn(i64) -> i64) -> Ve
 
 /// Gridlines for a token or cost axis, at "nice" magnitudes.
 ///
-/// This was a ladder of fixed steps (500k, 50k, 5k, …) chosen by span. It reads
-/// like it scales, but every branch is a *small* number, so a large span landed
-/// on 500k and produced a tick every 500k — 7,306 gridlines and labels on a real
-/// 3.65e9 day, 176 on a 8.8e7 one. Thousands of SVG nodes, which is why the
-/// chart looked cooked rather than merely dense.
-///
-/// Steps now scale with the span: 1, 2 or 5 times a power of ten, sized to land
-/// on roughly five gridlines whatever the magnitude.
+/// Steps scale with the span — 1, 2 or 5 times a power of ten, sized to land on
+/// roughly five gridlines whatever the magnitude. Fixed steps chosen by span do
+/// not scale: every branch is a small number, so a large span lands on one huge
+/// step and the axis gets thousands of gridlines.
 fn nice_ticks(low: f64, high: f64) -> Vec<f64> {
     const TARGET_TICKS: f64 = 5.0;
     if !high.is_finite() || !low.is_finite() || high <= low {

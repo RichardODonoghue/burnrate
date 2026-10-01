@@ -8,14 +8,14 @@ export const ISSUES_URL = `${REPO_URL}/issues`;
 /** The newest release, where a platform that cannot self-install sends you. */
 export const RELEASES_URL = `${REPO_URL}/releases/latest`;
 
-/** A card surface, the Swift `Card`. */
+/** A card surface. */
 export function card(title: string, body: string, extra = ""): string {
   return `<section class="card">${title ? `<h2>${esc(title)}</h2>` : ""}${body}${extra}</section>`;
 }
 
 /**
- * A card whose title row also carries controls on the right — the Swift
- * `HStack { Text(title); Spacer(); Picker }` for the trend chart.
+ * A card whose title row also carries controls on the right, for the trend
+ * chart's window picker.
  */
 export function cardWithControls(title: string, controls: string, body: string): string {
   return `<section class="card">
@@ -34,11 +34,11 @@ export interface Segment {
 }
 
 /**
- * The Swift `Picker(…).pickerStyle(.segmented)`, as a button group.
+ * A segmented picker, as a button group.
  *
  * A connected run of buttons with the selection lit — not a menu, so not a
- * `<select>`. `totalWidth` fixes the group's width: the Swift build sets an
- * explicit `.frame(width:)`, and a control that reflows as options change reads
+ * `<select>`. `totalWidth` fixes the group's width, because a control that
+ * reflows as options change reads
  * as a layout bug.
  */
 export function segmented(

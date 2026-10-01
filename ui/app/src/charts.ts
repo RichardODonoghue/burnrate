@@ -2,9 +2,8 @@
 //
 // The numbers that matter — domains, ticks, axis labels, annotations, totals —
 // are computed in Rust (`burnrate-core::charts`) and arrive pre-formatted. This
-// file maps values to pixels and strokes paths, and nothing else. The first
-// version did its own arithmetic and formatting, and that is precisely how the
-// axes and labels drifted from the Swift build.
+// file maps values to pixels and strokes paths, and nothing else: arithmetic or
+// formatting done here is exactly how axes and labels drift apart.
 //
 // The one exception is `Math.round` on a hovered percentage.
 
@@ -100,7 +99,7 @@ export function placeTooltip(
   tip.style.top = `${Math.round(top)}px`;
 }
 
-/** Middle truncation, as the Swift legend's `.truncationMode(.middle)`. */
+/** Middle truncation: keep both ends of the name, drop the middle. */
 export function middleTruncate(text: string, limit: number): string {
   if (text.length <= limit) return text;
   const head = Math.ceil((limit - 1) / 2);
@@ -290,8 +289,8 @@ function trendSvg(dashboard: Dashboard, width: number): string {
     })
     .join("");
 
-  // The selected-time rule, as the Swift chart's `RuleMark`. Drawn once and moved
-  // on hover, rather than redrawing the chart under the cursor.
+  // The selected-time rule. Drawn once and moved on hover, rather than redrawing
+  // the chart under the cursor.
   const rule = `<line class="rule" id="trend-rule" x1="0" y1="${pad.top}"
       x2="0" y2="${map.bottom.toFixed(1)}" visibility="hidden"/>`;
 

@@ -42,18 +42,12 @@ struct WindowState {
     history: Vec<crate::alerts::Reading>,
 }
 
-/// The part of the notifier's state that has to survive a relaunch.
+/// The part of the notifier's state that survives a relaunch.
 ///
-/// Swift writes this to `UserDefaults` as `notifierState`. Without it the first
-/// poll after a launch has no baseline, so a plan switch that happened while the
-/// app was closed is indistinguishable from a continued session — and, just as
-/// importantly, restoring the baseline is what makes the saved fingerprint
-/// load-bearing, because that fingerprint is the only thing that can tell the two
-/// apart.
-///
-/// The burn history is deliberately not persisted: it has six hours of retention
-/// and is rebuilt from the first few polls, so what a relaunch loses is a few
-/// minutes of baseline.
+/// Both halves matter: restoring the baseline is what makes the saved fingerprint
+/// load-bearing, and without a baseline the first poll after a launch cannot tell
+/// a plan switch from a continued session. The burn history is not persisted — it
+/// has six hours of retention and is rebuilt from the first few polls.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotifierState {

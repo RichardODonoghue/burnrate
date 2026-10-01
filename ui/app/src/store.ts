@@ -19,7 +19,7 @@ export interface AppState {
   /** True while a settings write is in flight, so clicks cannot stack. */
   busy: boolean;
   // Chart controls, sent with every snapshot so the payload matches the view.
-  // Labels are the Swift build's: 24h / 7d / 30d, defaulting to 7d.
+  // Labels are 24h / 7d / 30d, defaulting to 7d.
   range: string;
   metric: string;
   windowLabel: string | null;
@@ -39,7 +39,7 @@ export const state: AppState = {
   providerFilter: null,
 };
 
-/** Mirrors `SettingsView.color(for:)` in the Swift build. */
+/** Provider colours, keyed by provider name. */
 export const PROVIDER_COLOURS: Record<string, string> = {
   Claude: "rgb(217, 120, 87)",
   "OpenCode Go": "rgb(64, 140, 242)",

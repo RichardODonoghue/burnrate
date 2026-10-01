@@ -1,6 +1,5 @@
-// The About pane, laid out as the Swift `AboutView`: the shipped bundle icon over
-// the name and version, then Updates, What it does, Data sources, Links — each row
-// a `Label(text, systemImage:)` equivalent.
+// The About pane: the shipped bundle icon over the name and version, then
+// Updates, What it does, Data sources, Links — each row a glyph beside its text.
 
 import { api } from "../api.js";
 import { esc, el, must, on, onAll, targetData, toast } from "../dom.js";
@@ -10,7 +9,7 @@ import { state } from "../store.js";
 import type { Snapshot } from "../types.js";
 import type { PaneContext } from "./usage.js";
 
-/** One `Label(text, systemImage:)` row, as the Swift cards are built from. */
+/** One row: a leading glyph, then text. */
 function labelled(icon: IconName, text: string): string {
   return `<div class="about-row">${rowIcon(icon)}<span>${esc(text)}</span></div>`;
 }
@@ -127,8 +126,7 @@ export function wire(_snapshot: Snapshot, context: PaneContext): void {
   // everything below it can be required rather than looked up loosely.
   if (!el("about-icon")) return;
 
-  // The shipped bundle icon, as the Swift AboutView uses it — not the live
-  // severity-tinted renderer.
+  // The shipped bundle icon, not the live severity-tinted renderer.
   void api.appIconDataUrl(144).then((url) => {
     must<HTMLImageElement>("about-icon").src = url;
   });

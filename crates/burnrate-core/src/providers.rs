@@ -339,12 +339,9 @@ impl ClaudeUsageApiProvider {
     /// The signed-in account's identity, for detecting a plan switch.
     ///
     /// `~/.claude.json`'s `oauthAccount` gives `accountUuid|organizationUuid`,
-    /// which is stable across OAuth refreshes. Falls back to hashing the token,
-    /// which is not — an OAuth refresh looks like a switch — so the uuid pair is
-    /// preferred and the token is only used when there is no account block.
-    ///
-    /// `None` when neither is available; the notifier reads that as "no change"
-    /// rather than as a switch.
+    /// which is stable across OAuth refreshes, so the uuid pair is preferred. The
+    /// token hash is the fallback and is *not* stable — a refresh looks like a
+    /// switch. `None` when neither is available, which reads as no change.
     pub fn credential_fingerprint(&self) -> Option<String> {
         if let Ok(bytes) = std::fs::read(&self.claude_json_url) {
             if let Some(fingerprint) = Self::account_fingerprint(&bytes) {

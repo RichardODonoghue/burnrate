@@ -1,5 +1,5 @@
-// The Usage pane: the Swift `ModelsView`, section for section — three snapshot
-// cards, Remaining over time, Daily usage by model, Top models, Breakdown.
+// The Usage pane, section for section: three snapshot cards, Remaining over time,
+// Daily usage by model, Top models, Breakdown.
 //
 // Two rules keep this honest, both learned from getting them wrong.
 //
@@ -129,9 +129,8 @@ function breakdownTable(dashboard: Dashboard): string {
 
 export function render(snapshot: Snapshot): string {
   const { dashboard } = snapshot;
-  // `filteredDaily.isEmpty` in the Swift view: no entries for this filter in the
-  // whole 30 days, which is not the same as an empty chart series — the trend
-  // history outlives the model history.
+  // No entries for this filter in the whole 30 days, which is not the same as an
+  // empty chart series — the trend history outlives the model history.
   if (!dashboard.hasData) {
     return `<div class="empty">
       <span class="empty-glyph">▤</span>
@@ -147,8 +146,8 @@ export function render(snapshot: Snapshot): string {
     "window-group",
     dashboard.windowLabels,
     dashboard.windowLabel,
-    // `max(labels, 3) * 86`, per the Swift view's `.frame(width:)`, so the control
-    // keeps its size as options come and go rather than reflowing.
+    // `max(labels, 3) * 86`, so the control keeps its size as options come and go
+    // rather than reflowing.
     Math.max(dashboard.windowLabels.length, 3) * 86
   );
   return [
@@ -220,7 +219,7 @@ export function wire(snapshot: Snapshot, context: PaneContext): void {
   const dashboard = snapshot.dashboard;
   if (!dashboard.hasData) return;
 
-  // The window picker is a segmented button group, as in Swift's Picker.
+  // The window picker is a segmented button group.
   for (const button of el("window-group")?.querySelectorAll("button") ?? []) {
     on(button, "click", () => {
       const label = (button as HTMLButtonElement).dataset.value;
