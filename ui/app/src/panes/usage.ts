@@ -12,7 +12,14 @@
 //    every window size except the one it was designed at. `layout` measures,
 //    draws, and redraws on resize.
 
-import { drawChart, nearestPoint, placeTooltip } from "../charts.js";
+import {
+  chartGeometry,
+  clientYOf,
+  drawChart,
+  nearestPoint,
+  placeTooltip,
+  ratioAt,
+} from "../charts.js";
 import { esc, el, on } from "../dom.js";
 import { dayHeading, tokenCount } from "../format.js";
 import { card, cardWithControls, segmented } from "../ui.js";
@@ -233,9 +240,12 @@ export function wire(snapshot: Snapshot, context: PaneContext): void {
     const rule = el("trend-rule");
     const [xLow, xHigh] = dashboard.xDomain;
     on<MouseEvent>(trend.plot, "mousemove", (event) => {
-      const box = trend.plot.getBoundingClientRect();
-      if (!box.width) return;
-      const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+      // Measured across the *plot*, not the element. The plot is inset by the
+      // axis padding and the Y labels live in that inset, so measuring the whole
+      // element claimed a reading under the labels and drew the rule across them.
+      const geometry = chartGeometry(trend.plot.querySelector("svg.chart"));
+      if (!geometry) return;
+      const ratio = ratioAt(geometry, event.clientX);
       const at = Math.round(xLow + ratio * (xHigh - xLow));
       const rows = nearestRows(dashboard, at);
       if (!rows.length) {
@@ -262,10 +272,16 @@ export function wire(snapshot: Snapshot, context: PaneContext): void {
           )
           .join("");
       trend.tip.hidden = false;
-      const x = (stamp - xLow) / (xHigh - xLow);
-      placeTooltip(trend.tip, trend.plot, x * box.width, box.height / 2);
-      rule?.setAttribute("x1", String(x * box.width));
-      rule?.setAttribute("x2", String(x * box.width));
+      // The rule is placed in the SVG's own units and the tooltip in client
+      // pixels, both from the domain the line was drawn from, so the reading the
+      // tooltip shows is the one under the cursor.
+      const scale = geometry.rect.width / geometry.viewWidth;
+      const userX =
+        geometry.box.left +
+        ((stamp - xLow) / (xHigh - xLow)) * (geometry.box.right - geometry.box.left);
+      placeTooltip(trend.tip, trend.plot, userX * scale, geometry.rect.height / 2);
+      rule?.setAttribute("x1", String(userX));
+      rule?.setAttribute("x2", String(userX));
       rule?.setAttribute("visibility", "visible");
     });
     on(trend.plot, "mouseleave", () => {
@@ -305,12 +321,18 @@ export function wire(snapshot: Snapshot, context: PaneContext): void {
         dayHeading(day.day)
       )}</div>${rows.join("")}${total}`;
       daily.tip.hidden = false;
-      placeTooltip(
-        daily.tip,
-        daily.plot,
-        Number(group?.dataset.x) + Number(group?.dataset.slot) / 2,
-        (daily.plot.clientHeight || 0) / 2
-      );
+      // `data-x` and `data-slot` are the SVG's own units; the tooltip is placed in
+      // client pixels. These coincided only while nothing scaled the chart.
+      const geometry = chartGeometry(daily.plot.querySelector("svg.chart"));
+      if (geometry) {
+        const scale = geometry.rect.width / geometry.viewWidth;
+        placeTooltip(
+          daily.tip,
+          daily.plot,
+          (Number(group?.dataset.x) + Number(group?.dataset.slot) / 2) * scale,
+          geometry.rect.height / 2
+        );
+      }
     });
     on(daily.plot, "mouseleave", () => {
       daily.tip.hidden = true;
@@ -349,12 +371,17 @@ export function wire(snapshot: Snapshot, context: PaneContext): void {
          }</span></div>
          ${reasoning}`;
       ranking.tip.hidden = false;
-      placeTooltip(
-        ranking.tip,
-        ranking.plot,
-        ranking.plot.clientWidth || 0,
-        Number(group?.dataset.y)
-      );
+      // `data-y` is an SVG unit; the tooltip is positioned in client pixels
+      // against the chart frame.
+      const geometry = chartGeometry(ranking.plot.querySelector("svg.chart"));
+      if (geometry) {
+        placeTooltip(
+          ranking.tip,
+          ranking.plot,
+          geometry.rect.width,
+          clientYOf(geometry, Number(group?.dataset.y)) - geometry.rect.top
+        );
+      }
     });
     on(ranking.plot, "mouseleave", () => {
       ranking.tip.hidden = true;

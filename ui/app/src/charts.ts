@@ -56,6 +56,95 @@ export function textWidth(text: string): number {
   return text.length * 6.2;
 }
 
+/** The plot rectangle of a chart, in that SVG's own user units. */
+export interface PlotBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/**
+ * A chart's plot rect and the element box it is drawn into.
+ *
+ * `rect` is the SVG's *own* box, not its container's. The plot is inset from the
+ * frame by the axis paddings — the Y labels sit in that inset — so mapping the
+ * whole container onto the data domain claims a reading exists under the labels
+ * and draws the hover rule across them.
+ */
+export interface ChartGeometry {
+  box: PlotBox;
+  rect: { left: number; top: number; width: number; height: number };
+  /** The width the SVG was built at, which is its `viewBox` width. */
+  viewWidth: number;
+}
+
+/** Carries the plot rect to the hover maths, which cannot recover it from pixels. */
+function plotAttrs(map: Projector, viewWidth: number): string {
+  return (
+    `data-view-width="${viewWidth.toFixed(1)}"` +
+    ` data-plot-left="${map.left.toFixed(1)}"` +
+    ` data-plot-right="${map.right.toFixed(1)}"` +
+    ` data-plot-top="${map.top.toFixed(1)}"` +
+    ` data-plot-bottom="${map.bottom.toFixed(1)}"`
+  );
+}
+
+/** Reads back what `plotAttrs` wrote, or `null` for anything else. */
+export function chartGeometry(svg: Element | null): ChartGeometry | null {
+  if (!svg) return null;
+  const number = (name: string): number | null => {
+    const raw = svg.getAttribute(name);
+    if (raw === null) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  };
+  const [left, right, top, bottom, viewWidth] = [
+    number("data-plot-left"),
+    number("data-plot-right"),
+    number("data-plot-top"),
+    number("data-plot-bottom"),
+    number("data-view-width"),
+  ];
+  if (left === null || right === null || top === null || bottom === null || !viewWidth) {
+    return null;
+  }
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    box: { left, right, top, bottom },
+    rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+    viewWidth,
+  };
+}
+
+/**
+ * Where `clientX` falls across the plot, as 0…1.
+ *
+ * Measured from the plot's edges, not the element's. Clamped, because a pointer
+ * over the axis labels is the first or last reading rather than a position that
+ * does not exist.
+ */
+export function ratioAt(geometry: ChartGeometry, clientX: number): number {
+  const scale = geometry.rect.width / geometry.viewWidth;
+  const userX = (clientX - geometry.rect.left) / scale;
+  const span = geometry.box.right - geometry.box.left;
+  if (span <= 0) return 0;
+  return Math.min(1, Math.max(0, (userX - geometry.box.left) / span));
+}
+
+/** A chart user-unit x in client pixels, so the rule and tooltip line up with it. */
+export function clientXOf(geometry: ChartGeometry, userX: number): number {
+  const scale = geometry.rect.width / geometry.viewWidth;
+  return geometry.rect.left + userX * scale;
+}
+
+/** A chart user-unit y in client pixels; CSS scaling is uniform when it happens. */
+export function clientYOf(geometry: ChartGeometry, userY: number): number {
+  const scale = geometry.rect.width / geometry.viewWidth;
+  return geometry.rect.top + userY * scale;
+}
+
 /** The widest of a set of labels, or `""`. */
 function widest(labels: readonly string[]): string {
   return labels.reduce((longest, label) => (label.length >= longest.length ? label : longest), "");
@@ -295,7 +384,7 @@ function trendSvg(dashboard: Dashboard, width: number): string {
       x2="0" y2="${map.bottom.toFixed(1)}" visibility="hidden"/>`;
 
   return `<svg class="chart" id="trend" viewBox="0 0 ${width} ${height}"
-      width="${width}" height="${height}" role="img"
+      width="${width}" height="${height}" ${plotAttrs(map, width)} role="img"
       aria-label="Remaining usage over time">
     ${yGrid(map, yLabels, dashboard.yTicks)}${xMarks}${lines}${rule}
   </svg>`;
@@ -358,7 +447,7 @@ function dailySvg(dashboard: Dashboard, width: number): string {
     .join("");
 
   return `<svg class="chart" id="daily" viewBox="0 0 ${width} ${height}"
-      width="${width}" height="${height}" role="img"
+      width="${width}" height="${height}" ${plotAttrs(map, width)} role="img"
       aria-label="Daily usage by model">${yGrid(map, yLabels, dashboard.dailyYTicks)}${bars}${marks}</svg>`;
 }
 
@@ -416,7 +505,7 @@ function rankingSvg(dashboard: Dashboard, width: number): string {
     .join("");
 
   return `<svg class="chart" id="ranking" viewBox="0 0 ${width} ${height}"
-      width="${width}" height="${height}" role="img"
+      width="${width}" height="${height}" ${plotAttrs(map, width)} role="img"
       aria-label="Top models">${grid}${bars}</svg>`;
 }
 
