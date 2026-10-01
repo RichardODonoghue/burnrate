@@ -283,20 +283,48 @@ pub fn replace_bundle(current: &Path, new: &Path) -> Result<(), String> {
 ///
 /// The wait itself matters: opening immediately would leave two copies running,
 /// and the single-instance guard would then kill the new one.
+///
+/// The launch is then retried, and every attempt is logged to `$2`. A relaunch
+/// that does nothing is invisible from the app: by the time it fails, the process
+/// that would report it is gone. `open` is deliberate rather than `open -n`, so an
+/// attempt made while the app is up activates it instead of starting a second
+/// copy — which is why the loop can only ever leave one running.
 #[cfg(any(target_os = "macos", test))]
 fn relaunch_script(pid: u32) -> String {
-    format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$1\"")
+    format!(
+        "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done\n\
+         exec >>\"$2\" 2>&1\n\
+         echo \"$(date -u +%FT%TZ) relaunching $1\"\n\
+         for attempt in 1 2 3 4 5; do\n\
+         \x20 /usr/bin/open \"$1\"\n\
+         \x20 sleep 2\n\
+         \x20 if /usr/bin/pgrep -f \"$1/Contents/MacOS/\" >/dev/null; then\n\
+         \x20   echo \"relaunched on attempt $attempt\"\n\
+         \x20   exit 0\n\
+         \x20 fi\n\
+         done\n\
+         echo \"the app did not come back after 5 attempts\""
+    )
 }
 
 /// Relaunches once this process is gone.
 #[cfg(target_os = "macos")]
 fn relaunch_after_exit(bundle: &Path) -> Result<(), String> {
+    // Somewhere for the script to record what it did. Losing the log is not a
+    // reason to refuse the relaunch, so a failure to create the directory falls
+    // back to the temporary directory rather than propagating.
+    let log = burnrate_core::paths::AppPaths::detect()
+        .ensure_app_directory()
+        .map(|directory| directory.join("update-relaunch.log"))
+        .unwrap_or_else(|_| std::env::temp_dir().join("burnrate-update-relaunch.log"));
+
     Command::new("/bin/sh")
         .arg("-c")
         .arg(relaunch_script(std::process::id()))
-        // `$0` for the shell, then the path as `$1`.
+        // `$0` for the shell, then the bundle as `$1` and the log as `$2`.
         .arg("sh")
         .arg(bundle)
+        .arg(log)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -423,8 +451,88 @@ mod tests {
             script.contains("\"$1\""),
             "the path arrives as an argument: {script}"
         );
+        assert!(
+            script.contains("\"$2\""),
+            "so does the log the script writes its attempts to: {script}"
+        );
+        assert!(
+            script.contains("pgrep -f \"$1/Contents/MacOS/\""),
+            "the launch is retried until the app is actually up, not fired once: {script}"
+        );
+        assert!(
+            !script.contains("open -n"),
+            "a forced new instance could leave two copies running: {script}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The relaunch, run for real: a stand-in bundle is opened by the script.
+    ///
+    /// Ignored like the release test above it, because it goes through
+    /// LaunchServices and that needs a logged-in GUI session, which CI cannot be
+    /// relied on for. Run it with
+    ///
+    /// ```text
+    /// cargo test -p burnrate-desktop -- --ignored --nocapture relaunch
+    /// ```
+    ///
+    /// This is the check that matters for a relaunch that "does nothing": the wait
+    /// for this process to exit, the launch, the `pgrep` confirmation and the log
+    /// are all one shell script, and a unit test of its text cannot tell whether
+    /// the app it starts actually comes up.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "launches an app through LaunchServices"]
+    fn the_relaunch_script_starts_the_bundle_and_logs_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp("relaunch");
+        let bundle = dir.join(BUNDLE_NAME);
+        write(&bundle.join("Contents/Info.plist"), STAND_IN_PLIST);
+        let executable = bundle.join("Contents/MacOS/burnrate-desktop");
+        // Stays up long enough for the script's `pgrep` to see it, which is the
+        // condition the script exits on.
+        write(&executable, "#!/bin/sh\nsleep 30\n");
+        std::fs::set_permissions(&executable, PermissionsExt::from_mode(0o755)).expect("chmod");
+
+        let log = dir.join("relaunch.log");
+        // A pid past the ceiling, so the wait for "this process" ends at once.
+        let run = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(relaunch_script(999_999))
+            .arg("sh")
+            .arg(&bundle)
+            .arg(&log)
+            .output()
+            .expect("sh runs");
+        assert!(run.status.success(), "{run:?}");
+
+        let recorded = std::fs::read_to_string(&log).expect("the script leaves a log");
+        assert!(
+            recorded.contains("relaunched on attempt 1"),
+            "the app did not come back on the first attempt: {recorded}"
+        );
+        println!("{recorded}");
+
+        let _ = Command::new("/usr/bin/pkill")
+            .arg("-f")
+            .arg(bundle.to_string_lossy().as_ref())
+            .status();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A minimal stand-in bundle for the relaunch script to open.
+    #[cfg(target_os = "macos")]
+    const STAND_IN_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.burnrate.relaunchstandin</string>
+  <key>CFBundleName</key><string>BurnRate</string>
+  <key>CFBundleExecutable</key><string>burnrate-desktop</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.0.0</string>
+</dict></plist>
+"#;
 
     #[test]
     fn an_unwritable_parent_is_reported() {
