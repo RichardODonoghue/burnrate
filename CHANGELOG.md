@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.3](https://github.com/RichardODonoghue/burnrate/compare/v0.9.2...v0.9.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* **tray:** unregister a widget's icon when it is toggled off ([#126](https://github.com/RichardODonoghue/burnrate/issues/126)) ([f1113a5](https://github.com/RichardODonoghue/burnrate/commit/f1113a5e89ffa6ad464e87545d6bbfc0a0d3a4e7))
+* **updater:** refuse an unwritable destination before downloading ([#127](https://github.com/RichardODonoghue/burnrate/issues/127)) ([fa69a82](https://github.com/RichardODonoghue/burnrate/commit/fa69a82f1eb3a1ea82495a435d68366b6abd8784))
+* **updater:** retry the relaunch and record what it did ([#128](https://github.com/RichardODonoghue/burnrate/issues/128)) ([2e11908](https://github.com/RichardODonoghue/burnrate/commit/2e1190854bd92b46c6492ccbb990e190d16ebbf6))
+
 ## [0.9.2](https://github.com/RichardODonoghue/burnrate/compare/v0.9.1...v0.9.2) (2026-10-01)
 
 
