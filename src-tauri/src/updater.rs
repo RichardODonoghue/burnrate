@@ -142,8 +142,12 @@ pub fn stage(release: &Release) -> Result<PathBuf, String> {
 /// to exit immediately afterwards.
 #[cfg(target_os = "macos")]
 pub fn install(release: &Release) -> Result<(), String> {
-    let bundle = stage(release)?;
     let current = current_bundle()?;
+    // Before the download, not after: a destination that cannot be written is not
+    // fixed by having the bytes, and staging a release takes tens of megabytes to
+    // discover that.
+    ensure_installable(&current)?;
+    let bundle = stage(release)?;
     replace_bundle(&current, &bundle)?;
     relaunch_after_exit(&current)?;
     Ok(())
@@ -174,6 +178,51 @@ pub fn install(_release: &Release) -> Result<(), String> {
 
 #[cfg(any(target_os = "macos", test))]
 pub const BUNDLE_NAME: &str = "BurnRate.app";
+
+/// The marker at the front of a translocated bundle's path.
+///
+/// macOS runs a *quarantined* app that has never been moved — a downloaded one —
+/// from a randomised read-only mount so it cannot modify itself, and this is what
+/// that mount looks like: `/private/var/folders/…/AppTranslocation/<uuid>/d/…`.
+/// Sparkle detects the same way; there is no public API for it.
+#[cfg(any(target_os = "macos", test))]
+const TRANSLOCATED_APP: &str = "/AppTranslocation/";
+
+#[cfg(any(target_os = "macos", test))]
+/// Refuses a destination that cannot be replaced, before anything is downloaded.
+///
+/// Two cases, and the message names the way out for each rather than reporting
+/// the raw errno the swap would eventually fail with.
+fn ensure_installable(current: &Path) -> Result<(), String> {
+    if current.to_string_lossy().contains(TRANSLOCATED_APP) {
+        return Err(format!(
+            "{BUNDLE_NAME} is running from a temporary read-only copy that macOS made \
+             because it was downloaded and never moved. Move {BUNDLE_NAME} to \
+             /Applications, open it from there once, and updates install in place."
+        ));
+    }
+    let parent = current
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", current.display()))?;
+    if !parent.is_dir() {
+        return Err(format!("{} is not a directory", parent.display()));
+    }
+    // An attempt, not a permission bit: the parent can be read-only for reasons
+    // the mode does not show — a mounted disk image, a network volume, a
+    // root-owned directory — and only writing says which.
+    let probe = parent.join(format!(".{BUNDLE_NAME}.write-test"));
+    match std::fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(error) => Err(format!(
+            "cannot write in {}, so {BUNDLE_NAME} cannot replace itself there. Move it \
+             somewhere writable, such as /Applications, and update again: {error}",
+            parent.display()
+        )),
+    }
+}
 
 #[cfg(any(target_os = "macos", test))]
 /// Where a download is staged. Keyed by pid so two attempts cannot collide.
@@ -434,6 +483,75 @@ mod tests {
         )
         .expect_err("must fail");
         assert!(error.contains("not a directory"), "got {error}");
+    }
+
+    #[test]
+    fn a_translocated_copy_is_refused_before_downloading() {
+        let error = ensure_installable(Path::new(
+            "/private/var/folders/bw/zz/T/AppTranslocation/66A65D2C-AB73/d/BurnRate.app",
+        ))
+        .expect_err("a translocated copy cannot replace itself");
+        assert!(error.contains("read-only"), "got {error}");
+        assert!(
+            error.contains("/Applications"),
+            "the message has to name the way out: {error}"
+        );
+        assert!(
+            !error.contains("os error"),
+            "a raw errno is what this check exists to avoid: {error}"
+        );
+    }
+
+    #[test]
+    fn a_writable_destination_is_accepted() {
+        let dir = temp("installable");
+        let current = dir.join(BUNDLE_NAME);
+        std::fs::create_dir_all(&current).expect("bundle");
+        ensure_installable(&current).expect("a temp dir is writable");
+
+        // The probe is a real file in the destination, so it must not survive.
+        let strays = std::fs::read_dir(&dir)
+            .expect("read")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("write-test"))
+            .count();
+        assert_eq!(strays, 0, "ensure_installable left its probe behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_destination_is_refused_before_downloading() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp("read-only");
+        let current = dir.join(BUNDLE_NAME);
+        std::fs::create_dir_all(&current).expect("bundle");
+
+        let mut perms = std::fs::metadata(&dir).expect("metadata").permissions();
+        perms.set_mode(0o500);
+        std::fs::set_permissions(&dir, perms).expect("chmod");
+
+        // Root ignores mode bits, so let the environment say whether the assertion
+        // means anything here rather than assuming which user runs the suite.
+        let writable = std::fs::write(dir.join(".probe"), b"").is_ok();
+        if writable {
+            let _ = std::fs::remove_file(dir.join(".probe"));
+            eprintln!("skipped: this user writes to a 0500 directory anyway");
+        } else {
+            let error = ensure_installable(&current).expect_err("must refuse");
+            assert!(error.contains("cannot write"), "got {error}");
+            assert!(
+                error.contains("/Applications"),
+                "the message has to name the way out: {error}"
+            );
+        }
+
+        let mut perms = std::fs::metadata(&dir).expect("metadata").permissions();
+        perms.set_mode(0o700);
+        let _ = std::fs::set_permissions(&dir, perms);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The real thing, against the real release.
