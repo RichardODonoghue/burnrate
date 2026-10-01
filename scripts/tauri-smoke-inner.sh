@@ -11,6 +11,8 @@
 #      set, so the real menu has to edit items, which is what the old
 #      hand-rolled tray could not do
 #   5. a DBusMenu click dispatches to Rust and quits the app
+#   6. a widget toggled off is unregistered from the watcher, which needs the
+#      manager's remove call — dropping the Rust handle leaves the item in place
 #
 # Tauri reaches the Linux tray through libayatana-appindicator, so items live at
 # /org/ayatana/NotificationItem/<sanitised id> with the menu at <item>/Menu.
@@ -189,6 +191,43 @@ case "$W1" in
 *"Claude"*) ;;
 *) fail "unexpected initial widget label: $W1" ;;
 esac
+
+# Toggling a widget off has to unregister its item, not just drop the handle. The
+# `Remove widget` row in a widget's own menu runs the same path as the settings
+# toggle: `toggle_widget` writes the setting and rerenders the tray.
+WIDGET_MENU="$WIDGET_PATH/Menu"
+WIDGET_LAYOUT=$(gdbus call --session --dest "$BUS" --object-path "$WIDGET_MENU" \
+  --method com.canonical.dbusmenu.GetLayout -- 0 -1 '[]' || true)
+printf '%s' "$WIDGET_LAYOUT" | grep -q "Remove widget" \
+  || fail "widget menu has no Remove widget row: $WIDGET_LAYOUT"
+REMOVE_ID=$(printf '%s' "$WIDGET_LAYOUT" \
+  | grep -oE "\(([0-9]+), \{(('enabled': <[a-z]+>, )?'label': <'Remove widget')" \
+  | head -1 | sed -E 's/^\(([0-9]+).*/\1/' || true)
+echo "widget remove item id=$REMOVE_ID"
+[ -n "$REMOVE_ID" ] || fail "could not read the Remove widget item id: $WIDGET_LAYOUT"
+gdbus call --session --dest "$BUS" --object-path "$WIDGET_MENU" \
+  --method com.canonical.dbusmenu.Event -- "$REMOVE_ID" clicked '<uint32 0>' 0 >/dev/null
+sleep 3
+# The signal is the item object itself, not the watcher's Registered list: that
+# lists each connection's bus name, and the app's main item and every widget
+# share one name — so a grep there can never prove a widget went away. A removed
+# item is dropped from the bus, or at minimum goes Passive.
+STATUS=""
+for _ in $(seq 1 10); do
+  STATUS=$(props "$BUS" "$WIDGET_PATH" Status || true)
+  case "$STATUS" in
+  *"<'Active'>"*) sleep 1 ;;
+  *) break ;;
+  esac
+done
+case "$STATUS" in
+*"<'Active'>"*)
+  fail "the Claude widget is still Active after Remove widget: $STATUS"
+  ;;
+esac
+grep -o '"widgetProviders": \[[^]]*\]' "$HOME/.config/BurnRate/settings.json" \
+  | grep -q "Claude" && fail "settings still configure the Claude widget"
+echo "tray: widget unregistered when toggled off (Status=${STATUS:-gone})"
 
 # Click: the quit item dispatches to Rust and exits the process.
 # The GVariant text form is not a Python literal (uint32/@av/<false>), so pull
