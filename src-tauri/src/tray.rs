@@ -341,9 +341,21 @@ pub(crate) fn render_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
             Err(error) => eprintln!("burnrate: widget {provider} failed: {error}"),
         }
     }
-    handles
-        .widgets
-        .retain(|widget| settings.widget_providers.contains(&widget.provider));
+    // A provider that is no longer configured has to be *unregistered*, not just
+    // dropped. `TrayIcon` implements no `Drop` of its own and the tray manager
+    // owns the resource, so letting the handle fall out of the vector left the
+    // menu-bar item in place: toggling a widget off appeared to do nothing, and
+    // toggling it on again installed a second icon for the same provider.
+    let mut kept = Vec::with_capacity(handles.widgets.len());
+    for widget in handles.widgets.drain(..) {
+        if settings.widget_providers.contains(&widget.provider) {
+            kept.push(widget);
+        } else {
+            let _ = app.remove_tray_by_id(widget_id(&widget.provider).as_str());
+            eprintln!("burnrate: widget {} removed", widget.provider);
+        }
+    }
+    handles.widgets = kept;
 
     let mut alive = Vec::new();
     for widget in &handles.widgets {
