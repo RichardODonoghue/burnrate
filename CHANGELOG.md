@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/RichardODonoghue/burnrate/compare/v0.9.1...v0.9.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **charts:** map the pointer to the plot rect, not the element ([#124](https://github.com/RichardODonoghue/burnrate/issues/124)) ([cc57dcf](https://github.com/RichardODonoghue/burnrate/commit/cc57dcf05d1d29dfcaf5cc90be3ca26e0eecba7d))
+
 ## [0.9.1](https://github.com/RichardODonoghue/burnrate/compare/v0.9.0...v0.9.1) (2026-09-30)
 
 
