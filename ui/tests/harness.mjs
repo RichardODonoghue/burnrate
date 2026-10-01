@@ -112,12 +112,36 @@ function element(id) {
     className: "",
     querySelectorAll: (selector) =>
       selector === "button" ? globalThis.__windowButtons : [],
-    querySelector: () => null,
+    querySelector: (selector) => {
+      // A chart is markup dropped into its plot with `innerHTML`, so the SVG does
+      // not exist as a node here. Answer for it from what was written: the hover
+      // maths reads the plot rect off the element and needs its box.
+      if (selector !== "svg.chart") return null;
+      const svg = (node._innerHTML ?? "").match(/<svg\b[^>]*>/)?.[0];
+      if (!svg) return null;
+      const attribute = (name) => svg.match(new RegExp(`${name}="([^"]+)"`))?.[1] ?? null;
+      return {
+        getAttribute: attribute,
+        getBoundingClientRect: () => ({
+          left: 0,
+          top: 0,
+          width: 700,
+          // The chart's own height, so a tooltip's vertical centre is the chart's.
+          height: Number(attribute("height") ?? 220),
+        }),
+      };
+    },
     addEventListener(type, fn) {
       listeners.push({ id, type, fn });
     },
     removeEventListener() {},
-    setAttribute() {},
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    },
+    getAttribute(name) {
+      return this.attributes[name] ?? null;
+    },
     appendChild() {},
     focus() {},
     closest: () => null,
@@ -354,7 +378,6 @@ check("trend has the selection rule", trend.includes('id="trend-rule"'));
 check("scoped series dashed", trend.includes("stroke-dasharray"));
 check("trend curves, not polylines", trend.includes(" C"));
 const coords = [...trend.matchAll(/[MC]\s*[\d.]+[ ,]([\d.]+)/g)].map((m) => Number(m[1]));
-check("every trend coordinate is inside the plot", coords.every((y) => y >= 0 && y <= 180));
 
 check("daily drawn", dailySvg.includes('id="daily"'));
 check("daily y labels are pre-formatted", dailySvg.includes(">8m</text>") && !dailySvg.includes("8000000"));
@@ -368,6 +391,92 @@ check("daily empty day draws no bar", (emptyGroup.match(/<rect/g) ?? []).length 
 check("ranking drawn", ranking.includes('id="ranking"'));
 check("ranking annotations carry the unit", ranking.includes("3000000 tok"));
 check("ranking has a value axis for tokens", (ranking.match(/class="tick mid"/g) ?? []).length === 4);
+
+console.log("--- every mark is inside the plot, and the pointer maps across it ---");
+
+/** The plot rect a chart SVG was drawn with, from the attributes it carries. */
+const plotBox = (svg) => {
+  const value = (side) => Number(svg.match(new RegExp(`data-plot-${side}="([\\d.]+)"`))?.[1]);
+  return { left: value("left"), right: value("right"), top: value("top"), bottom: value("bottom") };
+};
+const viewWidth = (svg) => Number(svg.match(/viewBox="0 0 ([\d.]+)/)[1]);
+for (const [name, svg] of [["trend", trend], ["daily", dailySvg], ["ranking", ranking]]) {
+  const box = plotBox(svg);
+  check(
+    `${name} carries its plot rect`,
+    [box.left, box.right, box.top, box.bottom].every(Number.isFinite),
+    JSON.stringify(box)
+  );
+  check(
+    `${name} plot is inset from the frame`,
+    box.left > 0 && box.right < viewWidth(svg) && box.bottom < 220,
+    `${box.left}..${box.right} of ${viewWidth(svg)}`
+  );
+}
+
+// Data, measured against the plot rather than the element. `data-x` etc. are what
+// the hover maths reads, so if a mark sits outside the box the reading under it
+// cannot match what is drawn.
+const trendBox = plotBox(trend);
+check(
+  "every trend coordinate is inside the plot",
+  coords.every((y) => y >= trendBox.top - 0.6 && y <= trendBox.bottom + 0.6),
+  `${Math.min(...coords)}..${Math.max(...coords)} against ${trendBox.top}..${trendBox.bottom}`
+);
+const dailyBox = plotBox(dailySvg);
+// Attribute order and line breaks in the template are not the interface, so parse
+// the tag and pull each attribute out.
+const attr = (tag, name) => Number(tag.match(new RegExp(`${name}="([\\d.]+)"`))?.[1]);
+const dailyRects = [...dailySvg.matchAll(/<rect\b[^>]*>/g)]
+  .map((m) => m[0])
+  .map((tag) => ({ x: attr(tag, "x"), y: attr(tag, "y"), w: attr(tag, "width"), h: attr(tag, "height") }));
+check("daily draws rects", dailyRects.length > 0, `${dailyRects.length}`);
+const strays = dailyRects.filter(
+  (r) =>
+    r.x < dailyBox.left - 0.6 ||
+    r.x + r.w > dailyBox.right + 0.6 ||
+    r.y < dailyBox.top - 0.6 ||
+    r.y + r.h > dailyBox.bottom + 0.6
+);
+check("every daily bar is inside the plot", strays.length === 0, JSON.stringify(strays[0] ?? {}));
+
+// The mapping itself. The frames here are 700 wide whatever the chart, which is
+// the case that used to break: measuring the *element* claimed a reading under
+// the Y labels and drew the rule across them.
+const charts = await import("../app/js/charts.js");
+const geometry = {
+  box: { left: 10, right: 667, top: 6, bottom: 156 },
+  rect: { left: 0, top: 0, width: 700, height: 220 },
+  viewWidth: 700,
+};
+// CSS beats an SVG's width/height attributes, so a `.chart` rule that sets them
+// scales whichever chart it is applied to — the 220-tall daily chart was drawn at
+// 86%, the variable-height ranking chart at about 63%, and the tooltip anchors
+// (in user units) no longer matched the drawing.
+const chartRules = [...css.matchAll(/\.chart\s*\{([^}]*)\}/g)].map((m) => m[1]);
+check(
+  "no .chart rule sets a width or height",
+  chartRules.every((body) => !/(^|[;\s])(width|height)\s*:/.test(body)),
+  chartRules.join(" | ").slice(0, 120)
+);
+
+check("the plot's left edge is the first reading", charts.ratioAt(geometry, 10) === 0);
+check("the plot's right edge is the last reading", charts.ratioAt(geometry, 667) === 1);
+check(
+  "a pointer over the Y labels reads as the last sample",
+  charts.ratioAt(geometry, 690) === 1,
+  String(charts.ratioAt(geometry, 690))
+);
+check("the plot's right edge is inside the element", charts.clientXOf(geometry, 667) < 700);
+check("a user-unit x round-trips through the pointer maths", charts.ratioAt(geometry, charts.clientXOf(geometry, 300)) === (300 - 10) / 657);
+// A chart the stylesheet scales is still mapped by the plot, not by the element:
+// the same user-unit x lands at half the client pixels, and the ratio is unchanged.
+const scaled = { ...geometry, rect: { left: 0, top: 0, width: 350, height: 110 } };
+check(
+  "a scaled chart maps by the plot, not the element",
+  charts.ratioAt(scaled, charts.clientXOf(geometry, 667) / 2) === 1,
+  String(charts.ratioAt(scaled, charts.clientXOf(geometry, 667) / 2))
+);
 
 console.log("--- y labels clear the plot ---");
 for (const [name, svg] of [
@@ -472,6 +581,16 @@ for (const [name, plotId, tipId, event] of cases) {
     `left ${left} top ${top}`
   );
 }
+
+// The rule is drawn in SVG user units. Measuring from the element put it at
+// `ratio x element width`, which is past the plot and across the Y labels — the
+// "graph overlapping the labels" report.
+const hoverRule = store.get("trend-rule")?.attributes?.x1;
+check(
+  "the hover rule is drawn inside the plot",
+  hoverRule !== undefined && Number(hoverRule) <= plotBox(trend).right + 0.01,
+  `x1=${hoverRule} plot.right=${plotBox(trend).right}`
+);
 
 console.log("--- notification windows follow the provider ---");
 state.pane = "notifications";
