@@ -1,5 +1,5 @@
 // The Notifications pane: milestone, burn-rate and daily-spend rules, plus the
-// window-reset toggle. Mirrors the Swift `MilestonesView`.
+// window-reset toggle.
 
 import { api } from "../api.js";
 import {

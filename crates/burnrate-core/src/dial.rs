@@ -82,15 +82,13 @@ impl Canvas {
 
     /// Magnifies the design space, placing `focus` at the canvas centre.
     ///
-    /// The geometry is shared between the app icon and the menu-bar mark, but
-    /// their framing is not: the app icon is a plate with deliberate padding,
-    /// while `tray-icon` scales the whole *canvas* to a fixed 18pt. Padding that
-    /// reads as margin on a 1024px icon is lost size in the menu bar — the mark
-    /// inked 74% of the canvas, so it drew at 13.4pt.
+    /// The app icon and the menu-bar mark share geometry but not framing: the
+    /// icon is a plate with deliberate padding, while `tray-icon` scales the whole
+    /// *canvas* to a fixed 18pt, so padding in the design space is lost size rather
+    /// than margin.
     ///
-    /// `focus` is the design point to centre, which is the mark's own ink centre
-    /// rather than the canvas middle: the flame sits slightly above it, so
-    /// scaling about the canvas centre would leave the mark riding high.
+    /// `focus` is the mark's own ink centre rather than the canvas middle: the
+    /// flame sits above it, so scaling about the canvas would leave it riding high.
     pub fn zoomed(mut self, zoom: f64, focus: [f64; 2]) -> Self {
         self.zoom = zoom;
         self.focus = focus;
