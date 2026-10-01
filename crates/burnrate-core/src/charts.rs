@@ -784,22 +784,10 @@ pub fn colour_for_model(model: &str) -> (u8, u8, u8) {
     PALETTE[(crate::formatting::stable_hash(model) % PALETTE.len() as u64) as usize]
 }
 
-/// A compact axis label, ported from `ModelsView.axisLabel(_:metric:)`.
-///
-/// ```text
-/// metric == .cost
-///     ? (abs(value) < 1000 ? String(format: "$%g", value)
-///                          : "$" + TokenFormat.format(Int(value)))
-///     : TokenFormat.format(Int(value))
-/// ```
-///
-/// Tokens shorten through `TokenFormat` (1.2m). Costs below $1000 go through
-/// `%g`, which is not the same as printing the number: `%g` keeps six
-/// significant digits and drops trailing zeros, so `0.1 + 0.2` labels as
-/// `$0.3` rather than `$0.30000000000000004`. `format!("{value}")` in Rust
-/// prints the shortest *round-tripping* form, so it agrees on most values and
-/// disagrees exactly where a float artefact appears — which is the case the
-/// user sees on a cost axis.
+/// A compact axis label: tokens through `TokenFormat` (1.2m), costs below $1000
+/// through `%g`, which keeps six significant digits and drops trailing zeros.
+/// Rust's `{value}` prints the shortest round-tripping form instead, so `0.1 + 0.2`
+/// would label as `$0.30000000000000004`.
 pub fn axis_label(value: f64, metric: Metric) -> String {
     match metric {
         Metric::Cost if value.abs() < 1000.0 => format!("${}", percent_g(value)),

@@ -1,9 +1,8 @@
 // Icons, drawn rather than typed.
 //
-// These were Unicode glyphs ("◐", "▢") which depend on the font having them — the
-// Widgets item rendered with no icon at all. They mirror the SF Symbols the Swift
-// build uses. Each entry carries its own fill/stroke: an outlined shape drawn with
-// the group's `fill` becomes a solid blob, which is what the About item was.
+// Drawn rather than typed: Unicode glyphs depend on the font having them, and a
+// missing one renders nothing at all. Each entry carries its own fill/stroke,
+// because an outlined shape drawn with the group's `fill` becomes a solid blob.
 //
 // The name is a union rather than a string, so `ICONS.githb` is a compile error
 // and a row cannot silently render an empty `<svg>`.

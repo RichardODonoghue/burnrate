@@ -13,7 +13,7 @@ import * as usage from "./panes/usage.js";
 import * as widgets from "./panes/widgets.js";
 import type { AppPane, Snapshot } from "./types.js";
 
-// Titles and order match the Swift build's sidebar, including "Menu Bar Widgets".
+// The sidebar's titles and order, including "Menu Bar Widgets".
 const PANES: { id: AppPane; title: string }[] = [
   { id: "usage", title: "Usage" },
   { id: "notifications", title: "Notifications" },
@@ -68,9 +68,9 @@ function renderSidebar(): void {
 // ------------------------------------------------------------------- toolbar
 
 /**
- * The Swift toolbar: heading left, then provider popup, then two segmented
+ * The usage toolbar: heading left, then provider popup, then two segmented
  * pickers, then a refresh icon button. The picker labels ("Provider", "Metric",
- * "Range") are not rendered — a segmented macOS picker shows only its segments,
+ * "Range") are not rendered — a segmented picker shows only its segments,
  * and showing the labels was making the row read as a form.
  */
 function toolbar(snapshot: Snapshot): string {
@@ -154,8 +154,8 @@ function wireContent(snapshot: Snapshot): void {
   const content = el("content");
   if (!content) return;
 
-  // Usage toolbar. Provider stays a popup (a menu, as in Swift, which uses the
-  // default picker style there); Metric and Range are segmented button groups.
+  // Usage toolbar. Provider is a popup menu; Metric and Range are segmented
+  // button groups.
   const providerSelect = el<HTMLSelectElement>("provider-select");
   on(providerSelect, "change", () => {
     state.providerFilter = providerSelect?.value || null;

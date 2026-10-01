@@ -1,9 +1,8 @@
 // Small pure formatters.
 //
 // Deliberately tiny: the numbers that matter — axis labels, annotations, day
-// totals — arrive pre-formatted from Rust, because the frontend formatting its own
-// copy is exactly how the axes drifted from the Swift build. What is left here is
-// display-only.
+// totals — arrive pre-formatted from Rust. Formatting a second copy here is how
+// the two drift apart; what is left is display-only.
 
 /** Compact token counts: 850, 42.3k, 1.2m, 3.6b, 1.1t. Mirrors `TokenFormat`. */
 export function tokenCount(value: number): string {
