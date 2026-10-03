@@ -386,6 +386,13 @@ impl ClaudeUsageApiProvider {
             .map(str::to_string)
     }
 
+    /// A cheap fingerprint of the *current* credential, so the poller can notice
+    /// a login/logout and refetch immediately instead of sitting out a backoff.
+    /// `None` means no usable token.
+    pub fn credential_signature(&self) -> Option<String> {
+        Some(crate::formatting::stable_hash(&self.access_token()?).to_string())
+    }
+
     /// The signed-in Claude Code OAuth object, from
     /// `~/.claude/.credentials.json` or, failing that, the login Keychain.
     ///
@@ -539,6 +546,17 @@ impl ClaudeUsageApiProvider {
 // MARK: - OpenCode Go
 
 const OPENCODE_ENDPOINT: &str = "https://opencode.ai/zen/go/v1/usage";
+/// The endpoint a console-login account uses. `opencode console login` (V1)
+/// stores the OAuth token in the DB `account` table, not in `auth.json`, and
+/// that token is rejected by the `zen/go` route — it authenticates the console
+/// API, which serves the same limits under `/inference`.
+const OPENCODE_CONSOLE_ENDPOINT: &str = "https://opencode.ai/inference/go/v1/usage";
+
+/// A console-login token and the org header its usage route requires.
+struct ConsoleCredentials {
+    token: String,
+    org: String,
+}
 
 /// OpenCode Go's usage endpoint, for both OpenCode versions.
 pub struct OpenCodeGoApiProvider {
@@ -635,10 +653,21 @@ impl OpenCodeGoApiProvider {
     }
 
     fn perform_fetch(&mut self) -> Result<Vec<UsageWindow>, String> {
-        let key = self
-            .read_api_key()
+        let key = self.read_api_key();
+        if let Some(key) = key {
+            let body = self.client.get(OPENCODE_ENDPOINT, &key, &[])?;
+            return Self::parse_windows(body.as_bytes());
+        }
+        // No `auth.json`/`account.json`/`credential` key — a console-login
+        // install (opencode 1.18) keeps its OAuth token in the DB `account`
+        // table instead, and fetches from the console-backed route.
+        let console = self
+            .read_console_credentials()
             .ok_or_else(|| format!("no OpenCode key in {}", self.candidate_list()))?;
-        let body = self.client.get(OPENCODE_ENDPOINT, &key, &[])?;
+        let org_header = [("x-opencode-org-id", console.org.as_str())];
+        let body = self
+            .client
+            .get(OPENCODE_CONSOLE_ENDPOINT, &console.token, &org_header)?;
         Self::parse_windows(body.as_bytes())
     }
 
@@ -660,6 +689,17 @@ impl OpenCodeGoApiProvider {
             }
         }
         self.key_from_database()
+    }
+
+    /// A cheap fingerprint of the *current* credential, so the poller can notice
+    /// a login/logout and refetch immediately instead of sitting out a backoff.
+    /// Covers every store: v1/v2 files, the v2 DB `credential` row, and the
+    /// console-login DB `account` token.
+    pub fn credential_signature(&self) -> Option<String> {
+        let key = self
+            .read_api_key()
+            .or_else(|| self.read_console_credentials().map(|c| c.token))?;
+        Some(crate::formatting::stable_hash(&key).to_string())
     }
 
     /// v1 `auth.json`: `{"opencode-go":{"key":…}}`.
@@ -713,6 +753,40 @@ impl OpenCodeGoApiProvider {
                     return Some(key.to_string());
                 }
             }
+        }
+        None
+    }
+
+    /// The active console account (`opencode console login`), for installs that
+    /// never wrote an API key. The token and its org live in the DB `account`
+    /// and `account_state` tables; the org is required as a header on the
+    /// console-backed usage route.
+    fn read_console_credentials(&self) -> Option<ConsoleCredentials> {
+        for url in &self.db_urls {
+            if !url.exists() {
+                continue;
+            }
+            let Ok(token) = self
+                .sqlite
+                .query(url, "SELECT access_token FROM account LIMIT 1;")
+            else {
+                continue;
+            };
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            let Ok(org) = self
+                .sqlite
+                .query(url, "SELECT active_org_id FROM account_state LIMIT 1;")
+            else {
+                continue;
+            };
+            let org = org.trim().to_string();
+            return Some(ConsoleCredentials {
+                token: token.to_string(),
+                org,
+            });
         }
         None
     }
@@ -1193,6 +1267,113 @@ mod tests {
         );
         let no_go = br#"{"version":2,"accounts":{"a1":{"serviceID":"lmstudio","credential":{"key":"sk-lm"}}}}"#;
         assert_eq!(OpenCodeGoApiProvider::api_key_in_json(no_go), None);
+    }
+
+    /// A console-login install has no `auth.json`; the token lives in the DB
+    /// `account` table with its org in `account_state`, and is fetched from the
+    /// console-backed route. Without this it reported "no OpenCode key".
+    #[test]
+    fn console_login_reads_db_account_and_uses_console_endpoint() {
+        let dir = temp_dir("console-account");
+        let db = dir.join("opencode.db");
+        {
+            use rusqlite::Connection;
+            let connection = Connection::open(&db).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE account (access_token TEXT);
+                     CREATE TABLE account_state (active_org_id TEXT);
+                     INSERT INTO account VALUES ('st-console');
+                     INSERT INTO account_state VALUES ('wrk_1');",
+                )
+                .unwrap();
+        }
+
+        struct RecordingClient;
+        impl HttpClient for RecordingClient {
+            fn get(
+                &self,
+                url: &str,
+                bearer: &str,
+                headers: &[(&str, &str)],
+            ) -> Result<String, String> {
+                assert_eq!(url, "https://opencode.ai/inference/go/v1/usage");
+                assert_eq!(bearer, "st-console");
+                assert_eq!(headers, &[("x-opencode-org-id", "wrk_1")]);
+                Ok(r#"{"usage":{"rolling":{"percent":5},"weekly":{"percent":20},"monthly":{"percent":14}}}"#
+                    .to_string())
+            }
+        }
+
+        let mut provider = OpenCodeGoApiProvider::with_paths(Some(dir))
+            .with_client(Box::new(RecordingClient))
+            .with_cache(QuotaCache::new(
+                Duration::from_millis(1),
+                Duration::from_millis(1),
+            ));
+        let usage = provider.fetch_usage(NOW).usage.expect("console usage");
+        assert_eq!(usage.plan.as_deref(), Some("Go"));
+        assert_eq!(
+            usage.window("Rolling").unwrap().percent_remaining,
+            Some(95.0)
+        );
+    }
+
+    // ---- credential-change detection ----
+
+    /// The poller refetches when this changes; a login must not return the same
+    /// signature as the logged-out state.
+    #[test]
+    fn claude_signature_tracks_the_token() {
+        let dir = temp_dir("claude-sig");
+        let file = dir.join(".credentials.json");
+        std::fs::write(&file, br#"{}"#).unwrap();
+        let logged_out =
+            ClaudeUsageApiProvider::new(Some(file.clone()), None).credential_signature();
+        assert_eq!(logged_out, None);
+
+        std::fs::write(&file, br#"{"claudeAiOauth":{"accessToken":"tok"}}"#).unwrap();
+        let logged_in = ClaudeUsageApiProvider::new(Some(file), None).credential_signature();
+        assert!(logged_in.is_some());
+        assert_ne!(logged_in, logged_out);
+    }
+
+    #[test]
+    fn opencode_signature_tracks_the_console_token() {
+        let dir = temp_dir("opencode-sig");
+        let db = dir.join("opencode.db");
+        {
+            use rusqlite::Connection;
+            let connection = Connection::open(&db).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE account (access_token TEXT);
+                     CREATE TABLE account_state (active_org_id TEXT);
+                     INSERT INTO account_state VALUES ('wrk_1');
+                     INSERT INTO account VALUES ('st-console');",
+                )
+                .unwrap();
+        }
+        // The real `account` table's token lives elsewhere; the explicit dir is
+        // searched first, so this is what the signature reflects.
+        let present = OpenCodeGoApiProvider::with_paths(Some(dir)).credential_signature();
+        assert!(present.is_some());
+
+        let other = temp_dir("opencode-sig-2");
+        {
+            use rusqlite::Connection;
+            let connection = Connection::open(other.join("opencode.db")).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE account (access_token TEXT);
+                     CREATE TABLE account_state (active_org_id TEXT);
+                     INSERT INTO account_state VALUES ('wrk_1');
+                     INSERT INTO account VALUES ('st-other');",
+                )
+                .unwrap();
+        }
+        let changed = OpenCodeGoApiProvider::with_paths(Some(other)).credential_signature();
+        assert_ne!(present, changed);
     }
 
     // ---- the HTTP seam, without a network ----
