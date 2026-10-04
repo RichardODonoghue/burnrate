@@ -62,6 +62,10 @@ pub struct Poller {
     last_local_poll: Option<Instant>,
     local_interval: Duration,
     poll_count: AtomicU64,
+    /// The last poll's credential fingerprints, Claude then OpenCode. When a
+    /// login or logout changes either, the next poll skips the throttle so the
+    /// change shows up at the next tick rather than after a failure backoff.
+    last_credential_signature: Option<(Option<String>, Option<String>)>,
 }
 
 impl Poller {
@@ -92,6 +96,7 @@ impl Poller {
             // to walk 560MB more than once a minute.
             local_interval: Duration::from_secs(60),
             poll_count: AtomicU64::new(0),
+            last_credential_signature: None,
         }
     }
 
@@ -133,6 +138,23 @@ impl Poller {
         self.poll_count.fetch_add(1, Ordering::Relaxed);
         let mut missing: Vec<String> = Vec::new();
         let mut usage: Vec<ProviderUsage> = Vec::new();
+
+        // Credentials are re-read on every fetch, but the throttle and its
+        // failure backoff would otherwise hold a stale snapshot for up to ten
+        // minutes after a login. A changed signature drops the cache, so the
+        // login shows up on the next tick. This is why logging back in and not
+        // restarting appeared to do nothing.
+        let signature = (
+            self.claude_api.credential_signature(),
+            self.opencode_api.credential_signature(),
+        );
+        if self.last_credential_signature != Some(signature.clone()) {
+            if self.last_credential_signature.is_some() {
+                self.claude_api.invalidate_cache();
+                self.opencode_api.invalidate_cache();
+            }
+            self.last_credential_signature = Some(signature);
+        }
 
         // --- vendor quota APIs: authoritative percentages --------------------
         let claude = self.claude_api.fetch_usage(now);
