@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/RichardODonoghue/burnrate/compare/v0.9.3...v0.9.4) (2026-10-04)
+
+
+### Bug Fixes
+
+* **providers:** pick up credential changes and console-login OpenCode Go ([#130](https://github.com/RichardODonoghue/burnrate/issues/130)) ([e8d3424](https://github.com/RichardODonoghue/burnrate/commit/e8d34248b318de5422ddf6215d950d3d3057e1e5))
+
 ## [0.9.3](https://github.com/RichardODonoghue/burnrate/compare/v0.9.2...v0.9.3) (2026-10-01)
 
 
